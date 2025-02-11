@@ -1,10 +1,11 @@
-use boa_engine::{Context, Source};
-use lib::*;
+use boa_engine::{Context, Source, property::Attribute, js_string};
+use boa_runtime::Console;
 
-#[warn(dead_code)]
 fn main() {
     let js_code = "new Date()"; //実行したいJSのコード
+    let js_code2 = "console.log('Hello')";
     let mut context = Context::default();
+    
     let result = context.eval(Source::from_bytes(js_code)); 
     // Context の eval method で JS コード評価
 

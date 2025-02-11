@@ -1,13 +1,13 @@
-use boa_engine::{Context, Source, property::Attribute, js_string};
-use boa_runtime::Console;
+use boa_engine::{Context, Source, };
+
 
 pub fn log() {
-  let js_code2 = "console.log('Hello')";
+  
   let mut context2 = Context::default();
 
-  let console2 = Console::init(&mut context2);
+  let console = Console::init(&mut context);
 
-  context2
+  context
       .register_global_property(js_string!(Console::NAME), console2, Attribute::all())
       .expect("the console object shouldn't exist yet");
   
