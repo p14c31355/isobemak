@@ -9,7 +9,7 @@ fn main() {
     let console = Console::init(&mut context);
 
     context
-      .register_global_property(js_string!(Console::NAME), console2, Attribute::all())
+      .register_global_property(js_string!(Console::NAME), console, Attribute::all())
       .expect("the console object shouldn't exist yet");
 
     
