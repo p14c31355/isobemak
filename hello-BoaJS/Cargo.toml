@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 boa_engine = "0.20.0"
+boa_runtime = "0.20.0"
