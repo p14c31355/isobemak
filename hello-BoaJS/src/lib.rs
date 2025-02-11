@@ -5,11 +5,9 @@ pub fn log() {
   
   let mut context2 = Context::default();
 
-  let console = Console::init(&mut context);
+  
 
-  context
-      .register_global_property(js_string!(Console::NAME), console2, Attribute::all())
-      .expect("the console object shouldn't exist yet");
+  
   
   let result2 = context2.eval(Source::from_bytes(js_code2));
 
