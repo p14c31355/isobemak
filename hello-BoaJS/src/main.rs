@@ -1,18 +1,20 @@
 use boa_engine::{Context, Source, property::Attribute, js_string};
 use boa_runtime::Console;
 
+struct MyJsCode; // 空構造体を定義
+
 trait JsCode { // JSのコードをtrait impl にしてみた
   fn date(&self) -> String;
   fn hello(&mut self) -> String;
 }
 
-impl dyn JsCode { // dyn は dynamic 
+impl JsCode for MyJsCode { // dyn は dynamic 
   fn date(&self) -> String {
-    "new Date()";
+    "new Date()".to_string()
   }
 
   fn hello(&mut self) -> String {
-    "console.log('Hello')";
+    "console.log('Hello')".to_string()
   }
 }
 
@@ -26,8 +28,9 @@ fn js_code<T: JsCode>(f: &mut T) {
       .register_global_property(js_string!(Console::NAME), console, Attribute::all())
       .expect("the console object shouldn't exist yet");
 
+    let script = format!("{};{}", f.date(), f.hello());
     
-    let result = context.eval(Source::(&f.date(), &f.hello())); 
+    let result = context.eval(Source::new(script.as_str())); 
     // Context の eval method で JS コード評価
 
     match result { // match で context を拾って出力して抜ける
@@ -38,5 +41,6 @@ fn js_code<T: JsCode>(f: &mut T) {
 }
 
 fn main() {
-  let js = fn js_code();
+  let mut js = MyJsCode;
+  js_code(&mut js);
 }
