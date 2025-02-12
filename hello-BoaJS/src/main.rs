@@ -6,13 +6,13 @@ trait JsCode { // JSのコードをtrait impl にしてみた
   fn hello(&mut self) -> String;
 }
 
-impl JsCode {
+impl dyn JsCode { // dyn は dynamic 
   fn date(&self) -> String {
     "new Date()";
   }
 
   fn hello(&mut self) -> String {
-    "console.log('Hello')"
+    "console.log('Hello')";
   }
 }
 
@@ -27,7 +27,7 @@ fn js_code<T: JsCode>(f: &mut T) {
       .expect("the console object shouldn't exist yet");
 
     
-    let result = context.eval(Source::from_bytes(&f.date(), &f.hello())); 
+    let result = context.eval(Source::(&f.date(), &f.hello())); 
     // Context の eval method で JS コード評価
 
     match result { // match で context を拾って出力して抜ける
