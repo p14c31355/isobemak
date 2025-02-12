@@ -2,7 +2,8 @@ use boa_engine::{Context, Source, property::Attribute, js_string};
 use boa_runtime::Console;
 
 fn main() {
-    let js_code = ["new Date()", "console.log('Hello')"]; //実行したいJSのコード
+    let date = "new Date()";
+    let js_code = [date, "console.log('Hello')"]; //実行したいJSのコード
     let mut context = Context::default();
 
     let console = Console::init(&mut context);
