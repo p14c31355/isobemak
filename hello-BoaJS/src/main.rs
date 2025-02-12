@@ -2,8 +2,7 @@ use boa_engine::{Context, Source, property::Attribute, js_string};
 use boa_runtime::Console;
 
 fn main() {
-    let js_code = "new Date()"; //実行したいJSのコード
-    let js_code2 = "console.log('Hello')";
+    let js_code = ["new Date()", "console.log('Hello')"]; //実行したいJSのコード
     let mut context = Context::default();
 
     let console = Console::init(&mut context);
@@ -13,7 +12,7 @@ fn main() {
       .expect("the console object shouldn't exist yet");
 
     
-    let result = context.eval(Source::from_bytes(js_code,js_code2)); 
+    let result = context.eval(Source::from_bytes(&js_code)); 
     // Context の eval method で JS コード評価
 
     match result { // match で context を拾って出力して抜ける
