@@ -10,7 +10,7 @@ trait JsCode { // JSのコードをtrait impl にしてみた
 
 impl JsCode for MyJsCode { // dyn は dynamic 
   fn date(&self) -> String {
-    "new Date()".to_string()
+    "new Date().toString();".to_string()
   }
 
   fn hello(&mut self) -> String {
@@ -30,7 +30,7 @@ fn js_code<T: JsCode>(f: &mut T) {
 
     let script = format!("{};{}", f.date(), f.hello());
     
-    let result = context.eval(Source::new(script.as_str())); 
+    let result = context.eval(Source::from_bytes(script.as_str())); 
     // Context の eval method で JS コード評価
 
     match result { // match で context を拾って出力して抜ける
