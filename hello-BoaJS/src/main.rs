@@ -29,7 +29,7 @@ fn js_code<T: JsCode>(f: &mut T) {
         .register_global_property(js_string!(Console::NAME), console, Attribute::all())
         .expect("the console object shouldn't exist yet");
 
-    let script = format!("{};{}", f.date(), f.hello());
+    let script = format!("let date = new Date(); return date.toString(); {}", f.hello());
 
     let result = context.eval(Source::from_bytes(script.as_str()));
     // Context の eval method で JS コード評価
