@@ -10,7 +10,7 @@ trait JsCode { // JSのコードをtrait impl にしてみた
 
 impl JsCode for MyJsCode { // dyn は dynamic 
   fn date(&self) -> String {
-    "new Date()".to_string()
+    "new Date().toString();".to_string()
   }
 
   fn hello(&mut self) -> String {
@@ -28,16 +28,20 @@ fn js_code<T: JsCode>(f: &mut T) {
       .register_global_property(js_string!(Console::NAME), console, Attribute::all())
       .expect("the console object shouldn't exist yet");
 
-    let script = concat!(f.date(), ";", format!("{}", f.hello()).as_str());
+      let script = format!("{};{}", f.date(), f.hello());
     
     let result = context.eval(Source::from_bytes(script.as_str())); 
     // Context の eval method で JS コード評価
-
-    match result { // match で context を拾って出力して抜ける
-        Ok(res) => println!("{}", res.to_string(&mut context).unwrap().to_std_string_escaped()),
-        Err(e) => eprintln!("Uncaught {e}")
-    };
     
+    match result {
+      Ok(value) => {
+          let date_str = value.to_string(&mut context).unwrap().to_std_string_escaped();
+          println!("{}", date_str);
+      }
+      Err(e) => {
+          eprintln!("Error: {}", e);
+      }
+  }
 }
 
 fn main() {
