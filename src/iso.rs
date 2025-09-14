@@ -9,7 +9,7 @@ use std::{
 
 pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     let mut iso = File::create(path)?;
-    iso.write_all(&vec![0u8; SECTOR_SIZE * 16])?; // System Area
+    io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
     // Primary Volume Descriptor
     let mut pvd = [0u8; SECTOR_SIZE];
