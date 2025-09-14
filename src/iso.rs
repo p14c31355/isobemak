@@ -1,9 +1,9 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{pad_sector, SECTOR_SIZE};
+use crate::utils::{SECTOR_SIZE, pad_sector};
 use std::{
     fs::{self, File},
-    io::{self, Seek, SeekFrom, Write, Read},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
@@ -22,8 +22,7 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     volume_id[project_name.len()..].fill(b' ');
     pvd[40..72].copy_from_slice(&volume_id);
 
-    let fat32_img_sectors =
-        (fs::metadata(fat32_img)?.len() as u32 + SECTOR_SIZE as u32 - 1) / SECTOR_SIZE as u32;
+    let fat32_img_sectors = (fs::metadata(fat32_img)?.len() as u32).div_ceil(SECTOR_SIZE as u32);
 
     let total_sectors = 16 + 1 + 1 + 1 + 1 + fat32_img_sectors;
 
@@ -70,7 +69,7 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     term[6] = 1;
     iso.write_all(&term)?;
 
-    let current_pos = iso.seek(SeekFrom::Current(0))?;
+    let current_pos = iso.stream_position()?;
     let target_pos = 19 * SECTOR_SIZE as u64;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
@@ -99,7 +98,7 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     entry[5] = 0x00;
 
     let fat32_img_bytes = fs::metadata(fat32_img)?.len();
-    let sector_count_512 = (fat32_img_bytes + 511) / 512;
+    let sector_count_512 = fat32_img_bytes.div_ceil(512);
 
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
@@ -112,7 +111,7 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     cat[32..64].copy_from_slice(&entry);
     iso.write_all(&cat)?;
 
-    let current_pos = iso.seek(SeekFrom::Current(0))?;
+    let current_pos = iso.stream_position()?;
     let target_pos = 20 * SECTOR_SIZE as u64;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
