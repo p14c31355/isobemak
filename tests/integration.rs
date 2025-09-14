@@ -1,6 +1,6 @@
 // tests/integration.rs
 use std::{
-    fs::{self, File},
+    fs::{self, File, OpenOptions},
     io::{self, Seek, SeekFrom, Write},
 };
 
@@ -17,11 +17,19 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let kernel_path = temp_dir.path().join("kernel.efi");
 
     // Create mock files with some content
-    let mut bellows_file = File::create(&bellows_path)?;
+    let mut bellows_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&bellows_path)?;
     bellows_file.write_all(b"this is a mock bellows file")?;
     bellows_file.seek(SeekFrom::Start(0))?;
 
-    let mut kernel_file = File::create(&kernel_path)?;
+    let mut kernel_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .open(&kernel_path)?;
     kernel_file.write_all(b"this is a mock kernel file")?;
     kernel_file.seek(SeekFrom::Start(0))?;
 
