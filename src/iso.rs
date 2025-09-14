@@ -3,7 +3,7 @@
 use crate::utils::{SECTOR_SIZE, pad_sector};
 use std::{
     fs::{self, File},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 

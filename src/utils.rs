@@ -1,7 +1,7 @@
 // isobemak/src/utils.rs
 use std::{
     fs::File,
-    io::{self, Seek, SeekFrom, Write},
+    io::{self, Seek, Write},
 };
 
 pub const SECTOR_SIZE: usize = 2048;
