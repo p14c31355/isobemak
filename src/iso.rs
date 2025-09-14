@@ -19,9 +19,7 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     let mut volume_id = [0u8; 32];
     let project_name = b"FULLERENE";
     volume_id[..project_name.len()].copy_from_slice(project_name);
-    for i in project_name.len()..32 {
-        volume_id[i] = b' ';
-    }
+    volume_id[project_name.len()..].fill(b' ');
     pvd[40..72].copy_from_slice(&volume_id);
 
     let fat32_img_sectors =
@@ -72,8 +70,11 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     term[6] = 1;
     iso.write_all(&term)?;
 
-    while (iso.seek(SeekFrom::Current(0))? / SECTOR_SIZE as u64) < 19 {
-        iso.write_all(&[0u8; SECTOR_SIZE])?;
+    let current_pos = iso.seek(SeekFrom::Current(0))?;
+    let target_pos = 19 * SECTOR_SIZE as u64;
+    if current_pos < target_pos {
+        let padding_bytes = target_pos - current_pos;
+        io::copy(&mut io::repeat(0).take(padding_bytes), &mut iso)?;
     }
 
     // Boot Catalog (LBA 19)
@@ -111,8 +112,11 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     cat[32..64].copy_from_slice(&entry);
     iso.write_all(&cat)?;
 
-    while (iso.seek(SeekFrom::Current(0))? / SECTOR_SIZE as u64) < 20 {
-        iso.write_all(&[0u8; SECTOR_SIZE])?;
+    let current_pos = iso.seek(SeekFrom::Current(0))?;
+    let target_pos = 20 * SECTOR_SIZE as u64;
+    if current_pos < target_pos {
+        let padding_bytes = target_pos - current_pos;
+        io::copy(&mut io::repeat(0).take(padding_bytes), &mut iso)?;
     }
 
     let mut f = File::open(fat32_img)?;
