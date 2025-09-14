@@ -1,7 +1,7 @@
 // tests/integration.rs
 use std::{
     fs::{self, File},
-    io::{self, Write, Seek, SeekFrom},
+    io::{self, Seek, SeekFrom, Write},
 };
 
 use isobemak::create_disk_and_iso;
@@ -26,12 +26,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     kernel_file.seek(SeekFrom::Start(0))?;
 
     // Call the main function
-    create_disk_and_iso(
-        &fat32_path,
-        &iso_path,
-        &mut bellows_file,
-        &mut kernel_file,
-    )?;
+    create_disk_and_iso(&fat32_path, &iso_path, &mut bellows_file, &mut kernel_file)?;
 
     // Assert that the files were created
     assert!(fat32_path.exists());
