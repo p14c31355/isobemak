@@ -41,5 +41,6 @@ pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) ->
         copy_to_fat(&root, kernel, "EFI/BOOT/KERNEL.EFI")?;
     }
     file.sync_all()?;
+    println!("FAT32 image successfully created at {}", path.display());
     Ok(())
 }

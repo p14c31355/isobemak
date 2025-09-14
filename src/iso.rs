@@ -8,6 +8,16 @@ use std::{
 };
 
 pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
+    println!(
+        "create_iso: Checking if FAT32 image exists at: {}",
+        fat32_img.display()
+    );
+    if !fat32_img.exists() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            "FAT32 image not found in create_iso",
+        ));
+    }
     let mut iso = File::create(path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
