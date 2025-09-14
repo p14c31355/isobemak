@@ -36,10 +36,12 @@ pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) ->
         )?;
         let fs = FileSystem::new(&mut file, FsOptions::new())?;
         let root = fs.root_dir();
-        root.create_dir("EFI/BOOT")?;
-        copy_to_fat(&root, bellows, "EFI/BOOT/BOOTX64.EFI")?;
-        copy_to_fat(&root, kernel, "EFI/BOOT/KERNEL.EFI")?;
+        let efi_dir = root.create_dir("EFI")?;
+        let boot_dir = efi_dir.create_dir("BOOT")?;
+        copy_to_fat(&boot_dir, bellows, "BOOTX64.EFI")?;
+        copy_to_fat(&boot_dir, kernel, "KERNEL.EFI")?;
     }
     file.sync_all()?;
+    println!("FAT32 image successfully created at {}", path.display());
     Ok(())
 }

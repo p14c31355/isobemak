@@ -14,6 +14,8 @@ pub fn create_disk_and_iso(
     kernel: &mut File,
 ) -> io::Result<()> {
     create_fat32_image(fat32_img, bellows, kernel)?;
+    println!("FAT32 image successfully created.");
     create_iso(iso, fat32_img)?;
+    println!("ISO successfully created.");
     Ok(())
 }
