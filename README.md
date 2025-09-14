@@ -23,7 +23,7 @@ The FAT32 disk image created in the first step is then added to the ISO at a spe
   * `src/lib.rs`: The main entry point that coordinates the creation of both the FAT32 image and the final ISO file.
   * `src/fat32.rs`: Contains the logic for creating and formatting the 32 MiB FAT32 disk image and copying the bootloader and kernel files into it.
   * `src/iso.rs`: Handles the creation of the ISO9660 filesystem with El Torito bootable extensions. It sets up the various volume descriptors and the boot catalog.
-  * `src/utils.rs`: Provides utility functions, such as `pad_sector`, which aligns files to the correct sector size (2048 bytes), and `crc16`, a checksum function that's no longer used but remains in the code.
+  * `src/utils.rs`: Provides utility functions, such as `pad_sector`, which aligns files to the correct sector size (2048 bytes).
 
 ## Usage
 
