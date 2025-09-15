@@ -1,22 +1,24 @@
 // isobemak/src/lib.rs
 pub use crate::fat32::create_fat32_image;
 pub use crate::iso::create_iso;
-// use std::{fs::File, io, path::Path}; // Not needed if create_disk_and_iso is removed
+use std::{fs::File, io, path::Path};
 
 mod fat32;
 mod iso;
 mod utils;
 
-// create_disk_and_iso function is removed as ISO 9660 will directly embed EFI files.
-// pub fn create_disk_and_iso(
-//     fat32_img: &Path,
-//     iso: &Path,
-//     bellows: &mut File,
-//     kernel: &mut File,
-// ) -> io::Result<()> {
-//     create_fat32_image(fat32_img, bellows, kernel)?;
-//     println!("FAT32 image successfully created.");
-//     create_iso(iso, fat32_img)?;
-//     println!("ISO successfully created.");
-//     Ok(())
-// }
+pub fn create_disk_and_iso(
+    fat32_img: &Path,
+    iso: &Path,
+    bellows_path: &Path,
+    kernel_path: &Path,
+) -> io::Result<()> {
+    let mut bellows_file = File::open(bellows_path)?;
+    let mut kernel_file = File::open(kernel_path)?;
+
+    create_fat32_image(fat32_img, &mut bellows_file, &mut kernel_file)?;
+    println!("FAT32 image successfully created.");
+    create_iso(iso, bellows_path, kernel_path)?;
+    println!("ISO successfully created.");
+    Ok(())
+}
