@@ -31,8 +31,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
     // Read EFI files
-    let mut bellows_file_content = fs::read(bellows_path)?;
-    let mut kernel_file_content = fs::read(kernel_path)?;
+    let bellows_file_content = fs::read(bellows_path)?;
+    let kernel_file_content = fs::read(kernel_path)?;
 
     let bellows_sectors = (bellows_file_content.len() as u32).div_ceil(SECTOR_SIZE as u32);
     let kernel_sectors = (kernel_file_content.len() as u32).div_ceil(SECTOR_SIZE as u32);
@@ -56,8 +56,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     volume_id[project_name.len()..].fill(b' ');
     pvd[40..72].copy_from_slice(&volume_id);
 
-    pvd[80..84].copy_from_slice(&(total_sectors as u32).to_le_bytes());
-    pvd[84..88].copy_from_slice(&(total_sectors as u32).to_be_bytes());
+    pvd[80..84].copy_from_slice(&total_sectors.to_le_bytes());
+    pvd[84..88].copy_from_slice(&total_sectors.to_be_bytes());
     pvd[128..132].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
 
     // Root Directory Record (for PVD)
@@ -66,7 +66,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     let root_dir_size = SECTOR_SIZE as u32; // For simplicity, assume one sector for root dir
     let mut root_dir_record = [0u8; 34];
     root_dir_record[0] = 34; // Length of Directory Record
-    root_dir_record[1] = 0;  // Extended Attribute Record Length
+    root_dir_record[1] = 0; // Extended Attribute Record Length
     root_dir_record[2..6].copy_from_slice(&root_dir_lba.to_le_bytes()); // Location of Extent (LE)
     root_dir_record[6..10].copy_from_slice(&root_dir_lba.to_be_bytes()); // Location of Extent (BE)
     root_dir_record[10..14].copy_from_slice(&root_dir_size.to_le_bytes()); // Data Length (LE)
@@ -208,7 +208,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     boot_dir_record[30..32].copy_from_slice(&1u16.to_be_bytes());
     boot_dir_record[32] = boot_dir_name_len;
     boot_dir_record[33..33 + boot_dir_name_len as usize].copy_from_slice(boot_dir_name);
-    efi_dir_data[offset..offset + boot_dir_record_len as usize].copy_from_slice(&boot_dir_record[..boot_dir_record_len as usize]);
+    efi_dir_data[offset..offset + boot_dir_record_len as usize]
+        .copy_from_slice(&boot_dir_record[..boot_dir_record_len as usize]);
     offset += boot_dir_record_len as usize;
 
     iso.write_all(&efi_dir_data)?;
@@ -274,7 +275,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     bootx64_record[30..32].copy_from_slice(&1u16.to_be_bytes());
     bootx64_record[32] = bootx64_name_len;
     bootx64_record[33..33 + bootx64_name_len as usize].copy_from_slice(bootx64_name);
-    boot_dir_data[offset..offset + bootx64_record_len as usize].copy_from_slice(&bootx64_record[..bootx64_record_len as usize]);
+    boot_dir_data[offset..offset + bootx64_record_len as usize]
+        .copy_from_slice(&bootx64_record[..bootx64_record_len as usize]);
     offset += bootx64_record_len as usize;
 
     // KERNEL.EFI entry
@@ -294,7 +296,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     kernel_record[30..32].copy_from_slice(&1u16.to_be_bytes());
     kernel_record[32] = kernel_name_len;
     kernel_record[33..33 + kernel_name_len as usize].copy_from_slice(kernel_name);
-    boot_dir_data[offset..offset + kernel_record_len as usize].copy_from_slice(&kernel_record[..kernel_record_len as usize]);
+    boot_dir_data[offset..offset + kernel_record_len as usize]
+        .copy_from_slice(&kernel_record[..kernel_record_len as usize]);
     offset += kernel_record_len as usize;
 
     iso.write_all(&boot_dir_data)?;
