@@ -1,7 +1,7 @@
 // tests/integration.rs
 use std::{
-    fs::{self, File, OpenOptions},
-    io::{self, Seek, SeekFrom, Write},
+    fs::{self, File},
+    io::{self, Write},
 };
 
 use isobemak::create_disk_and_iso;
@@ -16,34 +16,16 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let bellows_path = temp_dir.path().join("bellows.efi");
     let kernel_path = temp_dir.path().join("kernel.efi");
 
-    // Create mock files with some content
-    let mut bellows_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&bellows_path)?;
-    bellows_file.write_all(b"this is a mock bellows file")?;
-    bellows_file.seek(SeekFrom::Start(0))?;
-
-    let mut kernel_file = OpenOptions::new()
-        .read(true)
-        .write(true)
-        .create(true)
-        .open(&kernel_path)?;
-    kernel_file.write_all(b"this is a mock kernel file")?;
-    kernel_file.seek(SeekFrom::Start(0))?;
+    // Create mock files and ensure they are flushed by closing the handles
+    File::create(&bellows_path)?.write_all(b"this is a mock bellows file")?;
+    File::create(&kernel_path)?.write_all(b"this is a mock kernel file")?;
 
     // Call the main function
-    create_disk_and_iso(&fat32_path, &iso_path, &mut bellows_file, &mut kernel_file)?;
+    create_disk_and_iso(&fat32_path, &iso_path, &bellows_path, &kernel_path)?;
 
     // Assert that the files were created
     assert!(fat32_path.exists());
     assert!(iso_path.exists());
 
-    // Clean up
-    fs::remove_file(&fat32_path)?;
-    fs::remove_file(&iso_path)?;
-    fs::remove_file(&bellows_path)?;
-    fs::remove_file(&kernel_path)?;
     Ok(())
 }

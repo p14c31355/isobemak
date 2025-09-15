@@ -2,24 +2,26 @@
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
-const FAT32_IMAGE_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
+const FAT32_IMAGE_SIZE: u64 = 0xFFFF * 512; // 33553920 bytes (65535 sectors of 512 bytes)
 
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
-    src_file: &mut File,
+    src_path: &Path,
     dest: &str,
 ) -> io::Result<()> {
+    let mut src_file = File::open(src_path)?;
     let mut f = dir.create_file(dest)?;
-    src_file.seek(SeekFrom::Start(0))?;
-    io::copy(src_file, &mut f)?;
+    io::copy(&mut src_file, &mut f)?;
+    f.flush()?;
+    println!("Copied {} to {} in FAT32 image.", src_path.display(), dest);
     Ok(())
 }
 
-pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) -> io::Result<()> {
+pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
     if path.exists() {
         fs::remove_file(path)?;
     }
@@ -28,20 +30,25 @@ pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) ->
         .write(true)
         .create(true)
         .open(path)?;
-    file.set_len(FAT32_IMAGE_SIZE)?; // 32 MiB
+    file.set_len(FAT32_IMAGE_SIZE)?;
+
+    fatfs::format_volume(
+        &mut file,
+        FormatVolumeOptions::new().fat_type(FatType::Fat32),
+    )?;
+
     {
-        fatfs::format_volume(
-            &mut file,
-            FormatVolumeOptions::new().fat_type(FatType::Fat32),
-        )?;
         let fs = FileSystem::new(&mut file, FsOptions::new())?;
         let root = fs.root_dir();
         let efi_dir = root.create_dir("EFI")?;
         let boot_dir = efi_dir.create_dir("BOOT")?;
-        copy_to_fat(&boot_dir, bellows, "BOOTX64.EFI")?;
-        copy_to_fat(&boot_dir, kernel, "KERNEL.EFI")?;
-    }
+
+        copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
+        copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
+    } // `fs`, `root`, `efi_dir`, `boot_dir` are dropped here, releasing the mutable borrow on `file`.
+
+    // Add the file.sync_all() call to ensure all data is written to disk.
     file.sync_all()?;
-    println!("FAT32 image successfully created at {}", path.display());
+
     Ok(())
 }

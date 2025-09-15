@@ -2,97 +2,117 @@
 // ISO + El Torito
 use crate::utils::{SECTOR_SIZE, pad_sector};
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{self, Read, Seek, Write},
     path::Path,
 };
 
-pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
-    println!(
-        "create_iso: Checking if FAT32 image exists at: {}",
-        fat32_img.display()
-    );
-    if !fat32_img.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            "FAT32 image not found in create_iso",
-        ));
+/// Constants for ISO 9660 structure to improve readability.
+const ISO_VOLUME_DESCRIPTOR_TERMINATOR: u8 = 255;
+const ISO_VOLUME_DESCRIPTOR_PRIMARY: u8 = 1;
+const ISO_VOLUME_DESCRIPTOR_BOOT_RECORD: u8 = 0;
+const ISO_ID: &[u8] = b"CD001";
+const ISO_VERSION: u8 = 1;
+
+const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
+const BOOT_CATALOG_BOOTABLE_INDICATOR: u8 = 0x88;
+const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
+
+/// Pads the ISO file with zeros to align to a specific LBA.
+/// This helper function reduces code duplication in the main logic.
+fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
+    let target_pos = lba as u64 * SECTOR_SIZE as u64;
+    let current_pos = iso.stream_position()?;
+    if current_pos < target_pos {
+        let padding_bytes = target_pos - current_pos;
+        io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
     }
-    let mut iso = File::create(path)?;
+    Ok(())
+}
+
+pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
+    println!("create_iso_from_img: Creating ISO from FAT32 image.");
+
+    // Get the size of the FAT32 image without reading the whole file into memory.
+    let img_file_size = img_path.metadata()?.len();
+    let fat_image_sectors = (img_file_size as u32).div_ceil(SECTOR_SIZE as u32);
+
+    // 2. Create the ISO with the FAT image embedded
+    let mut iso = File::create(iso_path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
-    // Primary Volume Descriptor
+    const FAT_IMAGE_LBA: u32 = 20;
+    let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
+
+    // Primary Volume Descriptor (LBA 16)
+    const LBA_PVD: u32 = 16;
+    pad_to_lba(&mut iso, LBA_PVD)?;
     let mut pvd = [0u8; SECTOR_SIZE];
-    pvd[0] = 1;
-    pvd[1..6].copy_from_slice(b"CD001");
-    pvd[6] = 1;
+    pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
+    pvd[1..6].copy_from_slice(ISO_ID);
+    pvd[6] = ISO_VERSION;
     let mut volume_id = [0u8; 32];
     let project_name = b"FULLERENE";
     volume_id[..project_name.len()].copy_from_slice(project_name);
     volume_id[project_name.len()..].fill(b' ');
     pvd[40..72].copy_from_slice(&volume_id);
-
-    let fat32_img_sectors = (fs::metadata(fat32_img)?.len() as u32).div_ceil(SECTOR_SIZE as u32);
-
-    let total_sectors = 16 + 1 + 1 + 1 + 1 + fat32_img_sectors;
-
     pvd[80..84].copy_from_slice(&total_sectors.to_le_bytes());
     pvd[84..88].copy_from_slice(&total_sectors.to_be_bytes());
     pvd[128..132].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
 
+    // Construct the root directory record field by field for clarity.
     let mut root_dir_record = [0u8; 34];
-    root_dir_record[0] = 34;
-    root_dir_record[1] = 0;
-    root_dir_record[2..6].copy_from_slice(&20u32.to_le_bytes());
-    root_dir_record[6..10].copy_from_slice(&20u32.to_be_bytes());
-    root_dir_record[10..14].copy_from_slice(&fat32_img_sectors.to_le_bytes());
-    root_dir_record[14..18].copy_from_slice(&fat32_img_sectors.to_be_bytes());
-    root_dir_record[25] = 0x02;
-    root_dir_record[26] = 0;
-    root_dir_record[27] = 0;
-    root_dir_record[28..30].copy_from_slice(&1u16.to_le_bytes());
-    root_dir_record[30..32].copy_from_slice(&1u16.to_be_bytes());
-    root_dir_record[32] = 1;
-    root_dir_record[33] = 0x00;
+    root_dir_record[0] = 34; // Directory record length
+    root_dir_record[1] = 0; // Extended Attribute Record length
+    root_dir_record[2..6].copy_from_slice(&LBA_PVD.to_le_bytes());
+    root_dir_record[6..10].copy_from_slice(&LBA_PVD.to_be_bytes());
+    root_dir_record[10..14].copy_from_slice(&(0u32).to_le_bytes());
+    root_dir_record[14..18].copy_from_slice(&(0u32).to_be_bytes());
+    root_dir_record[18] = 0; // Record time
+    root_dir_record[19] = 2; // File Flags: Directory
+    root_dir_record[20] = 0; // File unit size (interleaved)
+    root_dir_record[21] = 0; // Gap size (interleaved)
+    root_dir_record[22..26].copy_from_slice(&(0u16).to_le_bytes());
+    root_dir_record[26..28].copy_from_slice(&(0u16).to_be_bytes());
+    root_dir_record[28] = 1; // Length of File Identifier
+    root_dir_record[29] = 0; // File identifier
+    root_dir_record[30] = 0; // Padding
+    root_dir_record[31] = 1; // Padding
+    root_dir_record[32] = 1; // Padding
+    root_dir_record[33] = 0; // Padding
+
     pvd[156..190].copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)?;
 
-    // Boot Record Volume Descriptor
+    // Boot Record Volume Descriptor (LBA 17)
+    const LBA_BRVD: u32 = 17;
+    pad_to_lba(&mut iso, LBA_BRVD)?;
     let mut brvd = [0u8; SECTOR_SIZE];
-    brvd[0] = 0;
-    brvd[1..6].copy_from_slice(b"CD001");
-    brvd[6] = 1;
-    let mut el_torito_spec = [0u8; 32];
+    brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
+    brvd[1..6].copy_from_slice(ISO_ID);
+    brvd[6] = ISO_VERSION;
     let spec_name = b"EL TORITO SPECIFICATION";
-    el_torito_spec[..spec_name.len()].copy_from_slice(spec_name);
-    for i in spec_name.len()..32 {
-        el_torito_spec[i] = 0x00;
-    }
-    brvd[7..39].copy_from_slice(&el_torito_spec);
-    brvd[71..75].copy_from_slice(&19u32.to_le_bytes());
+    brvd[7..7 + spec_name.len()].copy_from_slice(spec_name);
+    const LBA_BOOT_CATALOG: u32 = 19;
+    brvd[71..75].copy_from_slice(&LBA_BOOT_CATALOG.to_le_bytes()); // Boot Catalog LBA
     iso.write_all(&brvd)?;
 
-    // Volume Descriptor Terminator
+    // Volume Descriptor Terminator (LBA 18)
+    const LBA_VDT: u32 = 18;
+    pad_to_lba(&mut iso, LBA_VDT)?;
     let mut term = [0u8; SECTOR_SIZE];
-    term[0] = 255;
-    term[1..6].copy_from_slice(b"CD001");
-    term[6] = 1;
+    term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
+    term[1..6].copy_from_slice(ISO_ID);
+    term[6] = ISO_VERSION;
     iso.write_all(&term)?;
 
-    let current_pos = iso.stream_position()?;
-    let target_pos = 19 * SECTOR_SIZE as u64;
-    if current_pos < target_pos {
-        let padding_bytes = target_pos - current_pos;
-        io::copy(&mut io::repeat(0).take(padding_bytes), &mut iso)?;
-    }
-
     // Boot Catalog (LBA 19)
+    pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
     let mut cat = [0u8; SECTOR_SIZE];
+    // Validation Entry
     cat[0] = 1;
-    cat[1] = 0xEF;
-    cat[2..4].copy_from_slice(&0u16.to_le_bytes());
-    cat[30] = 0x55;
-    cat[31] = 0xAA;
+    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
+    cat[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
     let mut sum: u16 = 0;
     for i in (0..32).step_by(2) {
         sum = sum.wrapping_add(u16::from_le_bytes([cat[i], cat[i + 1]]));
@@ -100,36 +120,26 @@ pub fn create_iso(path: &Path, fat32_img: &Path) -> io::Result<()> {
     let checksum = 0u16.wrapping_sub(sum);
     cat[28..30].copy_from_slice(&checksum.to_le_bytes());
 
+    // Boot Entry
     let mut entry = [0u8; 32];
-    entry[0] = 0x88;
-    entry[1] = 0x00;
-    entry[2..4].copy_from_slice(&0u16.to_le_bytes());
-    entry[4] = 0x00;
-    entry[5] = 0x00;
-
-    let fat32_img_bytes = fs::metadata(fat32_img)?.len();
-    let sector_count_512 = fat32_img_bytes.div_ceil(512);
-
+    entry[0] = BOOT_CATALOG_BOOTABLE_INDICATOR; // Bootable, EFI
+    entry[1] = 0x00; // Boot media type (no emulation)
+    let sector_count_512 = (img_file_size).div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
         sector_count_512 as u16
     };
-
-    entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes());
-    entry[8..12].copy_from_slice(&20u32.to_le_bytes());
+    entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes()); // Sector count (512-byte units)
+    entry[8..12].copy_from_slice(&FAT_IMAGE_LBA.to_le_bytes()); // LBA of FAT32 image
     cat[32..64].copy_from_slice(&entry);
     iso.write_all(&cat)?;
 
-    let current_pos = iso.stream_position()?;
-    let target_pos = 20 * SECTOR_SIZE as u64;
-    if current_pos < target_pos {
-        let padding_bytes = target_pos - current_pos;
-        io::copy(&mut io::repeat(0).take(padding_bytes), &mut iso)?;
-    }
-
-    let mut f = File::open(fat32_img)?;
-    io::copy(&mut f, &mut iso)?;
+    // Write FAT image to the ISO by streaming the data
+    pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
+    let mut img_file = File::open(img_path)?;
+    io::copy(&mut img_file, &mut iso)?;
     pad_sector(&mut iso)?;
+
     Ok(())
 }
