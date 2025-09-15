@@ -2,7 +2,7 @@
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
@@ -10,16 +10,17 @@ const FAT32_IMAGE_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB
 
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
-    src_file: &mut File,
+    src_path: &Path,
     dest: &str,
 ) -> io::Result<()> {
+    let mut src_file = File::open(src_path)?;
     let mut f = dir.create_file(dest)?;
-    src_file.seek(SeekFrom::Start(0))?;
-    io::copy(src_file, &mut f)?;
+    io::copy(&mut src_file, &mut f)?;
+    f.flush()?;
     Ok(())
 }
 
-pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) -> io::Result<()> {
+pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
     if path.exists() {
         fs::remove_file(path)?;
     }
@@ -39,11 +40,10 @@ pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) ->
             let root = fs.root_dir();
             let efi_dir = root.create_dir("EFI")?;
             let boot_dir = efi_dir.create_dir("BOOT")?;
-            copy_to_fat(&boot_dir, bellows, "BOOTX64.EFI")?;
-            copy_to_fat(&boot_dir, kernel, "KERNEL.EFI")?;
-            // fs.unmount() is called implicitly when `fs` goes out of scope
-        } // `fs` is dropped here, unmounting the filesystem
-        file.flush()?; // Ensure all buffered data is written to the underlying file
+            copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
+            copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
+        }
+        file.flush()?;
     }
     file.sync_all()?;
     println!("FAT32 image successfully created at {}", path.display());

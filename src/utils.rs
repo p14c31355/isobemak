@@ -16,6 +16,7 @@ pub fn pad_sector(f: &mut File) -> io::Result<()> {
 }
 
 // Simple CRC16 (for Validation Entry) - No longer used for El Torito checksum
+#[allow(dead_code)]
 pub fn crc16(data: &[u8]) -> u16 {
     let mut crc: u16 = 0;
     for &b in data {
