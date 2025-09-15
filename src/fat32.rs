@@ -46,7 +46,7 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
         copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
         copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
     } // `fs`, `root`, `efi_dir`, `boot_dir` are dropped here, releasing the mutable borrow on `file`.
-    
+
     // Add the file.sync_all() call to ensure all data is written to disk.
     file.sync_all()?;
 

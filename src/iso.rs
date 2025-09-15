@@ -36,7 +36,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     // Get the size of the FAT32 image without reading the whole file into memory.
     let img_file_size = img_path.metadata()?.len();
     let fat_image_sectors = (img_file_size as u32).div_ceil(SECTOR_SIZE as u32);
-    
+
     // 2. Create the ISO with the FAT image embedded
     let mut iso = File::create(iso_path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
@@ -63,7 +63,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     // Construct the root directory record field by field for clarity.
     let mut root_dir_record = [0u8; 34];
     root_dir_record[0] = 34; // Directory record length
-    root_dir_record[1] = 0;  // Extended Attribute Record length
+    root_dir_record[1] = 0; // Extended Attribute Record length
     root_dir_record[2..6].copy_from_slice(&LBA_PVD.to_le_bytes());
     root_dir_record[6..10].copy_from_slice(&LBA_PVD.to_be_bytes());
     root_dir_record[10..14].copy_from_slice(&(0u32).to_le_bytes());
