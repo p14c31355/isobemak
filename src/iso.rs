@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{pad_sector, SECTOR_SIZE};
+use crate::utils::{SECTOR_SIZE, pad_sector};
 use std::{
     fs::File,
     io::{self, Read, Seek, Write},
@@ -62,7 +62,10 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     pvd[84..88].copy_from_slice(&total_sectors.to_be_bytes());
     pvd[128..132].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
     // Minimal root directory record (not really used, but required)
-    let root_dir_record = [ 34, 0, 19, 0, 0, 0, 19, 0, 0, 0, 0, 8, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1, 0, 0, 1, 1, 0 ];
+    let root_dir_record = [
+        34, 0, 19, 0, 0, 0, 19, 0, 0, 0, 0, 8, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1,
+        0, 0, 1, 1, 0,
+    ];
     pvd[156..190].copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)?;
 

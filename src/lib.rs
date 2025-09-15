@@ -1,9 +1,5 @@
 // isobemak/src/lib.rs
-use std::{
-    fs::File,
-    io,
-    path::Path,
-};
+use std::{io, path::Path};
 
 pub use crate::fat32::create_fat32_image;
 pub use crate::iso::create_iso_from_img;

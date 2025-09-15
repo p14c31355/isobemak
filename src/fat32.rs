@@ -2,7 +2,7 @@
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::{self, File, OpenOptions},
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 
@@ -32,7 +32,10 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
         .open(path)?;
     file.set_len(FAT32_IMAGE_SIZE)?;
 
-    fatfs::format_volume(&mut file, FormatVolumeOptions::new().fat_type(FatType::Fat32))?;
+    fatfs::format_volume(
+        &mut file,
+        FormatVolumeOptions::new().fat_type(FatType::Fat32),
+    )?;
 
     let fs = FileSystem::new(&mut file, FsOptions::new())?;
     let root = fs.root_dir();
