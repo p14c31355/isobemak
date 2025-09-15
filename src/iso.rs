@@ -75,13 +75,16 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
 }
 
 /// Appends a directory record to a buffer, with a panic guard.
-fn append_dir_record(buffer: &mut Vec<u8>, record: &[u8]) {
+fn append_dir_record(buffer: &mut Vec<u8>, record: &[u8]) -> io::Result<()> {
     let next_offset = buffer.len() + record.len();
-    assert!(
-        next_offset <= SECTOR_SIZE,
-        "Buffer overflow: Directory record exceeds sector size."
-    );
+    if next_offset > SECTOR_SIZE {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Buffer overflow: Directory record exceeds sector size.",
+        ));
+    }
     buffer.extend_from_slice(record);
+    Ok(())
 }
 
 pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
@@ -90,9 +93,6 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
         bellows_path.display(),
         kernel_path.display()
     );
-
-    // NOTE: The code review identified that tests are failing. Please ensure all tests pass before
-    // merging this change.
 
     if !bellows_path.exists() {
         return Err(io::Error::new(
@@ -183,8 +183,8 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     cat[0] = 1;
     cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
     cat[2..4].copy_from_slice(&0u16.to_le_bytes());
-    cat[30] = (BOOT_CATALOG_HEADER_SIGNATURE >> 8) as u8;
-    cat[31] = (BOOT_CATALOG_HEADER_SIGNATURE & 0xFF) as u8;
+    cat[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
+
     let mut sum: u16 = 0;
     for i in (0..32).step_by(2) {
         sum = sum.wrapping_add(u16::from_le_bytes([cat[i], cat[i + 1]]));
@@ -217,15 +217,15 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
 
     // Current directory entry ('.')
     let current_dir_record = create_dot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
-    append_dir_record(&mut efi_dir_data, &current_dir_record);
+    append_dir_record(&mut efi_dir_data, &current_dir_record)?;
 
     // Parent directory entry ('..')
-    let parent_dir_record = create_dotdot_entry(LBA_PVD, SECTOR_SIZE as u32);
-    append_dir_record(&mut efi_dir_data, &parent_dir_record);
+    let parent_dir_record = create_dotdot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
+    append_dir_record(&mut efi_dir_data, &parent_dir_record)?;
 
     // BOOT directory entry
     let boot_dir_record = create_dir_record(LBA_BOOT_DIR, SECTOR_SIZE as u32, true, b"BOOT");
-    append_dir_record(&mut efi_dir_data, &boot_dir_record);
+    append_dir_record(&mut efi_dir_data, &boot_dir_record)?;
 
     iso.write_all(&efi_dir_data)?;
     pad_sector(&mut iso)?; // Pad to full sector
@@ -236,11 +236,11 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
 
     // Current directory entry ('.')
     let current_dir_record = create_dot_entry(LBA_BOOT_DIR, SECTOR_SIZE as u32);
-    append_dir_record(&mut boot_dir_data, &current_dir_record);
+    append_dir_record(&mut boot_dir_data, &current_dir_record)?;
 
     // Parent directory entry ('..')
     let parent_dir_record = create_dotdot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
-    append_dir_record(&mut boot_dir_data, &parent_dir_record);
+    append_dir_record(&mut boot_dir_data, &parent_dir_record)?;
 
     // BOOTX64.EFI entry
     let bootx64_record = create_dir_record(
@@ -249,7 +249,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
         false,
         b"BOOTX64.EFI",
     );
-    append_dir_record(&mut boot_dir_data, &bootx64_record);
+    append_dir_record(&mut boot_dir_data, &bootx64_record)?;
 
     // KERNEL.EFI entry
     let kernel_record = create_dir_record(
@@ -258,7 +258,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
         false,
         b"KERNEL.EFI",
     );
-    append_dir_record(&mut boot_dir_data, &kernel_record);
+    append_dir_record(&mut boot_dir_data, &kernel_record)?;
 
     iso.write_all(&boot_dir_data)?;
     pad_sector(&mut iso)?; // Pad to full sector
