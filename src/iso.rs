@@ -2,7 +2,7 @@
 // ISO + El Torito
 use crate::utils::{SECTOR_SIZE, pad_sector};
 use std::{
-    fs::{self, File},
+    fs::File,
     io::{self, Read, Seek, Write},
     path::Path,
 };
@@ -44,8 +44,6 @@ fn create_dir_record(lba: u32, size: u32, is_dir: bool, name: &[u8]) -> Vec<u8> 
     record
 }
 
-/// Creates a Directory Record for the current directory ('.').
-/// This function now calls create_dir_record to reduce code duplication.
 /// Creates a Directory Record for the current ('.') or parent ('..') directory.
 fn create_relative_dir_entry(lba: u32, size: u32, is_parent: bool) -> [u8; 34] {
     let name_byte = if is_parent { 0x01 } else { 0x00 };
@@ -80,32 +78,23 @@ fn append_dir_record(buffer: &mut Vec<u8>, record: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
+pub fn create_iso(
+    path: &Path,
+    bellows_file: &mut File,
+    kernel_file: &mut File,
+) -> io::Result<()> {
     println!(
-        "create_iso: Creating ISO with bellows: {} and kernel: {}",
-        bellows_path.display(),
-        kernel_path.display()
+        "create_iso: Creating ISO with bellows and kernel from file handles."
     );
-
-    if !bellows_path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Bellows EFI file not found at {}", bellows_path.display()),
-        ));
-    }
-    if !kernel_path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Kernel EFI file not found at {}", kernel_path.display()),
-        ));
-    }
 
     let mut iso = File::create(path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
-    // Read EFI files
-    let bellows_file_content = fs::read(bellows_path)?;
-    let kernel_file_content = fs::read(kernel_path)?;
+    // Read EFI files from the provided file handles
+    let mut bellows_file_content = Vec::new();
+    bellows_file.read_to_end(&mut bellows_file_content)?;
+    let mut kernel_file_content = Vec::new();
+    kernel_file.read_to_end(&mut kernel_file_content)?;
 
     let bellows_sectors = (bellows_file_content.len() as u32).div_ceil(SECTOR_SIZE as u32);
     let kernel_sectors = (kernel_file_content.len() as u32).div_ceil(SECTOR_SIZE as u32);
@@ -138,7 +127,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     // Root Directory Record (for PVD)
     let root_dir_lba = LBA_EFI_DIR;
     let root_dir_size = SECTOR_SIZE as u32;
-    let root_dir_record = create_dot_entry(root_dir_lba, root_dir_size);
+    let root_dir_record = create_relative_dir_entry(root_dir_lba, root_dir_size, false);
     pvd[156..190].copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)?;
 
@@ -152,9 +141,6 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     let mut el_torito_spec = [0u8; 32];
     let spec_name = b"EL TORITO SPECIFICATION";
     el_torito_spec[..spec_name.len()].copy_from_slice(spec_name);
-    for i in spec_name.len()..32 {
-        el_torito_spec[i] = 0x00;
-    }
     brvd[7..39].copy_from_slice(&el_torito_spec);
 
     const LBA_BOOT_CATALOG: u32 = 19;
@@ -209,11 +195,11 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     let mut efi_dir_data = Vec::new();
 
     // Current directory entry ('.')
-    let current_dir_record = create_dot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
+    let current_dir_record = create_relative_dir_entry(LBA_EFI_DIR, SECTOR_SIZE as u32, false);
     append_dir_record(&mut efi_dir_data, &current_dir_record)?;
 
     // Parent directory entry ('..')
-    let parent_dir_record = create_dotdot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
+    let parent_dir_record = create_relative_dir_entry(LBA_EFI_DIR, SECTOR_SIZE as u32, true);
     append_dir_record(&mut efi_dir_data, &parent_dir_record)?;
 
     // BOOT directory entry
@@ -228,11 +214,11 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     let mut boot_dir_data = Vec::new();
 
     // Current directory entry ('.')
-    let current_dir_record = create_dot_entry(LBA_BOOT_DIR, SECTOR_SIZE as u32);
+    let current_dir_record = create_relative_dir_entry(LBA_BOOT_DIR, SECTOR_SIZE as u32, false);
     append_dir_record(&mut boot_dir_data, &current_dir_record)?;
 
     // Parent directory entry ('..')
-    let parent_dir_record = create_dotdot_entry(LBA_EFI_DIR, SECTOR_SIZE as u32);
+    let parent_dir_record = create_relative_dir_entry(LBA_EFI_DIR, SECTOR_SIZE as u32, true);
     append_dir_record(&mut boot_dir_data, &parent_dir_record)?;
 
     // BOOTX64.EFI entry
