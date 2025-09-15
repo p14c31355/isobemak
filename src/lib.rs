@@ -1,7 +1,11 @@
 // isobemak/src/lib.rs
 pub use crate::fat32::create_fat32_image;
 pub use crate::iso::create_iso;
-use std::{fs::File, io::{self, Seek}, path::Path};
+use std::{
+    fs::File,
+    io::{self, Seek},
+    path::Path,
+};
 
 mod fat32;
 mod iso;
@@ -22,7 +26,7 @@ pub fn create_disk_and_iso(
     // Rewind files before passing to create_iso
     bellows_file.seek(io::SeekFrom::Start(0))?;
     kernel_file.seek(io::SeekFrom::Start(0))?;
-    
+
     create_iso(iso, &mut bellows_file, &mut kernel_file)?;
     println!("ISO successfully created.");
     Ok(())

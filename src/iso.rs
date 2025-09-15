@@ -78,14 +78,8 @@ fn append_dir_record(buffer: &mut Vec<u8>, record: &[u8]) -> io::Result<()> {
     Ok(())
 }
 
-pub fn create_iso(
-    path: &Path,
-    bellows_file: &mut File,
-    kernel_file: &mut File,
-) -> io::Result<()> {
-    println!(
-        "create_iso: Creating ISO with bellows and kernel from file handles."
-    );
+pub fn create_iso(path: &Path, bellows_file: &mut File, kernel_file: &mut File) -> io::Result<()> {
+    println!("create_iso: Creating ISO with bellows and kernel from file handles.");
 
     let mut iso = File::create(path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
