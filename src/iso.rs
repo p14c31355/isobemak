@@ -9,16 +9,11 @@ use std::{
 
 /// Creates a general ISO 9660 directory or file record.
 /// This function handles the common fields for a directory record.
-fn create_dir_record(
-    lba: u32,
-    size: u32,
-    is_dir: bool,
-    name: &[u8],
-) -> Vec<u8> {
+fn create_dir_record(lba: u32, size: u32, is_dir: bool, name: &[u8]) -> Vec<u8> {
     let name_len = name.len() as u8;
     let record_len = 33 + name_len;
     let mut record = vec![0u8; record_len as usize];
-    
+
     record[0] = record_len; // Length of Directory Record
     record[1] = 0; // Extended Attribute Record Length
     record[2..6].copy_from_slice(&lba.to_le_bytes()); // Location of Extent (LE)
@@ -33,7 +28,7 @@ fn create_dir_record(
     record[30..32].copy_from_slice(&1u16.to_be_bytes()); // Volume Sequence Number (BE)
     record[32] = name_len; // Length of File Identifier
     record[33..33 + name_len as usize].copy_from_slice(name); // File Identifier
-    
+
     record
 }
 
@@ -217,12 +212,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
     offset += parent_dir_record.len();
 
     // BOOT directory entry
-    let boot_dir_record = create_dir_record(
-        boot_dir_lba,
-        SECTOR_SIZE as u32,
-        true,
-        b"BOOT",
-    );
+    let boot_dir_record = create_dir_record(boot_dir_lba, SECTOR_SIZE as u32, true, b"BOOT");
     efi_dir_data[offset..offset + boot_dir_record.len()].copy_from_slice(&boot_dir_record);
     offset += boot_dir_record.len();
 
