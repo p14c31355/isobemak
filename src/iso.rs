@@ -46,17 +46,10 @@ fn create_dir_record(lba: u32, size: u32, is_dir: bool, name: &[u8]) -> Vec<u8> 
 
 /// Creates a Directory Record for the current directory ('.').
 /// This function now calls create_dir_record to reduce code duplication.
-fn create_dot_entry(lba: u32, size: u32) -> [u8; 34] {
-    let vec_record = create_dir_record(lba, size, true, &[0x00]); // Use 0x00 for '.'
-    let mut record = [0u8; 34];
-    record.copy_from_slice(&vec_record);
-    record
-}
-
-/// Creates a Directory Record for the parent directory ('..').
-/// This function now calls create_dir_record to reduce code duplication.
-fn create_dotdot_entry(parent_lba: u32, parent_size: u32) -> [u8; 34] {
-    let vec_record = create_dir_record(parent_lba, parent_size, true, &[0x01]); // Use 0x01 for '..'
+/// Creates a Directory Record for the current ('.') or parent ('..') directory.
+fn create_relative_dir_entry(lba: u32, size: u32, is_parent: bool) -> [u8; 34] {
+    let name_byte = if is_parent { 0x01 } else { 0x00 };
+    let vec_record = create_dir_record(lba, size, true, &[name_byte]);
     let mut record = [0u8; 34];
     record.copy_from_slice(&vec_record);
     record
