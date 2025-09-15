@@ -96,7 +96,7 @@ pub fn create_iso(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::R
         el_torito_spec[i] = 0x00;
     }
     brvd[7..39].copy_from_slice(&el_torito_spec);
-    brvd[71..75].copy_from_slice(&18u32.to_le_bytes()); // Boot Catalog LBA (LBA 18)
+    brvd[71..75].copy_from_slice(&19u32.to_le_bytes()); // Boot Catalog LBA (LBA 19)
     iso.write_all(&brvd)?;
 
     // Volume Descriptor Terminator (LBA 18)
