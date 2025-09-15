@@ -33,16 +33,14 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
 pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
-    // 1. Read the FAT32 image from disk
-    let mut img_file = File::open(img_path)?;
-    let mut fat_image = Vec::new();
-    img_file.read_to_end(&mut fat_image)?;
-
+    // Get the size of the FAT32 image without reading the whole file into memory.
+    let img_file_size = img_path.metadata()?.len();
+    let fat_image_sectors = (img_file_size as u32).div_ceil(SECTOR_SIZE as u32);
+    
     // 2. Create the ISO with the FAT image embedded
     let mut iso = File::create(iso_path)?;
     io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
-    let fat_image_sectors = (fat_image.len() as u32).div_ceil(SECTOR_SIZE as u32);
     const FAT_IMAGE_LBA: u32 = 20;
     let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
 
@@ -61,11 +59,28 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     pvd[80..84].copy_from_slice(&total_sectors.to_le_bytes());
     pvd[84..88].copy_from_slice(&total_sectors.to_be_bytes());
     pvd[128..132].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
-    // Minimal root directory record (not really used, but required)
-    let root_dir_record = [
-        34, 0, 19, 0, 0, 0, 19, 0, 0, 0, 0, 8, 0, 0, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 1,
-        0, 0, 1, 1, 0,
-    ];
+
+    // Construct the root directory record field by field for clarity.
+    let mut root_dir_record = [0u8; 34];
+    root_dir_record[0] = 34; // Directory record length
+    root_dir_record[1] = 0;  // Extended Attribute Record length
+    root_dir_record[2..6].copy_from_slice(&LBA_PVD.to_le_bytes());
+    root_dir_record[6..10].copy_from_slice(&LBA_PVD.to_be_bytes());
+    root_dir_record[10..14].copy_from_slice(&(0u32).to_le_bytes());
+    root_dir_record[14..18].copy_from_slice(&(0u32).to_be_bytes());
+    root_dir_record[18] = 0; // Record time
+    root_dir_record[19] = 2; // File Flags: Directory
+    root_dir_record[20] = 0; // File unit size (interleaved)
+    root_dir_record[21] = 0; // Gap size (interleaved)
+    root_dir_record[22..26].copy_from_slice(&(0u16).to_le_bytes());
+    root_dir_record[26..28].copy_from_slice(&(0u16).to_be_bytes());
+    root_dir_record[28] = 1; // Length of File Identifier
+    root_dir_record[29] = 0; // File identifier
+    root_dir_record[30] = 0; // Padding
+    root_dir_record[31] = 1; // Padding
+    root_dir_record[32] = 1; // Padding
+    root_dir_record[33] = 0; // Padding
+
     pvd[156..190].copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)?;
 
@@ -109,7 +124,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOTABLE_INDICATOR; // Bootable, EFI
     entry[1] = 0x00; // Boot media type (no emulation)
-    let sector_count_512 = (fat_image.len() as u64).div_ceil(512);
+    let sector_count_512 = (img_file_size).div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -120,9 +135,10 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     cat[32..64].copy_from_slice(&entry);
     iso.write_all(&cat)?;
 
-    // Write FAT image to the ISO
+    // Write FAT image to the ISO by streaming the data
     pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
-    iso.write_all(&fat_image)?;
+    let mut img_file = File::open(img_path)?;
+    io::copy(&mut img_file, &mut iso)?;
     pad_sector(&mut iso)?;
 
     Ok(())
