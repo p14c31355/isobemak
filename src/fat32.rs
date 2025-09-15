@@ -34,12 +34,16 @@ pub fn create_fat32_image(path: &Path, bellows: &mut File, kernel: &mut File) ->
             &mut file,
             FormatVolumeOptions::new().fat_type(FatType::Fat32),
         )?;
-        let fs = FileSystem::new(&mut file, FsOptions::new())?;
-        let root = fs.root_dir();
-        let efi_dir = root.create_dir("EFI")?;
-        let boot_dir = efi_dir.create_dir("BOOT")?;
-        copy_to_fat(&boot_dir, bellows, "BOOTX64.EFI")?;
-        copy_to_fat(&boot_dir, kernel, "KERNEL.EFI")?;
+        {
+            let fs = FileSystem::new(&mut file, FsOptions::new())?;
+            let root = fs.root_dir();
+            let efi_dir = root.create_dir("EFI")?;
+            let boot_dir = efi_dir.create_dir("BOOT")?;
+            copy_to_fat(&boot_dir, bellows, "BOOTX64.EFI")?;
+            copy_to_fat(&boot_dir, kernel, "KERNEL.EFI")?;
+            // fs.unmount() is called implicitly when `fs` goes out of scope
+        } // `fs` is dropped here, unmounting the filesystem
+        file.flush()?; // Ensure all buffered data is written to the underlying file
     }
     file.sync_all()?;
     println!("FAT32 image successfully created at {}", path.display());
