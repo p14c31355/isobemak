@@ -158,11 +158,12 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     )?; // System Area
 
     const FAT_IMAGE_LBA: u32 = 20;
-    let _total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
+    let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
 
     // Write ISO Volume Descriptors
+    write_primary_volume_descriptor(&mut iso, total_sectors)?;
     const LBA_BOOT_CATALOG: u32 = 19;
-    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?; // LBA 19 for Boot Catalog
+    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
     // Write Boot Catalog
