@@ -179,10 +179,12 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     cat[2..4].copy_from_slice(&[0; 2]); // Reserved
 
     // FIX: Write the ID string
-    let id_str = b"ISOBEMAKI EFI BOOT";
-    let mut id_field = [0u8; 24];
-    id_field[..id_str.len()].copy_from_slice(id_str);
-    cat[4..28].copy_from_slice(&id_field);
+    const ID_STR: &[u8] = b"ISOBEMAKI EFI BOOT";
+    const ID_FIELD_OFFSET: usize = 4;
+    const ID_FIELD_LEN: usize = 24;
+    let mut id_field = [0u8; ID_FIELD_LEN];
+    id_field[..ID_STR.len()].copy_from_slice(ID_STR);
+    cat[ID_FIELD_OFFSET..ID_FIELD_OFFSET + ID_FIELD_LEN].copy_from_slice(&id_field);
 
     cat[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
 
