@@ -5,10 +5,10 @@ use std::{
     io::{self, Read, Seek, Write},
     path::Path,
 };
+use crate::utils::FAT32_SECTOR_SIZE;
 
-const SECTOR_SIZE_512: u64 = 512;
 const FAT32_IMAGE_SECTOR_COUNT: u64 = 0xFFFF;
-const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * SECTOR_SIZE_512;
+const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
 
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,

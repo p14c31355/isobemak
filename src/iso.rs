@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{SECTOR_SIZE, pad_sector};
+use crate::utils::{ISO_SECTOR_SIZE, pad_sector, FAT32_SECTOR_SIZE};
 use std::{
     fs::File,
     io::{self, Read, Seek, Write},
@@ -28,11 +28,11 @@ const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 /// Pads the ISO file with zeros to align to a specific LBA.
 /// This helper function reduces code duplication in the main logic.
 fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
-    let target_pos = lba as u64 * SECTOR_SIZE as u64;
+    let target_pos = lba as u64 * ISO_SECTOR_SIZE as u64;
     let current_pos = iso.stream_position()?;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
-        io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
+        pad_sector(iso)?;
     }
     Ok(())
 }
@@ -40,7 +40,7 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
 fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     const LBA_PVD: u32 = 16;
     pad_to_lba(iso, LBA_PVD)?;
-    let mut pvd = [0u8; SECTOR_SIZE];
+    let mut pvd = [0u8; ISO_SECTOR_SIZE];
     pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
     pvd[1..6].copy_from_slice(ISO_ID);
     pvd[6] = ISO_VERSION;
@@ -52,7 +52,7 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Re
 
     pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4].copy_from_slice(&total_sectors.to_le_bytes());
     pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8].copy_from_slice(&total_sectors.to_be_bytes());
-    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 4].copy_from_slice(&(SECTOR_SIZE as u32).to_le_bytes());
+    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 4].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
 
     // Root directory record
     let mut root_dir_record = [0u8; 34];
@@ -72,7 +72,7 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Re
 fn write_boot_record_volume_descriptor(iso: &mut File, lba_boot_catalog: u32) -> io::Result<()> {
     const LBA_BRVD: u32 = 17;
     pad_to_lba(iso, LBA_BRVD)?;
-    let mut brvd = [0u8; SECTOR_SIZE];
+    let mut brvd = [0u8; ISO_SECTOR_SIZE];
     brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
     brvd[1..6].copy_from_slice(ISO_ID);
     brvd[6] = ISO_VERSION;
@@ -85,7 +85,7 @@ fn write_boot_record_volume_descriptor(iso: &mut File, lba_boot_catalog: u32) ->
 fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
     const LBA_VDT: u32 = 18;
     pad_to_lba(iso, LBA_VDT)?;
-    let mut term = [0u8; SECTOR_SIZE];
+    let mut term = [0u8; ISO_SECTOR_SIZE];
     term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
     term[1..6].copy_from_slice(ISO_ID);
     term[6] = ISO_VERSION;
@@ -95,7 +95,7 @@ fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) -> io::Result<()> {
     const LBA_BOOT_CATALOG: u32 = 19;
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
-    let mut cat = [0u8; SECTOR_SIZE];
+    let mut cat = [0u8; ISO_SECTOR_SIZE];
 
     // Validation Entry
     cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
@@ -112,7 +112,7 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
-    let sector_count_512 = (img_file_size).div_ceil(512);
+    let sector_count_512 = (img_file_size).div_ceil(FAT32_SECTOR_SIZE as u64);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -129,10 +129,10 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
     let img_file_size = img_path.metadata()?.len();
-    let fat_image_sectors = (img_file_size as u32).div_ceil(SECTOR_SIZE as u32);
+    let fat_image_sectors = (img_file_size as u32).div_ceil(ISO_SECTOR_SIZE as u32);
 
     let mut iso = File::create(iso_path)?;
-    io::copy(&mut io::repeat(0).take(SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
+    io::copy(&mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
 
     const FAT_IMAGE_LBA: u32 = 20;
     let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
