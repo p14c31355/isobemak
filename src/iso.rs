@@ -3,7 +3,7 @@
 use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE, pad_sector};
 use std::{
     fs::File,
-    io::{self, Read, Seek, Write},
+    io::{self, Read, Seek, Write, SeekFrom},
     path::Path,
 };
 
@@ -211,6 +211,20 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     iso.write_all(&cat)
 }
 
+fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
+    const PVD_START_OFFSET: u64 = 16 * ISO_SECTOR_SIZE as u64;
+    const PVD_TOTAL_SECTORS_LE_OFFSET: u64 = PVD_START_OFFSET + PVD_TOTAL_SECTORS_OFFSET as u64;
+    const PVD_TOTAL_SECTORS_BE_OFFSET: u64 = PVD_START_OFFSET + PVD_TOTAL_SECTORS_OFFSET as u64 + 4;
+
+    iso.seek(SeekFrom::Start(PVD_TOTAL_SECTORS_LE_OFFSET))?;
+    iso.write_all(&total_sectors.to_le_bytes())?;
+    
+    iso.seek(SeekFrom::Start(PVD_TOTAL_SECTORS_BE_OFFSET))?;
+    iso.write_all(&total_sectors.to_be_bytes())?;
+
+    Ok(())
+}
+
 pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
@@ -218,20 +232,17 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     let img_padding_size = (ISO_SECTOR_SIZE as u64 - (img_file_size % ISO_SECTOR_SIZE as u64)) % ISO_SECTOR_SIZE as u64;
     let padded_img_file_size = img_file_size + img_padding_size;
 
-    let fat_image_sectors = (padded_img_file_size.div_ceil(ISO_SECTOR_SIZE as u64)) as u32;
-
     let mut iso = File::create(iso_path)?;
     io::copy(
         &mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 * 16),
         &mut iso,
     )?; // System Area
 
-    const FAT_IMAGE_LBA: u32 = 21; // Moved to a new LBA to make room for the root directory sector
+    const FAT_IMAGE_LBA: u32 = 21;
     const ROOT_DIR_LBA: u32 = 20;
-    let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
 
-    // Write ISO Volume Descriptors
-    write_primary_volume_descriptor(&mut iso, total_sectors, ROOT_DIR_LBA)?;
+    // Write ISO Volume Descriptors with a temporary total_sectors (0)
+    write_primary_volume_descriptor(&mut iso, 0, ROOT_DIR_LBA)?;
     const LBA_BOOT_CATALOG: u32 = 19;
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
@@ -246,7 +257,16 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
     let mut img_file = File::open(img_path)?;
     io::copy(&mut img_file, &mut iso)?;
-    pad_to_lba(&mut iso, total_sectors)?; // Pad to the end of the total sectors
+
+    // FIX: Calculate the final total sectors from the actual file size
+    let final_pos = iso.stream_position()?;
+    let total_sectors = ((final_pos + ISO_SECTOR_SIZE as u64 - 1) / ISO_SECTOR_SIZE as u64) as u32;
+
+    // Seek back and update the total_sectors field in the PVD
+    update_total_sectors(&mut iso, total_sectors)?;
+    
+    // Ensure the file is truncated to the correct size
+    iso.set_len(total_sectors as u64 * ISO_SECTOR_SIZE as u64)?;
 
     Ok(())
 }
