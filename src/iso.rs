@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{ISO_SECTOR_SIZE, pad_sector, FAT32_SECTOR_SIZE};
+use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE, pad_sector};
 use std::{
     fs::File,
     io::{self, Read, Seek, Write},
@@ -50,9 +50,12 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Re
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
-    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4].copy_from_slice(&total_sectors.to_le_bytes());
-    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8].copy_from_slice(&total_sectors.to_be_bytes());
-    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 4].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
+    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
+        .copy_from_slice(&total_sectors.to_le_bytes());
+    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
+        .copy_from_slice(&total_sectors.to_be_bytes());
+    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 4]
+        .copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
 
     // Root directory record
     let mut root_dir_record = [0u8; 34];
@@ -65,7 +68,8 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Re
     root_dir_record[32] = 1; // Padding
     root_dir_record[33] = 0; // Padding
 
-    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + 34].copy_from_slice(&root_dir_record);
+    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + 34]
+        .copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)
 }
 
@@ -112,7 +116,7 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
-    let sector_count_512 = (img_file_size).div_ceil(FAT32_SECTOR_SIZE as u64);
+    let sector_count_512 = (img_file_size).div_ceil(FAT32_SECTOR_SIZE);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -132,7 +136,10 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     let fat_image_sectors = (img_file_size as u32).div_ceil(ISO_SECTOR_SIZE as u32);
 
     let mut iso = File::create(iso_path)?;
-    io::copy(&mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 * 16), &mut iso)?; // System Area
+    io::copy(
+        &mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 * 16),
+        &mut iso,
+    )?; // System Area
 
     const FAT_IMAGE_LBA: u32 = 20;
     let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;

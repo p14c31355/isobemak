@@ -1,11 +1,11 @@
 // isobemak/src/fat32.rs
+use crate::utils::FAT32_SECTOR_SIZE;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, Write},
     path::Path,
 };
-use crate::utils::FAT32_SECTOR_SIZE;
 
 const FAT32_IMAGE_SECTOR_COUNT: u64 = 0xFFFF;
 const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
