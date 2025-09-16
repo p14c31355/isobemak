@@ -228,9 +228,7 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
 pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
-    let img_file_size = img_path.metadata()?.len();
-    let img_padding_size = (ISO_SECTOR_SIZE as u64 - (img_file_size % ISO_SECTOR_SIZE as u64)) % ISO_SECTOR_SIZE as u64;
-    let padded_img_file_size = img_file_size + img_padding_size;
+    let padded_img_file_size: u64 = 8 * 1024 * 1024;
 
     let mut iso = File::create(iso_path)?;
     io::copy(
