@@ -1,9 +1,9 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE, pad_sector};
+use crate::utils::ISO_SECTOR_SIZE;
 use std::{
     fs::File,
-    io::{self, Read, Seek, Write, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -41,7 +41,7 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
 fn write_root_directory_sector(iso: &mut File, root_dir_lba: u32) -> io::Result<()> {
     pad_to_lba(iso, root_dir_lba)?;
     let mut root_dir_sector = [0u8; ISO_SECTOR_SIZE];
-    
+
     // . (self) directory record
     let self_dir_record_len = 34;
     root_dir_sector[0] = self_dir_record_len;
@@ -74,7 +74,11 @@ fn write_root_directory_sector(iso: &mut File, root_dir_lba: u32) -> io::Result<
     iso.write_all(&root_dir_sector)
 }
 
-fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_lba: u32) -> io::Result<()> {
+fn write_primary_volume_descriptor(
+    iso: &mut File,
+    total_sectors: u32,
+    root_dir_lba: u32,
+) -> io::Result<()> {
     const LBA_PVD: u32 = 16;
     pad_to_lba(iso, LBA_PVD)?;
     let mut pvd = [0u8; ISO_SECTOR_SIZE];
@@ -88,7 +92,7 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
     // FIX: ISO9660 multi-endian fields
-    let total = total_sectors as u32;
+    let total = total_sectors;
     pvd[80..84].copy_from_slice(&total.to_le_bytes()); // total_sectors (LE)
     pvd[84..88].copy_from_slice(&total.to_be_bytes()); // total_sectors (BE)
 
@@ -99,7 +103,7 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     let vol_seq_num: u16 = 1;
     pvd[124..126].copy_from_slice(&vol_seq_num.to_le_bytes()); // Volume Sequence Number (LE)
     pvd[126..128].copy_from_slice(&vol_seq_num.to_be_bytes()); // Volume Sequence Number (BE)
-        
+
     let sector_size_u16 = ISO_SECTOR_SIZE as u16;
     pvd[128..130].copy_from_slice(&sector_size_u16.to_le_bytes()); // Logical Block Size (LE)
     pvd[130..132].copy_from_slice(&sector_size_u16.to_be_bytes()); // Logical Block Size (BE)
@@ -109,13 +113,12 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     pvd[132..136].copy_from_slice(&path_table_size.to_le_bytes()); // Path Table Size (LE)
     pvd[136..140].copy_from_slice(&path_table_size.to_be_bytes()); // Path Table Size (BE)
 
-
     // Root directory record
     let mut root_dir_record = [0u8; 34];
     root_dir_record[0] = 34; // Directory record length
 
     // Location of extent (LBA of the root directory sector)
-    let root_dir_lba_u32 = root_dir_lba as u32;
+    let root_dir_lba_u32 = root_dir_lba;
     root_dir_record[2..6].copy_from_slice(&root_dir_lba_u32.to_le_bytes());
     root_dir_record[6..10].copy_from_slice(&root_dir_lba_u32.to_be_bytes());
 
@@ -174,15 +177,15 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
     cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
     cat[2..4].copy_from_slice(&[0; 2]); // Reserved
-    
+
     // FIX: Write the ID string
     let id_str = b"ISOBEMAKI EFI BOOT";
     let mut id_field = [0u8; 24];
     id_field[..id_str.len()].copy_from_slice(id_str);
     cat[4..28].copy_from_slice(&id_field);
-    
+
     cat[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
-    
+
     // Checksum calculation (reordered)
     let mut sum: u16 = 0;
     for i in (0..32).step_by(2) {
@@ -195,16 +198,16 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
-    
+
     // FIX: Write the correct sector count in ISO_SECTOR_SIZE (2048-byte) units
-    let sector_count_iso = (img_file_size + (ISO_SECTOR_SIZE as u64 - 1)) / ISO_SECTOR_SIZE as u64;
+    let sector_count_iso = img_file_size.div_ceil(ISO_SECTOR_SIZE as u64);
     let sector_count_u16 = if sector_count_iso > 0xFFFF {
         0xFFFF
     } else {
         sector_count_iso as u16
     };
     entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes());
-    
+
     entry[8..12].copy_from_slice(&fat_image_lba.to_le_bytes()); // LBA of FAT32 image
     cat[32..64].copy_from_slice(&entry);
 
@@ -218,7 +221,7 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
 
     iso.seek(SeekFrom::Start(PVD_TOTAL_SECTORS_LE_OFFSET))?;
     iso.write_all(&total_sectors.to_le_bytes())?;
-    
+
     iso.seek(SeekFrom::Start(PVD_TOTAL_SECTORS_BE_OFFSET))?;
     iso.write_all(&total_sectors.to_be_bytes())?;
 
@@ -253,17 +256,17 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
 
     // Write FAT image
     pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
-    let mut img_file = File::open(img_path)?;
+    let img_file = File::open(img_path)?;
     let mut limited_reader = img_file.take(padded_img_file_size);
     io::copy(&mut limited_reader, &mut iso)?;
 
     // FIX: Calculate the final total sectors from the actual file size
     let final_pos = iso.stream_position()?;
-    let total_sectors = ((final_pos + ISO_SECTOR_SIZE as u64 - 1) / ISO_SECTOR_SIZE as u64) as u32;
+    let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     // Seek back and update the total_sectors field in the PVD
     update_total_sectors(&mut iso, total_sectors)?;
-    
+
     // Ensure the file is truncated to the correct size
     iso.set_len(total_sectors as u64 * ISO_SECTOR_SIZE as u64)?;
 
