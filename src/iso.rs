@@ -87,27 +87,37 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
-    // FIX: ISO9660 multi-endian fields for total sectors
+    // FIX: ISO9660 multi-endian fields
     let total = total_sectors as u32;
-    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
-        .copy_from_slice(&total.to_le_bytes());
-    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
-        .copy_from_slice(&total.to_be_bytes());
+    pvd[80..84].copy_from_slice(&total.to_le_bytes()); // total_sectors (LE)
+    pvd[84..88].copy_from_slice(&total.to_be_bytes()); // total_sectors (BE)
+
+    let vol_set_size: u16 = 1;
+    pvd[120..122].copy_from_slice(&vol_set_size.to_le_bytes()); // Volume Set Size (LE)
+    pvd[122..124].copy_from_slice(&vol_set_size.to_be_bytes()); // Volume Set Size (BE)
+
+    let vol_seq_num: u16 = 1;
+    pvd[124..126].copy_from_slice(&vol_seq_num.to_le_bytes()); // Volume Sequence Number (LE)
+    pvd[126..128].copy_from_slice(&vol_seq_num.to_be_bytes()); // Volume Sequence Number (BE)
         
-    // FIX: ISO9660 multi-endian fields for logical block size (u16)
     let sector_size_u16 = ISO_SECTOR_SIZE as u16;
-    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 2]
-        .copy_from_slice(&sector_size_u16.to_le_bytes());
-    pvd[PVD_SECTOR_SIZE_OFFSET + 2..PVD_SECTOR_SIZE_OFFSET + 4]
-        .copy_from_slice(&sector_size_u16.to_be_bytes());
+    pvd[128..130].copy_from_slice(&sector_size_u16.to_le_bytes()); // Logical Block Size (LE)
+    pvd[130..132].copy_from_slice(&sector_size_u16.to_be_bytes()); // Logical Block Size (BE)
+
+    // Path table fields. Set to 0 but must be multi-endian.
+    let path_table_size: u32 = 0;
+    pvd[132..136].copy_from_slice(&path_table_size.to_le_bytes()); // Path Table Size (LE)
+    pvd[136..140].copy_from_slice(&path_table_size.to_be_bytes()); // Path Table Size (BE)
+
 
     // Root directory record
     let mut root_dir_record = [0u8; 34];
     root_dir_record[0] = 34; // Directory record length
 
     // Location of extent (LBA of the root directory sector)
-    root_dir_record[2..6].copy_from_slice(&root_dir_lba.to_le_bytes());
-    root_dir_record[6..10].copy_from_slice(&root_dir_lba.to_be_bytes());
+    let root_dir_lba_u32 = root_dir_lba as u32;
+    root_dir_record[2..6].copy_from_slice(&root_dir_lba_u32.to_le_bytes());
+    root_dir_record[6..10].copy_from_slice(&root_dir_lba_u32.to_be_bytes());
 
     // Data length (size of one sector for the root directory contents)
     let sector_size_u32 = ISO_SECTOR_SIZE as u32;
@@ -180,12 +190,12 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
     
-    // FIX: Write the correct sector count
-    let sector_count_512 = (img_file_size).div_ceil(FAT32_SECTOR_SIZE);
-    let sector_count_u16 = if sector_count_512 > 0xFFFF {
+    // FIX: Write the correct sector count in ISO_SECTOR_SIZE (2048-byte) units
+    let sector_count_iso = (img_file_size + (ISO_SECTOR_SIZE as u64 - 1)) / ISO_SECTOR_SIZE as u64;
+    let sector_count_u16 = if sector_count_iso > 0xFFFF {
         0xFFFF
     } else {
-        sector_count_512 as u16
+        sector_count_iso as u16
     };
     entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes());
     
