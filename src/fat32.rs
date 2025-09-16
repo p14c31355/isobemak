@@ -6,7 +6,9 @@ use std::{
     path::Path,
 };
 
-const FAT32_IMAGE_SIZE: u64 = 0xFFFF * 512; // 33553920 bytes (65535 sectors of 512 bytes)
+const SECTOR_SIZE_512: u64 = 512;
+const FAT32_IMAGE_SECTOR_COUNT: u64 = 0xFFFF;
+const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * SECTOR_SIZE_512;
 
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
@@ -47,7 +49,6 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
         copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
     } // `fs`, `root`, `efi_dir`, `boot_dir` are dropped here, releasing the mutable borrow on `file`.
 
-    // Add the file.sync_all() call to ensure all data is written to disk.
     file.sync_all()?;
 
     Ok(())
