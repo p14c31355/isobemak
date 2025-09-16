@@ -87,12 +87,19 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
+    // FIX: ISO9660 multi-endian fields for total sectors
+    let total = total_sectors as u32;
     pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
-        .copy_from_slice(&total_sectors.to_le_bytes());
+        .copy_from_slice(&total.to_le_bytes());
     pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
-        .copy_from_slice(&total_sectors.to_be_bytes());
-    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 4]
-        .copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
+        .copy_from_slice(&total.to_be_bytes());
+        
+    // FIX: ISO9660 multi-endian fields for logical block size (u16)
+    let sector_size_u16 = ISO_SECTOR_SIZE as u16;
+    pvd[PVD_SECTOR_SIZE_OFFSET..PVD_SECTOR_SIZE_OFFSET + 2]
+        .copy_from_slice(&sector_size_u16.to_le_bytes());
+    pvd[PVD_SECTOR_SIZE_OFFSET + 2..PVD_SECTOR_SIZE_OFFSET + 4]
+        .copy_from_slice(&sector_size_u16.to_be_bytes());
 
     // Root directory record
     let mut root_dir_record = [0u8; 34];
@@ -172,13 +179,16 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
+    
+    // FIX: Write the correct sector count
     let sector_count_512 = (img_file_size).div_ceil(FAT32_SECTOR_SIZE);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
         sector_count_512 as u16
     };
-    entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes()); // Sector count (512-byte units)
+    entry[6..8].copy_from_slice(&sector_count_u16.to_le_bytes());
+    
     entry[8..12].copy_from_slice(&fat_image_lba.to_le_bytes()); // LBA of FAT32 image
     cat[32..64].copy_from_slice(&entry);
 
