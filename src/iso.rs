@@ -149,7 +149,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
     let img_file_size = img_path.metadata()?.len();
-    let fat_image_sectors = (img_file_size as u32).div_ceil(ISO_SECTOR_SIZE as u32);
+    let fat_image_sectors = (img_file_size.div_ceil(ISO_SECTOR_SIZE as u64)) as u32;
 
     let mut iso = File::create(iso_path)?;
     io::copy(
