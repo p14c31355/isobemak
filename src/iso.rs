@@ -59,12 +59,7 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
 }
 
 /// Helper to write a directory record.
-fn write_directory_record(
-    sector: &mut [u8],
-    offset: usize,
-    lba: u32,
-    file_id: u8,
-) -> io::Result<()> {
+fn write_directory_record(sector: &mut [u8], offset: usize, lba: u32, file_id: u8) {
     sector[offset] = DIR_RECORD_LEN;
     sector[offset + DIR_RECORD_LBA_OFFSET..offset + DIR_RECORD_LBA_OFFSET + 4]
         .copy_from_slice(&lba.to_le_bytes());
@@ -86,8 +81,6 @@ fn write_directory_record(
 
     sector[offset + DIR_RECORD_ID_LEN_OFFSET] = 1; // Length of File Identifier
     sector[offset + DIR_RECORD_ID_OFFSET] = file_id; // File Identifier: 0x00 for self, 0x01 for parent
-
-    Ok(())
 }
 
 fn write_root_directory_sector(iso: &mut File, root_dir_lba: u32) -> io::Result<()> {
@@ -121,12 +114,10 @@ fn write_primary_volume_descriptor(
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
-    let total = total_sectors;
     pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
-        .copy_from_slice(&total.to_le_bytes());
+        .copy_from_slice(&total_sectors.to_le_bytes());
     pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
-        .copy_from_slice(&total.to_be_bytes());
-
+        .copy_from_slice(&total_sectors.to_be_bytes());
     let vol_set_size: u16 = 1;
     pvd[PVD_VOL_SET_SIZE_OFFSET..PVD_VOL_SET_SIZE_OFFSET + 2]
         .copy_from_slice(&vol_set_size.to_le_bytes());
@@ -257,7 +248,8 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
 pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
-    let img_file_size = img_path.metadata()?.len();
+    let mut img_file = File::open(img_path)?;
+    let img_file_size = img_file.metadata()?.len();
 
     let mut iso = File::create(iso_path)?;
     io::copy(
@@ -282,7 +274,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
 
     // Write FAT image
     pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
-    let img_file = File::open(img_path)?;
+    img_file.seek(SeekFrom::Start(0))?;
     let mut limited_reader = img_file.take(img_file_size);
     io::copy(&mut limited_reader, &mut iso)?;
 
