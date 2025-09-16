@@ -11,13 +11,7 @@ pub fn pad_sector(f: &mut File) -> io::Result<()> {
     let pos = f.stream_position()?;
     let pad = ISO_SECTOR_SIZE as u64 - (pos % ISO_SECTOR_SIZE as u64);
     if pad != ISO_SECTOR_SIZE as u64 {
-        let zeros = [0u8; ISO_SECTOR_SIZE];
-        let mut written = 0;
-        while written < pad {
-            let to_write = std::cmp::min(pad as usize - written as usize, zeros.len());
-            f.write_all(&zeros[..to_write])?;
-            written += to_write as u64;
-        }
+        io::copy(&mut io::repeat(0).take(pad), f)?;
     }
     Ok(())
 }

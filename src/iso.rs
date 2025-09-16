@@ -32,7 +32,8 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     let current_pos = iso.stream_position()?;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
-        pad_sector(iso)?;
+        // Using io::copy with a repeat reader is efficient for writing large amounts of zeros.
+        io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
     }
     Ok(())
 }
@@ -60,13 +61,28 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32) -> io::Re
     // Root directory record
     let mut root_dir_record = [0u8; 34];
     root_dir_record[0] = 34; // Directory record length
-    root_dir_record[19] = 2; // File Flags: Directory
-    root_dir_record[28] = 1; // Length of File Identifier
-    root_dir_record[29] = 0; // File identifier
-    root_dir_record[30] = 0; // Padding
-    root_dir_record[31] = 1; // Padding
-    root_dir_record[32] = 1; // Padding
-    root_dir_record[33] = 0; // Padding
+
+    // Location of extent (LBA of the PVD)
+    root_dir_record[2..6].copy_from_slice(&LBA_PVD.to_le_bytes());
+    root_dir_record[6..10].copy_from_slice(&LBA_PVD.to_be_bytes());
+
+    // Data length (size of one sector for the root directory contents)
+    let sector_size_u32 = ISO_SECTOR_SIZE as u32;
+    root_dir_record[10..14].copy_from_slice(&sector_size_u32.to_le_bytes());
+    root_dir_record[14..18].copy_from_slice(&sector_size_u32.to_be_bytes());
+
+    // File flags (0x02 for directory)
+    root_dir_record[25] = 2;
+
+    // Volume sequence number (usually 1)
+    let vol_seq: u16 = 1;
+    root_dir_record[28..30].copy_from_slice(&vol_seq.to_le_bytes());
+    root_dir_record[30..32].copy_from_slice(&vol_seq.to_be_bytes());
+
+    // Length of File Identifier (1 for root)
+    root_dir_record[32] = 1;
+    // File Identifier (0x00 for root)
+    root_dir_record[33] = 0;
 
     pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + 34]
         .copy_from_slice(&root_dir_record);
@@ -145,8 +161,8 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
 
     // Write ISO Volume Descriptors
-    write_primary_volume_descriptor(&mut iso, total_sectors)?;
-    write_boot_record_volume_descriptor(&mut iso, 19)?; // LBA 19 for Boot Catalog
+    const LBA_BOOT_CATALOG: u32 = 19;
+    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?; // LBA 19 for Boot Catalog
     write_volume_descriptor_terminator(&mut iso)?;
 
     // Write Boot Catalog
