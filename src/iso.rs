@@ -158,7 +158,7 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     )?; // System Area
 
     const FAT_IMAGE_LBA: u32 = 20;
-    let total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
+    let _total_sectors = FAT_IMAGE_LBA + fat_image_sectors;
 
     // Write ISO Volume Descriptors
     const LBA_BOOT_CATALOG: u32 = 19;
