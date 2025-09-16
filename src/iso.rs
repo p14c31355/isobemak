@@ -256,7 +256,8 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     // Write FAT image
     pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
     let mut img_file = File::open(img_path)?;
-    io::copy(&mut img_file, &mut iso)?;
+    let mut limited_reader = img_file.take(padded_img_file_size);
+    io::copy(&mut limited_reader, &mut iso)?;
 
     // FIX: Calculate the final total sectors from the actual file size
     let final_pos = iso.stream_position()?;
