@@ -82,7 +82,7 @@ fn write_primary_volume_descriptor(iso: &mut File, total_sectors: u32, root_dir_
     pvd[1..6].copy_from_slice(ISO_ID);
     pvd[6] = ISO_VERSION;
 
-    let project_name = b"FULLERENE";
+    let project_name = b"ISOBEMAKI";
     let mut volume_id = [b' '; 32];
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
@@ -174,7 +174,13 @@ fn write_boot_catalog(iso: &mut File, fat_image_lba: u32, img_file_size: u64) ->
     cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
     cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
     cat[2..4].copy_from_slice(&[0; 2]); // Reserved
-    cat[4..28].copy_from_slice(&[0; 24]); // Reserved
+    
+    // FIX: Write the ID string
+    let id_str = b"ISOBEMAKI EFI BOOT";
+    let mut id_field = [0u8; 24];
+    id_field[..id_str.len()].copy_from_slice(id_str);
+    cat[4..28].copy_from_slice(&id_field);
+    
     cat[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
     
     // Checksum calculation (reordered)
