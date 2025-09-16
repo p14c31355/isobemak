@@ -88,11 +88,11 @@ fn write_root_directory_sector(iso: &mut File, root_dir_lba: u32) -> io::Result<
     let mut root_dir_sector = [0u8; ISO_SECTOR_SIZE];
 
     // . (self) directory record
-    write_directory_record(&mut root_dir_sector, 0, root_dir_lba, 0)?;
+    write_directory_record(&mut root_dir_sector, 0, root_dir_lba, 0);
 
     // .. (parent) directory record
     let parent_offset = DIR_RECORD_LEN as usize;
-    write_directory_record(&mut root_dir_sector, parent_offset, root_dir_lba, 1)?;
+    write_directory_record(&mut root_dir_sector, parent_offset, root_dir_lba, 1);
 
     iso.write_all(&root_dir_sector)
 }
