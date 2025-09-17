@@ -24,7 +24,8 @@ fn copy_to_fat<T: Read + Write + Seek>(
     Ok(())
 }
 
-/// Creates a FAT32 image file and populates it with the necessary files for UEFI boot.
+/// Creates a pure FAT32 filesystem image (not a full disk image with MBR).
+/// This image will be used directly as the El Torito boot image.
 pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
     if path.exists() {
         fs::remove_file(path)?;
@@ -36,17 +37,20 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
         .open(path)?;
     file.set_len(FAT32_IMAGE_SIZE)?;
 
+    // Format the entire file as a single FAT32 volume. This creates a pure FS image.
     fatfs::format_volume(
         &mut file,
         FormatVolumeOptions::new().fat_type(FatType::Fat32),
     )?;
 
     {
+        // Open the formatted file as a FAT filesystem
         let fs = FileSystem::new(&mut file, FsOptions::new())?;
         let root = fs.root_dir();
         let efi_dir = root.create_dir("EFI")?;
         let boot_dir = efi_dir.create_dir("BOOT")?;
 
+        // Copy EFI executables to the correct location
         copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
         copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
     }
