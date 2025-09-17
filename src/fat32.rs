@@ -7,11 +7,6 @@ use std::{
     path::Path,
 };
 
-// Use 0xFFFE (65534) to avoid the 0xFFFF issue with some UEFI implementations.
-// 0xFFFE * 512 = 33553408 bytes
-const FAT32_IMAGE_SECTOR_COUNT: u64 = 0xFFFE;
-const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
-
 /// Copies a file from the host filesystem into a FAT32 directory.
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
@@ -31,12 +26,23 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
     if path.exists() {
         fs::remove_file(path)?;
     }
+
+    // Determine the size of the files to be included
+    let bellows_metadata = fs::metadata(bellows_path)?;
+    let kernel_metadata = fs::metadata(kernel_path)?;
+    let total_file_size = bellows_metadata.len() + kernel_metadata.len();
+
+    // Add a buffer for filesystem overhead (boot sector, FAT, root dir).
+    // A 1 MiB buffer should be more than sufficient.
+    const BUF_SIZE: u64 = 1024 * 1024;
+    let image_size = total_file_size + BUF_SIZE;
+
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .open(path)?;
-    file.set_len(FAT32_IMAGE_SIZE)?;
+    file.set_len(image_size)?;
 
     fatfs::format_volume(
         &mut file,
@@ -54,6 +60,5 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
     }
 
     file.sync_all()?;
-
     Ok(())
 }

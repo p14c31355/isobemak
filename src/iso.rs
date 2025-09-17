@@ -167,7 +167,7 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
-    // Boot image sector count (512-byte sectors, truncated to 0xFFFF max)
+    // Boot image sector count (512-byte sectors)
     let sector_count_512 = ((boot_img_size + 511) / 512) as u32;
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
@@ -205,6 +205,55 @@ fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
     Ok(content)
 }
 
+/// Creates a directory record for an ISO 9660 filesystem.
+fn write_dir_record(
+    iso: &mut File,
+    name: &str,
+    lba: u32,
+    size: u32,
+    is_dir: bool,
+) -> io::Result<()> {
+    let name_len = name.len();
+    let record_len = 34 + name_len;
+    let mut record = vec![0u8; record_len];
+
+    record[0] = record_len as u8;
+    record[2..6].copy_from_slice(&lba.to_le_bytes());
+    record[6..10].copy_from_slice(&lba.to_be_bytes());
+    record[10..14].copy_from_slice(&size.to_le_bytes());
+    record[14..18].copy_from_slice(&size.to_be_bytes());
+    record[25] = if is_dir { 2 } else { 0 };
+
+    record[32] = name_len as u8;
+    record[33] = 0;
+    record[34..34 + name_len].copy_from_slice(name.as_bytes());
+
+    iso.write_all(&record)
+}
+
+/// Creates a file record for an ISO 9660 filesystem.
+fn write_file_record(
+    iso: &mut File,
+    name: &str,
+    lba: u32,
+    size: u32,
+) -> io::Result<()> {
+    let name_len = name.len();
+    let record_len = 34 + name_len;
+    let mut record = vec![0u8; record_len];
+    record[0] = record_len as u8;
+    record[2..6].copy_from_slice(&lba.to_le_bytes());
+    record[6..10].copy_from_slice(&lba.to_be_bytes());
+    record[10..14].copy_from_slice(&size.to_le_bytes());
+    record[14..18].copy_from_slice(&size.to_be_bytes());
+    record[25] = 0; // File flag
+    record[32] = name_len as u8;
+    record[33] = 0;
+    record[34..34 + name_len].copy_from_slice(name.as_bytes());
+    
+    iso.write_all(&record)
+}
+
 /// Creates an ISO image from a FAT32 image file.
 pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
@@ -221,34 +270,45 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     const LBA_BOOT_CATALOG: u32 = 19;
     const LBA_ROOT_DIR: u32 = 20;
 
-    // --- 1. Write Volume Descriptors. PVD total sectors and boot catalog LBA will be patched later. ---
-    // The root directory for the ISO9660 tree is now just an empty directory.
+    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
+    let fat32_size = fat32_content.len() as u32;
+
+    // Calculate LBA for FAT32 image, accounting for padding and records
+    let lba_fat32 = LBA_ROOT_DIR + 1;
+
+    // --- 1. Write Volume Descriptors. PVD total sectors will be patched later. ---
     write_primary_volume_descriptor(&mut iso, 0, LBA_ROOT_DIR)?;
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
-    // --- 2. Write placeholder for the boot catalog. LBA and size will be updated. ---
+    // --- 2. Write the boot catalog. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
-    iso.write_all(&[0u8; ISO_SECTOR_SIZE])?;
-
-    // --- 3. Write ISO9660 root directory sector (minimal). ---
-    pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
-    iso.write_all(&[0u8; ISO_SECTOR_SIZE])?;
-
-    // --- 4. Write the FAT32 image content to the ISO. ---
-    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
-    let fat32_size = fat32_content.len() as u32;
-    let lba_fat32 = iso.stream_position()?.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-    pad_to_lba(&mut iso, lba_fat32)?;
-    iso.write_all(&fat32_content)?;
-
-    // --- 5. Rewrite the boot catalog with correct information. ---
-    iso.seek(io::SeekFrom::Start(
-        LBA_BOOT_CATALOG as u64 * ISO_SECTOR_SIZE as u64,
-    ))?;
     write_boot_catalog(&mut iso, lba_fat32, fat32_size)?;
 
-    // --- 6. Finalize ISO file by updating the total number of sectors. ---
+    // --- 3. Write ISO9660 root directory and file records. ---
+    pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
+    
+    // Write the root directory record (points to itself and its parent)
+    let root_record_start_pos = iso.stream_position()?;
+    write_dir_record(&mut iso, ".", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true)?;
+    write_dir_record(&mut iso, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true)?;
+    
+    // Write the [BOOT] directory record
+    write_dir_record(&mut iso, "BOOT", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true)?;
+
+    // Write the Boot-NoEmul.img file record.
+    write_file_record(&mut iso, "Boot-NoEmul.img", lba_fat32, fat32_size)?;
+    
+    // Pad the root directory sector to ensure it takes up one full sector
+    let root_dir_end_pos = iso.stream_position()?;
+    let padding = ISO_SECTOR_SIZE as u64 - (root_dir_end_pos - root_record_start_pos);
+    io::copy(&mut io::repeat(0).take(padding), &mut iso)?;
+
+    // --- 4. Write the FAT32 image content to the ISO. ---
+    pad_to_lba(&mut iso, lba_fat32)?;
+    iso.write_all(&fat32_content)?;
+    
+    // --- 5. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
