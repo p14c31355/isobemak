@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::ISO_SECTOR_SIZE;
+use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE};
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
