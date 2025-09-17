@@ -7,6 +7,9 @@ use std::{
     path::Path,
 };
 
+const FAT32_IMAGE_SECTOR_COUNT: u64 = 2048; 
+const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
+
 /// Copies a file from the host filesystem into a FAT32 directory.
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
@@ -26,39 +29,30 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
     if path.exists() {
         fs::remove_file(path)?;
     }
-
-    // Determine the size of the files to be included
-    let bellows_metadata = fs::metadata(bellows_path)?;
-    let kernel_metadata = fs::metadata(kernel_path)?;
-    let total_file_size = bellows_metadata.len() + kernel_metadata.len();
-
-    // Add a buffer for filesystem overhead (boot sector, FAT, root dir).
-    // A 1 MiB buffer should be more than sufficient.
-    const BUF_SIZE: u64 = 1024 * 1024;
-    let image_size = total_file_size + BUF_SIZE;
-
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
         .open(path)?;
-    file.set_len(image_size)?;
+    file.set_len(FAT32_IMAGE_SIZE)?;
 
     fatfs::format_volume(
         &mut file,
         FormatVolumeOptions::new().fat_type(FatType::Fat32),
     )?;
 
-    {
-        let fs = FileSystem::new(&mut file, FsOptions::new())?;
-        let root = fs.root_dir();
-        let efi_dir = root.create_dir("EFI")?;
-        let boot_dir = efi_dir.create_dir("BOOT")?;
+    let fs = FileSystem::new(&mut file, FsOptions::new())?;
+    let root_dir = fs.root_dir();
+    let efi_dir = root_dir.create_dir("EFI")?;
+    let boot_dir = efi_dir.create_dir("BOOT")?;
 
-        copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
-        copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
-    }
+    // Copying `bellows.efi` to `\EFI\BOOT\BOOTX64.EFI`
+    assert!(bellows_path.exists(), "bellows.efi not found at {:?}", bellows_path);
+    copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
 
-    file.sync_all()?;
+    // Copying `kernel.bin` to `\kernel.bin`
+    assert!(kernel_path.exists(), "kernel.bin not found at {:?}", kernel_path);
+    copy_to_fat(&root_dir, kernel_path, "kernel.bin")?;
+
     Ok(())
 }
