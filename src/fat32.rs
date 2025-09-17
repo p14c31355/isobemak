@@ -7,7 +7,7 @@ use std::{
     path::Path,
 };
 
-const FAT32_IMAGE_SECTOR_COUNT: u64 = 2048; 
+const FAT32_IMAGE_SECTOR_COUNT: u64 = 2048;
 const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
 
 /// Copies a file from the host filesystem into a FAT32 directory.
@@ -26,7 +26,10 @@ fn copy_to_fat<T: Read + Write + Seek>(
 
 /// Creates a FAT32 image file and populates it with the necessary files for UEFI boot.
 pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
-    println!("create_fat32_image: Starting creation of FAT32 image at '{}'.", path.display());
+    println!(
+        "create_fat32_image: Starting creation of FAT32 image at '{}'.",
+        path.display()
+    );
     if path.exists() {
         println!("create_fat32_image: Removing existing file.");
         fs::remove_file(path)?;
@@ -50,16 +53,22 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
     let boot_dir = efi_dir.create_dir("BOOT")?;
 
     println!("create_fat32_image: Copying bootloader and kernel.");
-    
+
     // Copying `bellows.efi` to `\EFI\BOOT\BOOTX64.EFI`
     if !bellows_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, format!("bellows.efi not found at {:?}", bellows_path)));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("bellows.efi not found at {:?}", bellows_path),
+        ));
     }
     copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
 
     // Copying `kernel.bin` to `\kernel.bin`
     if !kernel_path.exists() {
-        return Err(io::Error::new(io::ErrorKind::NotFound, format!("kernel.bin not found at {:?}", kernel_path)));
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("kernel.bin not found at {:?}", kernel_path),
+        ));
     }
     copy_to_fat(&root_dir, kernel_path, "kernel.bin")?;
 
