@@ -70,7 +70,7 @@ fn write_directory_record(
     file_id: &[u8],
 ) {
     let id_len = file_id.len() as u8;
-    let rec_len = DIR_RECORD_LEN_MIN + id_len + (id_len % 2);
+    let rec_len = 33 + id_len + (id_len + 1) % 2;
 
     if *offset + rec_len as usize > ISO_SECTOR_SIZE {
         return;
