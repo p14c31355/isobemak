@@ -73,8 +73,7 @@ fn write_directory_record(
     let rec_len = 33 + id_len + (id_len + 1) % 2;
 
     if *offset + rec_len as usize > sector.len() {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::Other,
+        return Err(std::io::Error::other(
             "sector overflow when writing directory record",
         ));
     }
