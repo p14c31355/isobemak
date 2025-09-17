@@ -8,6 +8,7 @@ mod fat32;
 mod iso;
 mod utils;
 
+/// High-level function to create the FAT32 image and then the final ISO.
 pub fn create_disk_and_iso(
     fat32_img_path: &Path,
     iso_path: &Path,

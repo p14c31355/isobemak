@@ -10,6 +10,7 @@ use std::{
 const FAT32_IMAGE_SECTOR_COUNT: u64 = 0xFFFF;
 const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
 
+/// Copies a file from the host filesystem into a FAT32 directory.
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
     src_path: &Path,
@@ -23,6 +24,7 @@ fn copy_to_fat<T: Read + Write + Seek>(
     Ok(())
 }
 
+/// Creates a FAT32 image file and populates it with the necessary files for UEFI boot.
 pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) -> io::Result<()> {
     if path.exists() {
         fs::remove_file(path)?;
@@ -47,7 +49,7 @@ pub fn create_fat32_image(path: &Path, bellows_path: &Path, kernel_path: &Path) 
 
         copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
         copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
-    } // `fs`, `root`, `efi_dir`, `boot_dir` are dropped here, releasing the mutable borrow on `file`.
+    }
 
     file.sync_all()?;
 
