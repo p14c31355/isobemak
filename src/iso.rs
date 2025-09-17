@@ -43,15 +43,7 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     let current_pos = iso.stream_position()?;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
-        println!(
-            "pad_to_lba: Padding {} bytes to reach LBA {}.",
-            padding_bytes, lba
-        );
         io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
-    } else if current_pos > target_pos {
-        eprintln!(
-            "Warning: Current position is past the target LBA. This might indicate an error."
-        );
     }
     Ok(())
 }
@@ -62,10 +54,6 @@ fn write_primary_volume_descriptor(
     root_dir_lba: u32,
 ) -> io::Result<()> {
     const LBA_PVD: u32 = 16;
-    println!(
-        "write_primary_volume_descriptor: Writing PVD at LBA {}.",
-        LBA_PVD
-    );
     pad_to_lba(iso, LBA_PVD)?;
     let mut pvd = [0u8; ISO_SECTOR_SIZE];
     pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
@@ -128,10 +116,6 @@ fn write_primary_volume_descriptor(
 
 fn write_boot_record_volume_descriptor(iso: &mut File, lba_boot_catalog: u32) -> io::Result<()> {
     const LBA_BRVD: u32 = 17;
-    println!(
-        "write_boot_record_volume_descriptor: Writing BRVD at LBA {}.",
-        LBA_BRVD
-    );
     pad_to_lba(iso, LBA_BRVD)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];
     brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
@@ -145,10 +129,6 @@ fn write_boot_record_volume_descriptor(iso: &mut File, lba_boot_catalog: u32) ->
 
 fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
     const LBA_VDT: u32 = 18;
-    println!(
-        "write_volume_descriptor_terminator: Writing VDT at LBA {}.",
-        LBA_VDT
-    );
     pad_to_lba(iso, LBA_VDT)?;
     let mut term = [0u8; ISO_SECTOR_SIZE];
     term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
@@ -161,10 +141,6 @@ fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 /// It takes the LBA and size of the boot image to create a bootable entry.
 fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> io::Result<()> {
     const LBA_BOOT_CATALOG: u32 = 19;
-    println!(
-        "write_boot_catalog: Writing boot catalog at LBA {}.",
-        LBA_BOOT_CATALOG
-    );
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
     let mut cat = [0u8; ISO_SECTOR_SIZE];
 
@@ -192,7 +168,7 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
     // Boot image sector count (512-byte sectors)
-    let sector_count_512 = boot_img_size.div_ceil(512);
+    let sector_count_512 = ((boot_img_size + 511) / 512) as u32;
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -212,11 +188,6 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     const PVD_TOTAL_SECTORS_LE_OFFSET: u64 = PVD_START_OFFSET + PVD_TOTAL_SECTORS_OFFSET as u64;
     const PVD_TOTAL_SECTORS_BE_OFFSET: u64 = PVD_START_OFFSET + PVD_TOTAL_SECTORS_OFFSET as u64 + 4;
 
-    println!(
-        "update_total_sectors: Updating total sectors to {} at PVD.",
-        total_sectors
-    );
-
     iso.seek(SeekFrom::Start(PVD_TOTAL_SECTORS_LE_OFFSET))?;
     iso.write_all(&total_sectors.to_le_bytes())?;
 
@@ -228,34 +199,48 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
 
 /// Reads the entire FAT32 image from a specified path and returns its content.
 fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
-    println!(
-        "read_fat32_img_from_path: Reading FAT32 image from '{}'.",
-        img_path.display()
-    );
     let mut img_file = File::open(img_path)?;
     let mut content = Vec::new();
     img_file.read_to_end(&mut content)?;
-    println!("read_fat32_img_from_path: Read {} bytes.", content.len());
     Ok(content)
 }
 
-/// Creates a special directory record for '.' and '..'
-fn write_special_dir_record(name_byte: u8, lba: u32) -> io::Result<Vec<u8>> {
-    let record_len = 34; // Correct record length for special directories
+/// Creates a directory record for an ISO 9660 filesystem.
+fn write_dir_record(
+    name: &str,
+    lba: u32,
+    is_self: bool,
+) -> io::Result<Vec<u8>> {
+    let name_len = if is_self { 1 } else { name.len() };
+    let record_len = 34 + name_len;
     let mut record = vec![0u8; record_len];
+
     record[0] = record_len as u8;
     record[2..6].copy_from_slice(&lba.to_le_bytes());
     record[6..10].copy_from_slice(&lba.to_be_bytes());
     record[10..14].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
     record[14..18].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_be_bytes());
     record[25] = 2; // Directory flag
-    record[32] = 1; // Name length
-    record[33] = name_byte;
+    
+    // Set parent/self flags if applicable
+    if name == "." || name == ".." {
+        record[32] = 1;
+        record[33] = 0;
+    } else {
+        record[32] = name_len as u8;
+        record[33] = 0;
+        record[34..34 + name_len].copy_from_slice(name.as_bytes());
+    }
+
     Ok(record)
 }
 
 /// Creates a file record for an ISO 9660 filesystem.
-fn write_file_record(name: &str, lba: u32, size: u32) -> io::Result<Vec<u8>> {
+fn write_file_record(
+    name: &str,
+    lba: u32,
+    size: u32,
+) -> io::Result<Vec<u8>> {
     let name_len = name.len();
     let record_len = 34 + name_len;
     let mut record = vec![0u8; record_len];
@@ -268,7 +253,7 @@ fn write_file_record(name: &str, lba: u32, size: u32) -> io::Result<Vec<u8>> {
     record[32] = name_len as u8;
     record[33] = 0;
     record[34..34 + name_len].copy_from_slice(name.as_bytes());
-
+    
     Ok(record)
 }
 
@@ -293,10 +278,6 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     // Calculate LBA for FAT32 image, accounting for padding and records
     let lba_fat32 = LBA_ROOT_DIR + 1;
-    println!(
-        "create_iso_from_img: Calculated FAT32 image LBA: {}.",
-        lba_fat32
-    );
 
     // --- 1. Write Volume Descriptors. PVD total sectors will be patched later. ---
     write_primary_volume_descriptor(&mut iso, 0, LBA_ROOT_DIR)?;
@@ -309,42 +290,30 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
-    println!(
-        "create_iso_from_img: Writing root directory records at LBA {}.",
-        LBA_ROOT_DIR
-    );
-
+    
     let mut root_dir_records = Vec::new();
 
     // Self-record
-    root_dir_records.write_all(&write_special_dir_record(0x00, LBA_ROOT_DIR)?)?;
+    root_dir_records.write_all(&write_dir_record(".", LBA_ROOT_DIR, true)?)?;
     // Parent-record
-    root_dir_records.write_all(&write_special_dir_record(0x01, LBA_ROOT_DIR)?)?;
-    // Boot-NoEmul.img file record (FAT32 image)
-    root_dir_records.write_all(&write_file_record(
-        "BOOT-NOEMUL.IMG",
-        lba_fat32,
-        fat32_size,
-    )?)?;
+    root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, false)?)?;
+    // Boot-NoEmul.img file record
+    root_dir_records.write_all(&write_file_record("Boot-NoEmul.img", lba_fat32, fat32_size)?)?;
 
     // Pad the root directory sector to ensure it takes up one full sector
-    let padding = ISO_SECTOR_SIZE - root_dir_records.len();
+    let _padding = ISO_SECTOR_SIZE - root_dir_records.len();
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
 
     iso.write_all(&root_dir_records)?;
 
     // --- 4. Write the FAT32 image content to the ISO. ---
     pad_to_lba(&mut iso, lba_fat32)?;
-    println!(
-        "create_iso_from_img: Writing FAT32 image content ({} bytes) at LBA {}.",
-        fat32_size, lba_fat32
-    );
     iso.write_all(&fat32_content)?;
-
+    
     // --- 5. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
-    let total_sectors = (final_pos as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+    let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     update_total_sectors(&mut iso, total_sectors)?;
     iso.set_len(total_sectors as u64 * ISO_SECTOR_SIZE as u64)?;

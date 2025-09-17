@@ -1,8 +1,8 @@
 // isobemak/src/lib.rs
 use std::{io, path::Path};
-
-pub use crate::fat32::create_fat32_image;
-pub use crate::iso::create_iso_from_img;
+use crate::iso::create_iso_from_img;
+use crate::fat32::create_fat32_image;
+use tempfile::NamedTempFile;
 
 mod fat32;
 mod iso;
@@ -14,19 +14,23 @@ pub fn create_disk_and_iso(
     bellows_path: &Path,
     kernel_path: &Path,
 ) -> io::Result<()> {
-    let fat32_img_path = Path::new("./fat32.img");
-
-    // 1. Create a pure FAT32 filesystem image.
     println!("create_disk_and_iso: Starting process...");
-    create_fat32_image(fat32_img_path, bellows_path, kernel_path)?;
 
-    // 2. Embed the pure FAT32 image into the ISO as the El Torito boot image.
-    create_iso_from_img(iso_path, fat32_img_path)?;
+    // 1. Create a temporary FAT32 image file.
+    let mut fat32_img_file = NamedTempFile::new()?;
+    let fat32_img_path = fat32_img_file.path().to_owned();
 
-    // Clean up the temporary FAT32 image
-    println!("create_disk_and_iso: Cleaning up temporary FAT32 image.");
-    std::fs::remove_file(fat32_img_path)?;
+    // 2. Create and populate the FAT32 filesystem.
+    create_fat32_image(
+        fat32_img_file.as_file_mut(),
+        bellows_path,
+        kernel_path,
+    )?;
 
+    // 3. Create the ISO, embedding the temporary FAT32 filesystem.
+    create_iso_from_img(iso_path, &fat32_img_path)?;
+
+    // 4. The temporary file will be automatically deleted when it goes out of scope.
     println!("create_disk_and_iso: Process complete. ISO created successfully.");
     Ok(())
 }
