@@ -72,9 +72,10 @@ fn write_directory_record(
     let id_len = file_id.len() as u8;
     let rec_len = 33 + id_len + (id_len + 1) % 2;
 
-    if *offset + rec_len as usize > ISO_SECTOR_SIZE {
-        return;
-    }
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::Other,
+            "sector overflow when writing directory record",
+        ));
 
     let record_slice = &mut sector[*offset..];
     record_slice[0] = rec_len;
