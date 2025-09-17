@@ -16,6 +16,8 @@ const ISO_VERSION: u8 = 1;
 const PVD_VOLUME_ID_OFFSET: usize = 40;
 const PVD_TOTAL_SECTORS_OFFSET: usize = 80;
 const PVD_ROOT_DIR_RECORD_OFFSET: usize = 156;
+
+// New constants for PVD fields
 const PVD_VOL_SET_SIZE_OFFSET: usize = 120;
 const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
 const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
@@ -27,6 +29,8 @@ const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
 const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
 const BOOT_CATALOG_NO_EMULATION: u8 = 0x00;
 const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
+
+// New constants for Boot Catalog
 const ID_FIELD_OFFSET: usize = 4;
 const ID_FIELD_LEN: usize = 24;
 const ID_STR: &[u8] = b"ISOBEMAKI EFI BOOT";
@@ -163,9 +167,8 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
-    // Boot image sector count (512-byte sectors)
-    let sector_count_512 =
-        ((boot_img_size + (FAT32_SECTOR_SIZE as u32) - 1) / (FAT32_SECTOR_SIZE as u32));
+    // Boot image sector count (512-byte sectors, truncated to 0xFFFF max)
+    let sector_count_512 = ((boot_img_size + 511) / 512) as u32;
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
