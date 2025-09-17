@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE};
+use crate::utils::ISO_SECTOR_SIZE;
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -343,7 +343,7 @@ fn write_boot_catalog(iso: &mut File, bootx64_lba: u32, bootx64_size: u32) -> io
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
     // Calculate the number of 512-byte sectors for BOOTX64.EFI
-    let sector_count_512 = (bootx64_size as u64 + 511) / 512;
+    let sector_count_512 = (bootx64_size as u64).div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -420,12 +420,22 @@ pub fn create_iso_from_img(iso_path: &Path, efi_path: &Path) -> io::Result<()> {
     iso.write_all(&efi_content)?;
 
     // --- 5. Rewrite the boot catalog and boot directory with correct information. ---
-    iso.seek(io::SeekFrom::Start(LBA_BOOT_CATALOG as u64 * ISO_SECTOR_SIZE as u64))?;
+    iso.seek(io::SeekFrom::Start(
+        LBA_BOOT_CATALOG as u64 * ISO_SECTOR_SIZE as u64,
+    ))?;
     write_boot_catalog(&mut iso, lba_bootx64, bootx64_size)?;
 
-    iso.seek(io::SeekFrom::Start(LBA_BOOT_DIR as u64 * ISO_SECTOR_SIZE as u64))?;
-    write_boot_directory_sector(&mut iso, LBA_BOOT_DIR, LBA_EFI_DIR, lba_bootx64, bootx64_size)?;
-    
+    iso.seek(io::SeekFrom::Start(
+        LBA_BOOT_DIR as u64 * ISO_SECTOR_SIZE as u64,
+    ))?;
+    write_boot_directory_sector(
+        &mut iso,
+        LBA_BOOT_DIR,
+        LBA_EFI_DIR,
+        lba_bootx64,
+        bootx64_size,
+    )?;
+
     // --- 6. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
