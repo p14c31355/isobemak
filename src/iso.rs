@@ -62,8 +62,14 @@ fn write_directory_record(
     file_id: &[u8],
     flags: u8,
 ) {
-    let record_len = (DIR_RECORD_LEN as usize) + file_id.len();
-    sector[offset] = record_len as u8;
+    let record_len = DIR_RECORD_LEN as usize + file_id.len();
+    let padded_len = if record_len % 2 == 0 {
+        record_len
+    } else {
+        record_len + 1
+    };
+
+    sector[offset] = padded_len as u8;
     sector[offset + DIR_RECORD_LBA_OFFSET..offset + DIR_RECORD_LBA_OFFSET + 4]
         .copy_from_slice(&lba.to_le_bytes());
     sector[offset + DIR_RECORD_LBA_OFFSET + 4..offset + DIR_RECORD_LBA_OFFSET + 8]
@@ -230,6 +236,24 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     Ok(())
 }
 
+fn iso_path_name(name: &str) -> Vec<u8> {
+    let mut parts = name.split('.');
+    let mut base = parts.next().unwrap_or("").to_uppercase();
+    let ext = parts.next().unwrap_or("").to_uppercase();
+
+    // ISO9660 filename restrictions
+    base = base.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
+    let mut filename = base.split('_').next().unwrap_or("").to_string();
+    if !ext.is_empty() {
+        filename.push('.');
+        filename.push_str(&ext);
+    }
+
+    // Add version number
+    filename.push_str(";1");
+    filename.into_bytes()
+}
+
 /// Recursively copies a directory's contents from the FAT32 image to the ISO file,
 /// creating directory records in the process.
 fn copy_fat_dir_to_iso(
@@ -250,7 +274,7 @@ fn copy_fat_dir_to_iso(
         b"\x00",
         2,
     );
-    offset += (DIR_RECORD_LEN as usize) + 1;
+    offset += 1 + 33; // Record length for '.' is 34 bytes
 
     // .. (parent) directory record
     write_directory_record(
@@ -261,14 +285,20 @@ fn copy_fat_dir_to_iso(
         b"\x01",
         2,
     );
-    offset += (DIR_RECORD_LEN as usize) + 1;
+    offset += 1 + 33; // Record length for '..' is 34 bytes
 
     let entries = fat32_dir.iter().collect::<io::Result<Vec<_>>>()?;
     for entry in entries {
         let name = entry.file_name();
-        let name_iso = name.to_uppercase().replace('.', "_").into_bytes();
+        let name_iso = iso_path_name(&name);
+
         let entry_lba: u32;
         let entry_size: u32;
+
+        // Ensure that the file is not the parent directory
+        if name == "." || name == ".." {
+            continue;
+        }
 
         if entry.is_dir() {
             let subdir_lba = copy_fat_dir_to_iso(iso, &entry.to_dir(), dir_lba)?;
@@ -289,7 +319,14 @@ fn copy_fat_dir_to_iso(
             entry_size = file_size as u32;
             write_directory_record(&mut dir_sector, offset, entry_lba, entry_size, &name_iso, 0);
         }
-        offset += (DIR_RECORD_LEN as usize) + name_iso.len();
+
+        let record_len = DIR_RECORD_LEN as usize + name_iso.len();
+        let padded_len = if record_len % 2 == 0 {
+            record_len
+        } else {
+            record_len + 1
+        };
+        offset += padded_len;
     }
 
     iso.seek(SeekFrom::Start(dir_lba as u64 * ISO_SECTOR_SIZE as u64))?;
@@ -319,9 +356,12 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     {
         let fs = fatfs::FileSystem::new(&mut img_file, FsOptions::new())?;
         let root = fs.root_dir();
-        root_dir_lba = copy_fat_dir_to_iso(&mut iso, &root, 0)?;
+        // The root directory will start at LBA 20
+        pad_to_lba(&mut iso, 20)?;
+        root_dir_lba = copy_fat_dir_to_iso(&mut iso, &root, 20)?;
     }
 
+    // Now that we know the root dir LBA, we can write the PVD
     write_primary_volume_descriptor(&mut iso, 0, root_dir_lba)?;
     const LBA_BOOT_CATALOG: u32 = 19;
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
