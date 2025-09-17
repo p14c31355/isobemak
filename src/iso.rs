@@ -1,6 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE};
+use crate::utils::{ISO_SECTOR_SIZE};
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -205,33 +205,12 @@ fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
     Ok(content)
 }
 
-/// Creates a directory record for an ISO 9660 filesystem.
-fn write_dir_record(
-    name: &str,
-    lba: u32,
-    size: u32,
-) -> io::Result<Vec<u8>> {
-    let name_len = name.len();
-    let record_len = 34 + name_len;
-    let mut record = vec![0u8; record_len];
-    record[0] = record_len as u8;
-    record[2..6].copy_from_slice(&lba.to_le_bytes());
-    record[6..10].copy_from_slice(&lba.to_be_bytes());
-    record[10..14].copy_from_slice(&size.to_le_bytes());
-    record[14..18].copy_from_slice(&size.to_be_bytes());
-    record[25] = 2; // Directory flag
-    record[32] = name_len as u8;
-    record[33] = 0;
-    record[34..34 + name_len].copy_from_slice(name.as_bytes());
-    Ok(record)
-}
-
 /// Creates a special directory record for '.' and '..'
 fn write_special_dir_record(
     name_byte: u8,
     lba: u32,
 ) -> io::Result<Vec<u8>> {
-    let record_len = 34 + 1;
+    let record_len = 34; // Correct record length for special directories
     let mut record = vec![0u8; record_len];
     record[0] = record_len as u8;
     record[2..6].copy_from_slice(&lba.to_le_bytes());
@@ -239,14 +218,8 @@ fn write_special_dir_record(
     record[10..14].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
     record[14..18].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_be_bytes());
     record[25] = 2; // Directory flag
-    if name_byte == 0x00 { // Self
-        record[25] |= 0x02; // Set directory flag
-    } else { // Parent
-        record[25] |= 0x02; // Set directory flag
-    }
     record[32] = 1; // Name length
-    record[33] = 0;
-    record[34] = name_byte;
+    record[33] = name_byte;
     Ok(record)
 }
 
@@ -312,8 +285,8 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     root_dir_records.write_all(&write_special_dir_record(0x00, LBA_ROOT_DIR)?)?;
     // Parent-record
     root_dir_records.write_all(&write_special_dir_record(0x01, LBA_ROOT_DIR)?)?;
-    // Boot-NoEmul.img file record
-    root_dir_records.write_all(&write_file_record("Boot-NoEmul.img", lba_fat32, fat32_size)?)?;
+    // Boot-NoEmul.img file record (FAT32 image)
+    root_dir_records.write_all(&write_file_record("BOOT-NOEMUL.IMG", lba_fat32, fat32_size)?)?;
 
     // Pad the root directory sector to ensure it takes up one full sector
     let padding = ISO_SECTOR_SIZE - root_dir_records.len();
