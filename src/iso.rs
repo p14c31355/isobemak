@@ -168,7 +168,7 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
     // Boot image sector count (512-byte sectors)
-    let sector_count_512 = ((boot_img_size + 511) / 512) as u32;
+    let sector_count_512 = boot_img_size.div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
@@ -206,11 +206,7 @@ fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
 }
 
 /// Creates a directory record for an ISO 9660 filesystem.
-fn write_dir_record(
-    name: &str,
-    lba: u32,
-    is_self: bool,
-) -> io::Result<Vec<u8>> {
+fn write_dir_record(name: &str, lba: u32, is_self: bool) -> io::Result<Vec<u8>> {
     let name_len = if is_self { 1 } else { name.len() };
     let record_len = 34 + name_len;
     let mut record = vec![0u8; record_len];
@@ -221,7 +217,7 @@ fn write_dir_record(
     record[10..14].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
     record[14..18].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_be_bytes());
     record[25] = 2; // Directory flag
-    
+
     // Set parent/self flags if applicable
     if name == "." || name == ".." {
         record[32] = 1;
@@ -236,11 +232,7 @@ fn write_dir_record(
 }
 
 /// Creates a file record for an ISO 9660 filesystem.
-fn write_file_record(
-    name: &str,
-    lba: u32,
-    size: u32,
-) -> io::Result<Vec<u8>> {
+fn write_file_record(name: &str, lba: u32, size: u32) -> io::Result<Vec<u8>> {
     let name_len = name.len();
     let record_len = 34 + name_len;
     let mut record = vec![0u8; record_len];
@@ -253,7 +245,7 @@ fn write_file_record(
     record[32] = name_len as u8;
     record[33] = 0;
     record[34..34 + name_len].copy_from_slice(name.as_bytes());
-    
+
     Ok(record)
 }
 
@@ -290,7 +282,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
-    
+
     let mut root_dir_records = Vec::new();
 
     // Self-record
@@ -298,7 +290,11 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     // Parent-record
     root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, false)?)?;
     // Boot-NoEmul.img file record
-    root_dir_records.write_all(&write_file_record("Boot-NoEmul.img", lba_fat32, fat32_size)?)?;
+    root_dir_records.write_all(&write_file_record(
+        "Boot-NoEmul.img",
+        lba_fat32,
+        fat32_size,
+    )?)?;
 
     // Pad the root directory sector to ensure it takes up one full sector
     let _padding = ISO_SECTOR_SIZE - root_dir_records.len();
@@ -309,7 +305,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     // --- 4. Write the FAT32 image content to the ISO. ---
     pad_to_lba(&mut iso, lba_fat32)?;
     iso.write_all(&fat32_content)?;
-    
+
     // --- 5. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
