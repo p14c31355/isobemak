@@ -373,7 +373,7 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
 }
 
 /// A dummy function to read a file from the FAT32 image.
-/// NOTE: This is a placeholder and assumes a fixed location.
+/// This is a placeholder and assumes a fixed location.
 /// In a real scenario, you would need to parse the FAT32 filesystem.
 fn read_efi_bootx64_from_fat32_image(img_file: &mut File) -> io::Result<Vec<u8>> {
     // In a real-world scenario, you would:
@@ -406,35 +406,35 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     const LBA_ROOT_DIR: u32 = 20;
     const LBA_EFI_DIR: u32 = 21;
     const LBA_BOOT_DIR: u32 = 22;
-    const LBA_FAT_IMAGE: u32 = 23;
 
-    // --- 1. Extract BOOTX64.EFI content from the FAT32 image. ---
-    let efi_content = read_efi_bootx64_from_fat32_image(&mut img_file)?;
-    let bootx64_size = efi_content.len() as u32;
-
-    // --- 2. Write Volume Descriptors. ---
+    // --- 1. Write Volume Descriptors. PVD total sectors and boot catalog LBA will be patched later. ---
     write_primary_volume_descriptor(&mut iso, 0, LBA_ROOT_DIR)?;
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
-    // --- 3. Write ISO9660 directory sectors (temporary) as placeholders. ---
+    // --- 2. Write placeholder for the boot catalog. LBA and size will be updated. ---
+    pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
+    iso.write_all(&[0u8; ISO_SECTOR_SIZE])?;
+
+    // --- 3. Write ISO9660 directory sectors. LBA of BOOTX64.EFI will be patched later. ---
     write_root_directory_sector(&mut iso, LBA_ROOT_DIR, LBA_EFI_DIR)?;
     write_efi_directory_sector(&mut iso, LBA_EFI_DIR, LBA_ROOT_DIR, LBA_BOOT_DIR)?;
-    
-    // Write a placeholder for the boot directory, we will rewrite it later.
     pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
     iso.write_all(&[0u8; ISO_SECTOR_SIZE])?;
 
-    // --- 4. Write the actual BOOTX64.EFI file content to the ISO9660 tree. ---
+    // --- 4. Write the FAT32 image itself as a regular file in the ISO9660 tree. ---
+    let lba_fat_image = iso.stream_position()?.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    pad_to_lba(&mut iso, lba_fat_image)?;
+    img_file.seek(SeekFrom::Start(0))?;
+    io::copy(&mut img_file, &mut iso)?;
+    let fat_image_size = img_file.metadata()?.len() as u32;
+
+    // --- 5. Extract and Write actual BOOTX64.EFI file content to a new LBA. ---
+    let efi_content = read_efi_bootx64_from_fat32_image(&mut img_file)?;
+    let bootx64_size = efi_content.len() as u32;
     let lba_bootx64 = iso.stream_position()?.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
     pad_to_lba(&mut iso, lba_bootx64)?;
     iso.write_all(&efi_content)?;
-
-    // --- 5. Write the FAT32 image itself as a regular file in the ISO9660 tree. ---
-    // Note: It's a file, not a boot image in this context.
-    pad_to_lba(&mut iso, LBA_FAT_IMAGE)?;
-    img_file.seek(SeekFrom::Start(0))?;
-    io::copy(&mut img_file, &mut iso)?;
 
     // --- 6. Rewrite the boot catalog and boot directory with correct information. ---
     iso.seek(io::SeekFrom::Start(LBA_BOOT_CATALOG as u64 * ISO_SECTOR_SIZE as u64))?;
