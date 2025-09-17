@@ -17,6 +17,6 @@ pub fn create_disk_and_iso(
     kernel_path: &Path,
 ) -> io::Result<()> {
     create_fat32_image(fat32_img_path, bellows_path, kernel_path)?;
-    create_iso_from_img(&iso_path, &efi_path)?;
+    create_iso_from_img(iso_path, efi_path)?;
     Ok(())
 }
