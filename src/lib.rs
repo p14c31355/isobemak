@@ -13,11 +13,16 @@ pub fn create_disk_and_iso(iso_path: &Path, bellows_path: &Path, kernel_path: &P
     let fat32_img_path = Path::new("./fat32.img");
 
     // 1. Create a pure FAT32 filesystem image.
-    println!("Creating pure FAT32 filesystem image...");
+    println!("create_disk_and_iso: Starting process...");
     create_fat32_image(fat32_img_path, bellows_path, kernel_path)?;
 
     // 2. Embed the pure FAT32 image into the ISO as the El Torito boot image.
-    println!("Creating bootable ISO from the pure FAT32 image...");
     create_iso_from_img(iso_path, fat32_img_path)?;
+    
+    // Clean up the temporary FAT32 image
+    println!("create_disk_and_iso: Cleaning up temporary FAT32 image.");
+    std::fs::remove_file(fat32_img_path)?;
+    
+    println!("create_disk_and_iso: Process complete. ISO created successfully.");
     Ok(())
 }
