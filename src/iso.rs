@@ -68,16 +68,19 @@ fn write_directory_record(
     data_len: u32,
     flags: u8,
     file_id: &[u8],
-) {
+) -> io::Result<()> {
     let id_len = file_id.len() as u8;
     let rec_len = 33 + id_len + (id_len + 1) % 2;
 
+    if *offset + rec_len as usize > sector.len() {
         return Err(std::io::Error::new(
             std::io::ErrorKind::Other,
             "sector overflow when writing directory record",
         ));
+    }
 
-    let record_slice = &mut sector[*offset..];
+    let record_slice = &mut sector[*offset..*offset + rec_len as usize];
+    record_slice.fill(0);
     record_slice[0] = rec_len;
 
     record_slice[DIR_RECORD_LBA_OFFSET..DIR_RECORD_LBA_OFFSET + 4]
@@ -102,6 +105,7 @@ fn write_directory_record(
         .copy_from_slice(file_id);
 
     *offset += rec_len as usize;
+    Ok(())
 }
 
 fn write_root_directory_sector(
@@ -120,7 +124,7 @@ fn write_root_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x00],
-    );
+    )?;
 
     write_directory_record(
         &mut root_dir_sector,
@@ -129,7 +133,7 @@ fn write_root_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x01],
-    );
+    )?;
 
     write_directory_record(
         &mut root_dir_sector,
@@ -138,7 +142,7 @@ fn write_root_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         b"EFI",
-    );
+    )?;
 
     iso.write_all(&root_dir_sector)
 }
@@ -160,7 +164,7 @@ fn write_efi_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x00],
-    );
+    )?;
 
     write_directory_record(
         &mut efi_dir_sector,
@@ -169,7 +173,7 @@ fn write_efi_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x01],
-    );
+    )?;
 
     write_directory_record(
         &mut efi_dir_sector,
@@ -178,7 +182,7 @@ fn write_efi_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         b"BOOT",
-    );
+    )?;
 
     iso.write_all(&efi_dir_sector)
 }
@@ -201,7 +205,7 @@ fn write_boot_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x00],
-    );
+    )?;
 
     write_directory_record(
         &mut boot_dir_sector,
@@ -210,7 +214,7 @@ fn write_boot_directory_sector(
         ISO_SECTOR_SIZE as u32,
         2,
         &[0x01],
-    );
+    )?;
 
     write_directory_record(
         &mut boot_dir_sector,
@@ -219,7 +223,7 @@ fn write_boot_directory_sector(
         bootx64_size,
         0,
         b"BOOTX64.EFI;1",
-    );
+    )?;
 
     iso.write_all(&boot_dir_sector)
 }
