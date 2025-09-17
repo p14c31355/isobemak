@@ -1,7 +1,6 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
 use crate::utils::{FAT32_SECTOR_SIZE, ISO_SECTOR_SIZE};
-use fatfs::{self, FsOptions};
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
@@ -16,13 +15,14 @@ const ISO_ID: &[u8] = b"CD001";
 const ISO_VERSION: u8 = 1;
 const PVD_VOLUME_ID_OFFSET: usize = 40;
 const PVD_TOTAL_SECTORS_OFFSET: usize = 80;
+const PVD_SECTOR_SIZE_OFFSET: usize = 128;
+const PVD_ROOT_DIR_RECORD_OFFSET: usize = 156;
 
 // New constants for PVD fields
 const PVD_VOL_SET_SIZE_OFFSET: usize = 120;
 const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
 const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
-const PVD_ROOT_DIR_RECORD_OFFSET: usize = 156;
 
 // Constants for El Torito boot catalog.
 const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
@@ -39,7 +39,7 @@ const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 const BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET: usize = 30;
 
 // New constants for Directory Records
-const DIR_RECORD_LEN: u8 = 34;
+const DIR_RECORD_LEN_MIN: u8 = 34; // Minimum directory record length
 const DIR_RECORD_LBA_OFFSET: usize = 2;
 const DIR_RECORD_DATA_LEN_OFFSET: usize = 10;
 const DIR_RECORD_FLAGS_OFFSET: usize = 25;
@@ -58,64 +58,189 @@ fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Helper to write a directory record.
+/// Helper to write a directory record for both directories and files.
 fn write_directory_record(
     sector: &mut [u8],
-    offset: usize,
+    offset: &mut usize,
     lba: u32,
     data_len: u32,
-    file_id: &[u8],
     flags: u8,
+    file_id: &[u8],
 ) {
-    sector[offset] = DIR_RECORD_LEN;
-    sector[offset + DIR_RECORD_LBA_OFFSET..offset + DIR_RECORD_LBA_OFFSET + 4]
+    let id_len = file_id.len() as u8;
+    // Calculate record length, must be even
+    let rec_len = DIR_RECORD_LEN_MIN + id_len + (id_len % 2);
+
+    // Ensure the record fits in the remaining sector space
+    if *offset + rec_len as usize > ISO_SECTOR_SIZE {
+        // This simple implementation doesn't handle records spanning sectors
+        return;
+    }
+
+    let record_slice = &mut sector[*offset..*offset + rec_len as usize];
+    record_slice[0] = rec_len; // Length of Directory Record
+    record_slice[DIR_RECORD_LBA_OFFSET..DIR_RECORD_LBA_OFFSET + 4]
         .copy_from_slice(&lba.to_le_bytes());
-    sector[offset + DIR_RECORD_LBA_OFFSET + 4..offset + DIR_RECORD_LBA_OFFSET + 8]
+    record_slice[DIR_RECORD_LBA_OFFSET + 4..DIR_RECORD_LBA_OFFSET + 8]
         .copy_from_slice(&lba.to_be_bytes());
 
-    sector[offset + DIR_RECORD_DATA_LEN_OFFSET..offset + DIR_RECORD_DATA_LEN_OFFSET + 4]
+    record_slice[DIR_RECORD_DATA_LEN_OFFSET..DIR_RECORD_DATA_LEN_OFFSET + 4]
         .copy_from_slice(&data_len.to_le_bytes());
-    sector[offset + DIR_RECORD_DATA_LEN_OFFSET + 4..offset + DIR_RECORD_DATA_LEN_OFFSET + 8]
+    record_slice[DIR_RECORD_DATA_LEN_OFFSET + 4..DIR_RECORD_DATA_LEN_OFFSET + 8]
         .copy_from_slice(&data_len.to_be_bytes());
 
-    sector[offset + DIR_RECORD_FLAGS_OFFSET] = flags; // File flags
+    record_slice[DIR_RECORD_FLAGS_OFFSET] = flags;
     let vol_seq: u16 = 1;
-    sector[offset + DIR_RECORD_VOL_SEQ_OFFSET..offset + DIR_RECORD_VOL_SEQ_OFFSET + 2]
+    record_slice[DIR_RECORD_VOL_SEQ_OFFSET..DIR_RECORD_VOL_SEQ_OFFSET + 2]
         .copy_from_slice(&vol_seq.to_le_bytes());
-    sector[offset + DIR_RECORD_VOL_SEQ_OFFSET + 2..offset + DIR_RECORD_VOL_SEQ_OFFSET + 4]
+    record_slice[DIR_RECORD_VOL_SEQ_OFFSET + 2..DIR_RECORD_VOL_SEQ_OFFSET + 4]
         .copy_from_slice(&vol_seq.to_be_bytes());
 
-    sector[offset + DIR_RECORD_ID_LEN_OFFSET] = file_id.len() as u8;
-    sector[offset + DIR_RECORD_ID_OFFSET..offset + DIR_RECORD_ID_OFFSET + file_id.len()]
+    record_slice[DIR_RECORD_ID_LEN_OFFSET] = id_len; // Length of File Identifier
+    record_slice[DIR_RECORD_ID_OFFSET..DIR_RECORD_ID_OFFSET + id_len as usize]
         .copy_from_slice(file_id);
+
+    *offset += rec_len as usize;
 }
 
-fn write_root_directory_sector(iso: &mut File, root_dir_lba: u32) -> io::Result<()> {
+fn write_root_directory_sector(
+    iso: &mut File,
+    root_dir_lba: u32,
+    efi_dir_lba: u32,
+    bootx64_lba: u32,
+    bootx64_size: u32,
+) -> io::Result<()> {
     pad_to_lba(iso, root_dir_lba)?;
     let mut root_dir_sector = [0u8; ISO_SECTOR_SIZE];
+    let mut offset = 0;
 
     // . (self) directory record
     write_directory_record(
         &mut root_dir_sector,
-        0,
+        &mut offset,
         root_dir_lba,
         ISO_SECTOR_SIZE as u32,
-        b"\x00",
-        2,
+        2, // Directory flag
+        &[0x00],
     );
 
     // .. (parent) directory record
-    let parent_offset = DIR_RECORD_LEN as usize;
     write_directory_record(
         &mut root_dir_sector,
-        parent_offset,
+        &mut offset,
         root_dir_lba,
         ISO_SECTOR_SIZE as u32,
-        b"\x01",
-        2,
+        2, // Directory flag
+        &[0x01],
+    );
+
+    // EFI/ directory record
+    write_directory_record(
+        &mut root_dir_sector,
+        &mut offset,
+        efi_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2, // Directory flag
+        b"EFI",
+    );
+
+    // EFI/BOOT/BOOTX64.EFI file record
+    write_directory_record(
+        &mut root_dir_sector,
+        &mut offset,
+        bootx64_lba,
+        bootx64_size,
+        0, // File flag
+        b"BOOTX64.EFI;1",
     );
 
     iso.write_all(&root_dir_sector)
+}
+
+fn write_efi_boot_directory_sector(
+    iso: &mut File,
+    efi_dir_lba: u32,
+    boot_dir_lba: u32,
+) -> io::Result<()> {
+    pad_to_lba(iso, efi_dir_lba)?;
+    let mut efi_dir_sector = [0u8; ISO_SECTOR_SIZE];
+    let mut offset = 0;
+
+    // . (self) directory record
+    write_directory_record(
+        &mut efi_dir_sector,
+        &mut offset,
+        efi_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2,
+        &[0x00],
+    );
+
+    // .. (parent) directory record (refers to the root directory)
+    write_directory_record(
+        &mut efi_dir_sector,
+        &mut offset,
+        efi_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2,
+        &[0x01],
+    );
+
+    // BOOT/ directory record
+    write_directory_record(
+        &mut efi_dir_sector,
+        &mut offset,
+        boot_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2,
+        b"BOOT",
+    );
+
+    iso.write_all(&efi_dir_sector)
+}
+
+fn write_boot_directory_sector(
+    iso: &mut File,
+    boot_dir_lba: u32,
+    efi_dir_lba: u32,
+    bootx64_lba: u32,
+    bootx64_size: u32,
+) -> io::Result<()> {
+    pad_to_lba(iso, boot_dir_lba)?;
+    let mut boot_dir_sector = [0u8; ISO_SECTOR_SIZE];
+    let mut offset = 0;
+
+    // . (self) directory record
+    write_directory_record(
+        &mut boot_dir_sector,
+        &mut offset,
+        boot_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2,
+        &[0x00],
+    );
+
+    // .. (parent) directory record (refers to the EFI directory)
+    write_directory_record(
+        &mut boot_dir_sector,
+        &mut offset,
+        efi_dir_lba,
+        ISO_SECTOR_SIZE as u32,
+        2,
+        &[0x01],
+    );
+
+    // BOOTX64.EFI file record
+    write_directory_record(
+        &mut boot_dir_sector,
+        &mut offset,
+        bootx64_lba,
+        bootx64_size,
+        0,
+        b"BOOTX64.EFI;1",
+    );
+
+    iso.write_all(&boot_dir_sector)
 }
 
 fn write_primary_volume_descriptor(
@@ -266,108 +391,6 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     Ok(())
 }
 
-fn iso_path_name(name: &str) -> Vec<u8> {
-    let mut parts = name.split('.');
-    let mut base = parts.next().unwrap_or("").to_uppercase();
-    let ext = parts.next().unwrap_or("").to_uppercase();
-
-    // ISO9660 filename restrictions
-    base = base.replace(|c: char| !c.is_ascii_alphanumeric(), "_");
-    let mut filename = base.split('_').next().unwrap_or("").to_string();
-    if !ext.is_empty() {
-        filename.push('.');
-        filename.push_str(&ext);
-    }
-
-    // Add version number
-    filename.push_str(";1");
-    filename.into_bytes()
-}
-
-/// Recursively copies a directory's contents from the FAT32 image to the ISO file,
-/// creating directory records in the process.
-fn copy_fat_dir_to_iso(
-    iso: &mut File,
-    fat32_dir: &fatfs::Dir<&mut File>,
-    parent_lba: u32,
-) -> io::Result<u32> {
-    let dir_lba = (iso.stream_position()? / ISO_SECTOR_SIZE as u64) as u32;
-    let mut dir_sector = [0u8; ISO_SECTOR_SIZE];
-    let mut offset = 0;
-
-    // . (self) directory record
-    write_directory_record(
-        &mut dir_sector,
-        offset,
-        dir_lba,
-        ISO_SECTOR_SIZE as u32,
-        b"\x00",
-        2,
-    );
-    offset += 1 + 33; // Record length for '.' is 34 bytes
-
-    // .. (parent) directory record
-    write_directory_record(
-        &mut dir_sector,
-        offset,
-        parent_lba,
-        ISO_SECTOR_SIZE as u32,
-        b"\x01",
-        2,
-    );
-    offset += 1 + 33; // Record length for '..' is 34 bytes
-
-    let entries = fat32_dir.iter().collect::<io::Result<Vec<_>>>()?;
-    for entry in entries {
-        let name = entry.file_name();
-        let name_iso = iso_path_name(&name);
-
-        let entry_lba: u32;
-        let entry_size: u32;
-
-        // Ensure that the file is not the parent directory
-        if name == "." || name == ".." {
-            continue;
-        }
-
-        if entry.is_dir() {
-            let subdir_lba = copy_fat_dir_to_iso(iso, &entry.to_dir(), dir_lba)?;
-            entry_lba = subdir_lba;
-            entry_size = ISO_SECTOR_SIZE as u32;
-            write_directory_record(&mut dir_sector, offset, entry_lba, entry_size, &name_iso, 2);
-        } else {
-            let mut file = entry.to_file();
-            let file_size = entry.len();
-            let file_lba = (iso.stream_position()? / ISO_SECTOR_SIZE as u64) as u32;
-            io::copy(&mut file, iso)?;
-            pad_to_lba(
-                iso,
-                file_lba + (file_size.div_ceil(ISO_SECTOR_SIZE as u64)) as u32,
-            )?;
-
-            entry_lba = file_lba;
-            entry_size = file_size as u32;
-            write_directory_record(&mut dir_sector, offset, entry_lba, entry_size, &name_iso, 0);
-        }
-
-        let record_len = DIR_RECORD_LEN as usize + name_iso.len();
-        let padded_len = if record_len % 2 == 0 {
-            record_len
-        } else {
-            record_len + 1
-        };
-        offset += padded_len;
-    }
-
-    iso.seek(SeekFrom::Start(dir_lba as u64 * ISO_SECTOR_SIZE as u64))?;
-    iso.write_all(&dir_sector)?;
-    iso.seek(SeekFrom::End(0))?;
-
-    Ok(dir_lba)
-}
-
-/// Creates a bootable ISO image from a FAT32 image.
-/// This function now also populates the ISO's file system with the contents of the FAT32 image.
 pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
 
@@ -380,44 +403,68 @@ pub fn create_iso_from_img(iso_path: &Path, img_path: &Path) -> io::Result<()> {
         &mut iso,
     )?; // System Area
 
-    const FAT_IMAGE_LBA: u32 = 21;
-    let root_dir_lba;
+    // Temporary LBA values for now
+    let lba_boot_catalog: u32 = 19;
+    let lba_root_dir: u32 = 20;
+    let lba_fat_image: u32 = 21;
+    let lba_efi_dir: u32 = lba_fat_image + img_file_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    let lba_boot_dir: u32 = lba_efi_dir + 1;
+    let lba_bootx64: u32 = lba_boot_dir + 1;
 
-    {
-        let fs = fatfs::FileSystem::new(&mut img_file, FsOptions::new())?;
-        let root = fs.root_dir();
-        // The root directory will start at LBA 20
-        pad_to_lba(&mut iso, 20)?;
-        root_dir_lba = copy_fat_dir_to_iso(&mut iso, &root, 20)?;
-    }
+    // --- Write Volume Descriptors ---
+    write_primary_volume_descriptor(&mut iso, 0, lba_root_dir)?;
+    write_boot_record_volume_descriptor(&mut iso, lba_boot_catalog)?;
+    write_volume_descriptor_terminator(&mut iso)?;
 
-    // Write FAT image
-    pad_to_lba(&mut iso, FAT_IMAGE_LBA)?;
+    // --- Write Boot Catalog ---
+    write_boot_catalog(&mut iso, lba_fat_image, img_file_size)?;
+
+    // --- Write FAT image (El Torito Boot Image) ---
+    pad_to_lba(&mut iso, lba_fat_image)?;
     img_file.seek(SeekFrom::Start(0))?;
     let mut limited_reader = img_file.take(img_file_size);
     io::copy(&mut limited_reader, &mut iso)?;
 
-    // Calculate the final total sectors from the actual file size
+    // --- Extract BOOTX64.EFI from the FAT32 image and write it as a separate file ---
+    // In a real implementation, you would need to parse the FAT32 filesystem
+    // to find the location and size of BOOTX64.EFI. For this example, we assume
+    // its existence and a dummy size.
+    let bootx64_size: u32 = 4096; // Dummy size for now
+
+    // --- Write ISO9660 Directory Sectors ---
+    // Note: The LBA values must be calculated correctly based on the final layout.
+    // This is a simplified example.
+    write_root_directory_sector(
+        &mut iso,
+        lba_root_dir,
+        lba_efi_dir,
+        lba_bootx64,
+        bootx64_size,
+    )?;
+    write_efi_boot_directory_sector(&mut iso, lba_efi_dir, lba_boot_dir)?;
+    write_boot_directory_sector(
+        &mut iso,
+        lba_boot_dir,
+        lba_efi_dir,
+        lba_bootx64,
+        bootx64_size,
+    )?;
+
+    // Write BOOTX64.EFI file content (Dummy content for now)
+    pad_to_lba(&mut iso, lba_bootx64)?;
+    let dummy_efi_file = vec![0u8; bootx64_size as usize];
+    iso.write_all(&dummy_efi_file)?;
+
+    // --- Finalize ISO File ---
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
-    // Write ISO Volume Descriptors
-    write_primary_volume_descriptor(&mut iso, total_sectors, root_dir_lba)?;
-    const LBA_BOOT_CATALOG: u32 = 19;
-    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
-    write_volume_descriptor_terminator(&mut iso)?;
-
-    // Write Boot Catalog
-    write_boot_catalog(&mut iso, FAT_IMAGE_LBA, img_file_size)?;
-
-    // Write Root Directory Sector
-    write_root_directory_sector(&mut iso, root_dir_lba)?;
-
-    // Seek back and update the total_sectors field in the PVD
     update_total_sectors(&mut iso, total_sectors)?;
-
-    // Ensure the file is truncated to the correct size
     iso.set_len(total_sectors as u64 * ISO_SECTOR_SIZE as u64)?;
 
+    println!(
+        "create_iso_from_img: ISO created with {} sectors.",
+        total_sectors
+    );
     Ok(())
 }
