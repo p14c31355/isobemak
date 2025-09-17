@@ -343,7 +343,7 @@ fn write_boot_catalog(iso: &mut File, bootx64_lba: u32, bootx64_size: u32) -> io
     entry[1] = BOOT_CATALOG_NO_EMULATION;
 
     // Calculate the number of 512-byte sectors for BOOTX64.EFI
-    let sector_count_512 = (bootx64_size as u64).div_ceil(512);
+    let sector_count_512 = (bootx64_size as u64).div_ceil(FAT32_SECTOR_SIZE);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
     } else {
