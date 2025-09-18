@@ -331,7 +331,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&root_dir_records)?;
 
-    // --- 4. Write the FAT32 image as a file named 'fullerene'.
+// --- 4. Write the FAT32 image as a file named 'FULLERENE_IMG'.
     pad_to_lba(&mut iso, LBA_FULLERENE_FILE)?;
     iso.write_all(&fat32_content)?;
 
