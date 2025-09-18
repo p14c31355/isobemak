@@ -24,11 +24,10 @@ const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
 
 // Constants for El Torito boot catalog.
-const LBA_BOOT_CATALOG: u32 = 19; // Boot CatalogのLBAを定義
+const LBA_BOOT_CATALOG: u32 = 19; // Define LBA for the Boot Catalog
 const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
 const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
 const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
-const BOOT_CATALOG_NO_EMULATION: u8 = 0x00;
 const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 
 // New constants for Boot Catalog
@@ -163,11 +162,14 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     cat[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
 
+    // Boot entry
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
-    entry[1] = BOOT_CATALOG_NO_EMULATION;
+    // For UEFI boot, the media type should be 0xEF (EFI)
+    entry[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
 
     // Boot image sector count (512-byte sectors)
+    // The spec says 'number of 512-byte blocks'
     let sector_count_512 = boot_img_size.div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
@@ -197,11 +199,11 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Reads the entire FAT32 image from a specified path and returns its content.
-fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
-    let mut img_file = File::open(img_path)?;
+/// Reads the entire file from a specified path and returns its content.
+fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
+    let mut file = File::open(file_path)?;
     let mut content = Vec::new();
-    img_file.read_to_end(&mut content)?;
+    file.read_to_end(&mut content)?;
     Ok(content)
 }
 
@@ -218,9 +220,9 @@ fn write_dir_record(
         1
     } else {
         // Truncate name to 12 chars if it ends with .EFI
+        // ISO 9660 Joliet and Rock Ridge can handle longer names, but for
+        // a basic implementation, we'll follow the 8.3 convention for simplicity
         if name.len() > 12 && name.to_ascii_uppercase().ends_with(".EFI") {
-            // ISO 9660 Joliet and Rock Ridge can handle longer names, but for
-            // a basic implementation, we'll follow the 8.3 convention for simplicity
             12 // Name length for EFI files should be 12 (8 chars for name, 3 for ext, 1 for separator)
         } else {
             name.len()
@@ -266,26 +268,19 @@ fn write_dir_record(
     Ok(())
 }
 
-/// Creates an ISO image from a FAT32 image file.
-pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result<()> {
+/// Creates an ISO image from an EFI image file.
+pub fn create_iso_from_img(iso_path: &Path, efi_img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Starting creation of ISO.");
 
-    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
-    let fat32_size = fat32_content.len() as u32;
-    let lba_fat32_img: u32 = 21; // Allocate a new LBA for the FAT32 image file
+    // Read the EFI image content directly. No need for FAT32 wrapper.
+    let efi_content = read_file_from_path(efi_img_path)?;
+    let efi_size = efi_content.len() as u32;
 
-    // We'll write this file inside the ISO, so let's define its path and LBA.
-    // Let's assume the FAT32 image is a single file `Boot-NoEmul.img`
-    // within a `[BOOT]` directory (implied by El Torito).
-    let lba_boot_noemul_img = lba_fat32_img;
-
-    // Define LBAs for directories
+    // Correctly define LBA allocation to avoid conflicts
     const LBA_ROOT_DIR: u32 = 20;
-    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1; // EFI directory comes after root
-    const LBA_EFI_BOOT_DIR: u32 = LBA_EFI_DIR + 1; // EFI/BOOT directory comes after EFI
-
-    // The EFI boot image is the FAT32 image itself
-    let lba_bootx64_efi = lba_fat32_img;
+    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1;
+    const LBA_EFI_BOOT_DIR: u32 = LBA_EFI_DIR + 1;
+    const LBA_BOOTX64_EFI: u32 = LBA_EFI_BOOT_DIR + 1;
 
     let mut iso = File::create(iso_path)?;
 
@@ -294,9 +289,10 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
-    // --- 2. Write the boot catalog. ---
+    // --- 2. Write the boot catalog for UEFI. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
-    write_boot_catalog(&mut iso, lba_boot_noemul_img, fat32_size)?;
+    // The boot image LBA is the location of the BOOTX64.EFI file itself
+    write_boot_catalog(&mut iso, LBA_BOOTX64_EFI, efi_size)?;
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
@@ -330,14 +326,6 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
         "BOOT.CATALOG",
         LBA_BOOT_CATALOG,
         ISO_SECTOR_SIZE as u32,
-        false,
-        false,
-    )?;
-    write_dir_record(
-        &mut root_dir_records,
-        "BOOT_NOEMUL.IMG",
-        lba_boot_noemul_img,
-        fat32_size,
         false,
         false,
     )?;
@@ -396,17 +384,17 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     write_dir_record(
         &mut efi_boot_dir_records,
         "BOOTX64.EFI",
-        lba_bootx64_efi,
-        fat32_size,
+        LBA_BOOTX64_EFI,
+        efi_size,
         false,
         false,
     )?;
     efi_boot_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_boot_dir_records)?;
 
-    // --- 6. Write the FAT32 image content. ---
-    pad_to_lba(&mut iso, lba_fat32_img)?;
-    iso.write_all(&fat32_content)?;
+    // --- 6. Write the EFI image content. ---
+    pad_to_lba(&mut iso, LBA_BOOTX64_EFI)?;
+    iso.write_all(&efi_content)?;
 
     // --- 7. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
