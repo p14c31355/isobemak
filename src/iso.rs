@@ -66,11 +66,8 @@ fn create_iso9660_dir_record(lba: u32, data_len: u32, flags: u8, file_id_str: &s
                 actual_file_id_len = file_id_str.len() as u8;
             } else {
                 // File
-                let mut name = file_id_str.to_string();
-                if !name.contains('.') {
-                    name.push_str(".1");
-                }
-                file_id_vec = name.into_bytes();
+                let name_with_version = format!("{};1", file_id_str);
+                file_id_vec = name_with_version.into_bytes();
                 file_id_bytes = &file_id_vec;
                 actual_file_id_len = file_id_vec.len() as u8;
             }
