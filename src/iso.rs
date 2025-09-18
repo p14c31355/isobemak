@@ -211,8 +211,8 @@ fn write_dir_record(
     name: &str,
     lba: u32,
     size: u32,
-    is_self_or_parent: bool,
     is_dir: bool,
+    is_self_or_parent: bool,
 ) -> io::Result<()> {
     let name_len = if is_self_or_parent { 1 } else { name.len() };
     let record_len = 34 + name_len;
@@ -250,18 +250,20 @@ fn write_dir_record(
 pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Starting creation of ISO.");
 
+    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
+    let fat32_size = fat32_content.len() as u32;
+    let fat32_sector_size = fat32_size.div_ceil(ISO_SECTOR_SIZE as u32);
+    let boot_img_size_512 = fat32_size.div_ceil(512);
+
     // Define LBAs for each directory and file
     const LBA_PVD: u32 = 16;
     const LBA_BRVD: u32 = 17;
     const LBA_VDT: u32 = 18;
     const LBA_BOOT_CATALOG: u32 = 19;
     const LBA_ROOT_DIR: u32 = 20;
-    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1; // EFI directory is after the root
-    const LBA_BOOT_DIR: u32 = LBA_EFI_DIR + 1; // BOOT directory is after EFI
-    const LBA_FAT32: u32 = LBA_BOOT_DIR + 1; // FAT32 image is after BOOT directory
-
-    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
-    let fat32_size = fat32_content.len() as u32;
+    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1;
+    const LBA_BOOT_DIR: u32 = LBA_EFI_DIR + 1;
+    const LBA_FAT32: u32 = LBA_BOOT_DIR + 1;
 
     let mut iso = File::create(iso_path)?;
 
@@ -279,7 +281,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     let mut root_dir_records = Vec::new();
     write_dir_record(&mut root_dir_records, ".", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
     write_dir_record(&mut root_dir_records, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut root_dir_records, "EFI", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, false, true)?;
+    write_dir_record(&mut root_dir_records, "EFI", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, false)?;
     write_dir_record(&mut root_dir_records, "BOOT-NOEMUL.IMG", LBA_FAT32, fat32_size, false, false)?;
     write_dir_record(&mut root_dir_records, "boot.catalog", LBA_BOOT_CATALOG, ISO_SECTOR_SIZE as u32, false, false)?;
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
@@ -290,7 +292,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     let mut efi_dir_records = Vec::new();
     write_dir_record(&mut efi_dir_records, ".", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
     write_dir_record(&mut efi_dir_records, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut efi_dir_records, "BOOT", LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, false, true)?;
+    write_dir_record(&mut efi_dir_records, "BOOT", LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, true, false)?;
     efi_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_dir_records)?;
 
@@ -300,7 +302,10 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     write_dir_record(&mut boot_dir_records, ".", LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
     write_dir_record(&mut boot_dir_records, "..", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
     write_dir_record(&mut boot_dir_records, "BOOTX64.EFI", LBA_FAT32, 145920, false, false)?;
-    write_dir_record(&mut boot_dir_records, "KERNEL.EFI", LBA_FAT32, 0, false, false)?;
+    // The kernel file size is unknown and will be part of the FAT32 image, so we can't create a separate entry here.
+    // The directory listing from 7z doesn't show KERNEL.EFI as a separate file,
+    // because it is part of the embedded FAT32 image.
+    // We should only show files and directories that are top-level on the ISO.
     boot_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&boot_dir_records)?;
 
