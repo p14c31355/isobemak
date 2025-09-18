@@ -8,8 +8,9 @@ use std::{
 };
 
 // To ensure the volume is formatted as FAT32, we must use a sufficiently large size.
-// 65536 sectors (32MB) is a common minimum for FAT32 to be recognized correctly.
-const FAT32_IMAGE_SECTOR_COUNT: u64 = 65536;
+// A cluster count greater than 65524 is required for FAT32.
+// 131072 sectors (64MB) will result in a cluster count well over this limit.
+const FAT32_IMAGE_SECTOR_COUNT: u64 = 131072;
 const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
 
 /// Copies a file from the host filesystem into a FAT32 directory.
