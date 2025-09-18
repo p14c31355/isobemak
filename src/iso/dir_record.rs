@@ -38,7 +38,8 @@ impl<'a> IsoDirEntry<'a> {
             }
         };
 
-        let record_len_usize = 33 + actual_file_id_len as usize + (actual_file_id_len as usize % 2);
+        let base_len = 33 + actual_file_id_len as usize;
+        let record_len_usize = base_len + (base_len % 2);
         assert!(
             record_len_usize <= u8::MAX as usize,
             "Directory record length exceeds 255 bytes"
