@@ -32,8 +32,6 @@ const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 
 // New constants for Boot Catalog
 const ID_FIELD_OFFSET: usize = 4;
-const ID_FIELD_LEN: usize = 24;
-const ID_STR: &[u8] = b"ISOBEMAKI EFI BOOT";
 const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 const BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET: usize = 30;
 
@@ -138,28 +136,24 @@ fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 }
 
 /// Correctly writes the El Torito boot catalog for UEFI.
-/// It takes the LBA and size of the boot image to create a bootable entry.
-fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> io::Result<()> {
+/// It takes the LBA of the boot image to create a bootable entry.
+fn write_boot_catalog(iso: &mut File, boot_img_lba: u32) -> io::Result<()> {
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
     let mut cat = [0u8; ISO_SECTOR_SIZE];
 
     // --- Validation Entry (32 bytes) ---
     cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID; // Header ID
-    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID; // Platform ID (0xEF for UEFI)
+    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;         // Platform ID (0xEF for UEFI)
     cat[2..4].copy_from_slice(&[0; 2]); // Reserved
 
     // The ID field for UEFI is typically "UEFI" or a similar string.
-    // The previous implementation used "ISOBEMAKI EFI BOOT" which is also acceptable.
-    // Let's stick with the provided suggestion and use "UEFI" for clarity.
-    // The previous ID string was 18 bytes, this is 4, so we need to adjust the copy.
     cat[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 4].copy_from_slice(b"UEFI");
     cat[BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET..BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET + 2]
         .copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
 
     // Calculate checksum
     let mut sum: u16 = 0;
-    for i in (0..16).step_by(2) {
-        // The checksum is calculated over the first 16 words (32 bytes) of the Validation Entry.
+    for i in (0..16).step_by(2) { // The checksum is calculated over the first 16 words (32 bytes) of the Validation Entry.
         sum = sum.wrapping_add(u16::from_le_bytes([cat[i], cat[i + 1]]));
     }
     let checksum = 0u16.wrapping_sub(sum);
@@ -173,7 +167,8 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     entry[2..4].copy_from_slice(&[0; 2]); // Load segment
     entry[4] = 0x00; // System type
     entry[5] = 0x00; // Unused
-    entry[6..8].copy_from_slice(&((boot_img_size / 512) as u16).to_le_bytes()); // Number of 512-byte sectors
+    entry[6] = 1; // Number of 512-byte sectors to load. In "No Emulation" mode, this should be 1.
+    entry[7] = 0;
     entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes()); // LBA for the boot image
     entry[12..].copy_from_slice(&[0; 20]); // Unused
 
@@ -290,7 +285,7 @@ pub fn create_iso_from_img(iso_path: &Path, efi_img_path: &Path) -> io::Result<(
     // --- 2. Write the boot catalog for UEFI. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
     // The boot image LBA is the location of the BOOTX64.EFI file itself
-    write_boot_catalog(&mut iso, LBA_BOOTX64_EFI, efi_size)?;
+    write_boot_catalog(&mut iso, LBA_BOOTX64_EFI)?;
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
