@@ -226,7 +226,7 @@ fn write_dir_record(
             name.len()
         }
     };
-    let record_len = 34 + name_len;
+    let record_len = 33 + name_len + 1;
     let mut record = vec![0u8; record_len];
 
     record[0] = record_len as u8;
@@ -256,11 +256,10 @@ fn write_dir_record(
         if name_bytes.len() > name_len {
             name_bytes.truncate(name_len);
         }
-        name_bytes.push(0x01); // Version number (ISO 9660 standard)
 
         record[32] = name_len as u8;
-        record[33] = 1;
-        record[34..34 + name_bytes.len()].copy_from_slice(&name_bytes);
+        record[33..33 + name_bytes.len()].copy_from_slice(&name_bytes);
+        record[33 + name_bytes.len()] = 0x01;
     }
 
     writer.write_all(&record)?;
