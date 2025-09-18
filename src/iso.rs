@@ -298,7 +298,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, true)?)?;
     // Boot-NoEmul.img file record
     root_dir_records.write_all(&write_file_record(
-        "BOOT-NOEMUL.IMG", // ファイル名をISO 9660の慣例に従い大文字にする
+        "BOOT-NOEMUL.IMG",
         lba_fat32,
         fat32_size,
     )?)?;
