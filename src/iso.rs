@@ -252,8 +252,6 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
     let fat32_size = fat32_content.len() as u32;
-    let fat32_sector_size = fat32_size.div_ceil(ISO_SECTOR_SIZE as u32);
-    let boot_img_size_512 = fat32_size.div_ceil(512);
 
     // Define LBAs for each directory and file
     const LBA_PVD: u32 = 16;
@@ -261,9 +259,9 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     const LBA_VDT: u32 = 18;
     const LBA_BOOT_CATALOG: u32 = 19;
     const LBA_ROOT_DIR: u32 = 20;
-    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1;
-    const LBA_BOOT_DIR: u32 = LBA_EFI_DIR + 1;
-    const LBA_FAT32: u32 = LBA_BOOT_DIR + 1;
+    const LBA_FULLERENE_FILE: u32 = LBA_ROOT_DIR + 1;
+    let lba_fullerene_dir: u32 = LBA_FULLERENE_FILE + fat32_size.div_ceil(ISO_SECTOR_SIZE as u32);
+    let lba_fat32: u32 = lba_fullerene_dir + 1;
 
     let mut iso = File::create(iso_path)?;
 
@@ -274,43 +272,35 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     // --- 2. Write the boot catalog. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
-    write_boot_catalog(&mut iso, LBA_FAT32, fat32_size)?;
+    write_boot_catalog(&mut iso, lba_fat32, fat32_size)?;
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
     let mut root_dir_records = Vec::new();
     write_dir_record(&mut root_dir_records, ".", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
     write_dir_record(&mut root_dir_records, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut root_dir_records, "EFI", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, false)?;
-    write_dir_record(&mut root_dir_records, "BOOT-NOEMUL.IMG", LBA_FAT32, fat32_size, false, false)?;
+    write_dir_record(&mut root_dir_records, "fullerene", lba_fullerene_dir, ISO_SECTOR_SIZE as u32, true, false)?;
+    write_dir_record(&mut root_dir_records, "fullerene", LBA_FULLERENE_FILE, fat32_size, false, false)?;
     write_dir_record(&mut root_dir_records, "boot.catalog", LBA_BOOT_CATALOG, ISO_SECTOR_SIZE as u32, false, false)?;
+    write_dir_record(&mut root_dir_records, "BOOT-NOEMUL.IMG", lba_fat32, fat32_size, false, false)?;
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&root_dir_records)?;
 
-    // --- 4. Write the EFI directory. ---
-    pad_to_lba(&mut iso, LBA_EFI_DIR)?;
-    let mut efi_dir_records = Vec::new();
-    write_dir_record(&mut efi_dir_records, ".", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut efi_dir_records, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut efi_dir_records, "BOOT", LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, true, false)?;
-    efi_dir_records.resize(ISO_SECTOR_SIZE, 0);
-    iso.write_all(&efi_dir_records)?;
+    // --- 4. Write the FAT32 image as a file named 'fullerene'.
+    pad_to_lba(&mut iso, LBA_FULLERENE_FILE)?;
+    iso.write_all(&fat32_content)?;
 
-    // --- 5. Write the BOOT directory. ---
-    pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
-    let mut boot_dir_records = Vec::new();
-    write_dir_record(&mut boot_dir_records, ".", LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut boot_dir_records, "..", LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
-    write_dir_record(&mut boot_dir_records, "BOOTX64.EFI", LBA_FAT32, 145920, false, false)?;
-    // The kernel file size is unknown and will be part of the FAT32 image, so we can't create a separate entry here.
-    // The directory listing from 7z doesn't show KERNEL.EFI as a separate file,
-    // because it is part of the embedded FAT32 image.
-    // We should only show files and directories that are top-level on the ISO.
-    boot_dir_records.resize(ISO_SECTOR_SIZE, 0);
-    iso.write_all(&boot_dir_records)?;
+    // --- 5. Write the 'fullerene' directory. The content is now unknown, so we write a placeholder.
+    pad_to_lba(&mut iso, lba_fullerene_dir)?;
+    let mut fullerene_dir_records = Vec::new();
+    write_dir_record(&mut fullerene_dir_records, ".", lba_fullerene_dir, ISO_SECTOR_SIZE as u32, true, true)?;
+    write_dir_record(&mut fullerene_dir_records, "..", LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, true, true)?;
+    fullerene_dir_records.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&fullerene_dir_records)?;
 
-    // --- 6. Write the FAT32 image content to the ISO. ---
-    pad_to_lba(&mut iso, LBA_FAT32)?;
+
+    // --- 6. Write the FAT32 image content to the ISO as BOOT-NOEMUL.IMG. ---
+    pad_to_lba(&mut iso, lba_fat32)?;
     iso.write_all(&fat32_content)?;
 
     // --- 7. Finalize ISO file by updating the total number of sectors. ---
