@@ -148,16 +148,9 @@ fn write_primary_volume_descriptor(
         .copy_from_slice(&path_table_size.to_be_bytes());
 
     // Root directory record for the ISO9660 filesystem
+    let root_dir_record_vec = create_iso9660_dir_record(root_dir_lba, root_dir_size, 2, ".");
     let mut root_dir_record = [0u8; 34];
-    root_dir_record[0] = 34; // Directory Record Length
-    root_dir_record[2..6].copy_from_slice(&root_dir_lba.to_le_bytes()); // LBA of root directory (LE)
-    root_dir_record[6..10].copy_from_slice(&root_dir_lba.to_be_bytes()); // LBA of root directory (BE)
-    root_dir_record[10..14].copy_from_slice(&root_dir_size.to_le_bytes()); // Data Length (LE)
-    root_dir_record[14..18].copy_from_slice(&root_dir_size.to_be_bytes()); // Data Length (BE)
-    root_dir_record[25] = 2; // Directory flag
-    root_dir_record[32] = 1; // File ID Length
-    root_dir_record[33] = 0; // File ID (0x00 for root)
-
+    root_dir_record.copy_from_slice(&root_dir_record_vec);
     pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + 34]
         .copy_from_slice(&root_dir_record);
     iso.write_all(&pvd)
