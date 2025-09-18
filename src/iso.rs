@@ -256,6 +256,28 @@ fn write_file_record(name: &str, lba: u32, size: u32) -> io::Result<Vec<u8>> {
     Ok(record)
 }
 
+/// Creates a directory record for a directory
+fn create_dir_entry(iso: &mut File, dir_name: &str, parent_lba: u32, self_lba: u32, child_lba: u32, child_name: &str, child_size: u32, is_dir_child: bool) -> io::Result<()> {
+    let mut dir_records = Vec::new();
+
+    // Self-record
+    dir_records.write_all(&write_dir_record(".", self_lba, true)?)?;
+    // Parent-record
+    dir_records.write_all(&write_dir_record("..", parent_lba, true)?)?;
+
+    if is_dir_child {
+        dir_records.write_all(&write_dir_record(child_name, child_lba, false)?)?;
+    } else {
+        dir_records.write_all(&write_file_record(child_name, child_lba, child_size)?)?;
+    }
+
+    // Pad the directory sector to ensure it takes up one full sector
+    dir_records.resize(ISO_SECTOR_SIZE, 0);
+
+    iso.write_all(&dir_records)?;
+    Ok(())
+}
+
 /// Creates an ISO image from a FAT32 image file.
 pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result<()> {
     println!("create_iso_from_img: Creating ISO from FAT32 image.");
@@ -266,17 +288,20 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
         &mut iso,
     )?;
 
+    // Define LBAs
     const LBA_PVD: u32 = 16;
     const LBA_BRVD: u32 = 17;
     const LBA_VDT: u32 = 18;
     const LBA_BOOT_CATALOG: u32 = 19;
     const LBA_ROOT_DIR: u32 = 20;
+    const LBA_EFI_DIR: u32 = 21;
+    const LBA_BOOT_DIR: u32 = 22;
+    const LBA_FAT32: u32 = 23;
+    const LBA_BOOTX64_EFI: u32 = 24; // Dummy value, actual file content is in FAT32 image
+    const LBA_KERNEL_EFI: u32 = 25; // Dummy value
 
     let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
     let fat32_size = fat32_content.len() as u32;
-
-    // Calculate LBA for FAT32 image, accounting for padding and records
-    let lba_fat32 = LBA_ROOT_DIR + 1;
 
     // --- 1. Write Volume Descriptors. PVD total sectors will be patched later. ---
     write_primary_volume_descriptor(&mut iso, 0, LBA_ROOT_DIR)?;
@@ -285,35 +310,47 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
 
     // --- 2. Write the boot catalog. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
-    write_boot_catalog(&mut iso, lba_fat32, fat32_size)?;
+    write_boot_catalog(&mut iso, LBA_FAT32, fat32_size)?;
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
 
     let mut root_dir_records = Vec::new();
-
-    // Self-record
     root_dir_records.write_all(&write_dir_record(".", LBA_ROOT_DIR, true)?)?;
-    // Parent-record
     root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, true)?)?;
-    // Boot-NoEmul.img file record
-    root_dir_records.write_all(&write_file_record(
-        "BOOT-NOEMUL.IMG",
-        lba_fat32,
-        fat32_size,
-    )?)?;
+    root_dir_records.write_all(&write_dir_record("EFI", LBA_EFI_DIR, false)?)?;
+    root_dir_records.write_all(&write_file_record("BOOT-NOEMUL.IMG", LBA_FAT32, fat32_size)?)?;
+    root_dir_records.write_all(&write_file_record("boot.catalog", LBA_BOOT_CATALOG, ISO_SECTOR_SIZE as u32)?)?;
 
     // Pad the root directory sector to ensure it takes up one full sector
-    let _padding = ISO_SECTOR_SIZE - root_dir_records.len();
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
-
     iso.write_all(&root_dir_records)?;
 
-    // --- 4. Write the FAT32 image content to the ISO. ---
-    pad_to_lba(&mut iso, lba_fat32)?;
+    // --- 4. Write the EFI directory. ---
+    pad_to_lba(&mut iso, LBA_EFI_DIR)?;
+    let mut efi_dir_records = Vec::new();
+    efi_dir_records.write_all(&write_dir_record(".", LBA_EFI_DIR, true)?)?;
+    efi_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, true)?)?;
+    efi_dir_records.write_all(&write_dir_record("BOOT", LBA_BOOT_DIR, false)?)?;
+    efi_dir_records.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&efi_dir_records)?;
+
+    // --- 5. Write the BOOT directory. ---
+    pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
+    let mut boot_dir_records = Vec::new();
+    boot_dir_records.write_all(&write_dir_record(".", LBA_BOOT_DIR, true)?)?;
+    boot_dir_records.write_all(&write_dir_record("..", LBA_EFI_DIR, true)?)?;
+    // These files are only logical entries, their content is in the FAT32 image.
+    boot_dir_records.write_all(&write_file_record("BOOTX64.EFI", LBA_FAT32, 145920)?)?;
+    boot_dir_records.write_all(&write_file_record("KERNEL.EFI", LBA_FAT32, 0)?)?;
+    boot_dir_records.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&boot_dir_records)?;
+
+    // --- 6. Write the FAT32 image content to the ISO. ---
+    pad_to_lba(&mut iso, LBA_FAT32)?;
     iso.write_all(&fat32_content)?;
 
-    // --- 5. Finalize ISO file by updating the total number of sectors. ---
+    // --- 7. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
