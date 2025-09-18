@@ -331,11 +331,11 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&root_dir_records)?;
 
-// --- 4. Write the FAT32 image as a file named 'FULLERENE_IMG'.
+    // --- 4. Write the FAT32 image as a file named 'FULLERENE_IMG'.
     pad_to_lba(&mut iso, LBA_FULLERENE_FILE)?;
     iso.write_all(&fat32_content)?;
 
-// --- 5. Write the 'FULLERENE' directory. The content is now unknown, so we write a placeholder.
+    // --- 5. Write the 'FULLERENE' directory. The content is now unknown, so we write a placeholder.
     pad_to_lba(&mut iso, lba_fullerene_dir)?;
     let mut fullerene_dir_records = Vec::new();
     write_dir_record(
