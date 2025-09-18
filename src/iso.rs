@@ -145,7 +145,7 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
 
     // --- Validation Entry (32 bytes) ---
     cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID; // Header ID
-    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID;         // Platform ID (0xEF for UEFI)
+    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID; // Platform ID (0xEF for UEFI)
     cat[2..4].copy_from_slice(&[0; 2]); // Reserved
 
     // The ID field for UEFI is typically "UEFI" or a similar string.
@@ -158,7 +158,8 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
 
     // Calculate checksum
     let mut sum: u16 = 0;
-    for i in (0..16).step_by(2) { // The checksum is calculated over the first 16 words (32 bytes) of the Validation Entry.
+    for i in (0..16).step_by(2) {
+        // The checksum is calculated over the first 16 words (32 bytes) of the Validation Entry.
         sum = sum.wrapping_add(u16::from_le_bytes([cat[i], cat[i + 1]]));
     }
     let checksum = 0u16.wrapping_sub(sum);
