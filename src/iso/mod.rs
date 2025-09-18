@@ -1,4 +1,5 @@
 pub mod boot_catalog;
 pub mod dir_record;
-pub mod iso;
+mod iso;
+pub use self::iso::create_iso_from_img;
 pub mod volume_descriptor;
