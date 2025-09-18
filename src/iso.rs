@@ -32,8 +32,8 @@ const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 
 // New constants for Boot Catalog
 const ID_FIELD_OFFSET: usize = 4;
-const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
-const BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET: usize = 30;
+const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28; // Checksum is at byte 28 (2 bytes)
+// const BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET: usize = 30; // Validation Entry does not have a signature
 
 // New LBA assignments for ISO 9660 structure
 const LBA_PVD: u32 = 16;
@@ -189,23 +189,34 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_sectors: u16) 
     let mut cat = [0u8; ISO_SECTOR_SIZE];
 
     // --- Validation Entry (32 bytes) ---
-    cat[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID; // Header ID
-    cat[1] = BOOT_CATALOG_EFI_PLATFORM_ID; // Platform ID (0xEF for UEFI)
-    cat[2..4].copy_from_slice(&[0; 2]); // Reserved
+    let mut validation_entry = [0u8; 32];
+    validation_entry[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID; // Header ID
+    validation_entry[1] = BOOT_CATALOG_EFI_PLATFORM_ID; // Platform ID
+    validation_entry[2..4].copy_from_slice(&[0; 2]); // Reserved
+    validation_entry[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
+        .copy_from_slice(b"UEFI\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 
-    // ID string
-    cat[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 4].copy_from_slice(b"UEFI");
-    cat[BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET..BOOT_CATALOG_VALIDATION_SIGNATURE_OFFSET + 2]
-        .copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
+    // Temporarily set checksum bytes to 0 for calculation
+    validation_entry[BOOT_CATALOG_CHECKSUM_OFFSET] = 0;
+    validation_entry[BOOT_CATALOG_CHECKSUM_OFFSET + 1] = 0;
 
-    // Calculate checksum
+    // Calculate checksum for the entire 32-byte validation entry
+    // The checksum is calculated such that the sum of all 32 bytes is 0.
     let mut sum: u16 = 0;
-    for i in (0..16).step_by(2) {
-        sum = sum.wrapping_add(u16::from_le_bytes([cat[i], cat[i + 1]]));
+    for i in (0..32).step_by(2) {
+        sum = sum.wrapping_add(u16::from_le_bytes([
+            validation_entry[i],
+            validation_entry[i + 1],
+        ]));
     }
     let checksum = 0u16.wrapping_sub(sum);
-    cat[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
+    validation_entry[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
+
+    // Bytes 30-31 are reserved and should be 0.
+    validation_entry[30..32].copy_from_slice(&[0; 2]);
+
+    cat[0..32].copy_from_slice(&validation_entry);
 
     // --- Initial/Default Boot Entry (32 bytes) ---
     let mut entry = [0u8; 32];
