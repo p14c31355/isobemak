@@ -1,6 +1,6 @@
 [package]
 name = "isobemak"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 authors = ["p14c31355 <thinkoverheat@gmail.com>"]
 description = "Create bootable ISO images with FAT32 and UEFI (El Torito) support in Rust."
