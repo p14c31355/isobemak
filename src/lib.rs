@@ -1,6 +1,6 @@
 // isobemak/src/lib.rs
 use crate::fat32::create_fat32_image;
-use crate::iso::create_iso_from_img;
+use crate::iso::iso::create_iso_from_img;
 use std::{io, path::Path};
 use tempfile::NamedTempFile;
 
