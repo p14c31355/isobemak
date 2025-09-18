@@ -213,8 +213,8 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_sectors: u16) 
     validation_entry[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
 
-    // Bytes 30-31 are reserved and should be 0.
-    validation_entry[30..32].copy_from_slice(&[0; 2]);
+    // Bytes 30-31 must contain the signature 0x55AA for the validation entry.
+    validation_entry[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
 
     cat[0..32].copy_from_slice(&validation_entry);
 
