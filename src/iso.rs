@@ -298,7 +298,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     )?;
     write_dir_record(
         &mut root_dir_records,
-        "fullerene",
+        "FULLERENE",
         lba_fullerene_dir,
         ISO_SECTOR_SIZE as u32,
         true,
@@ -306,7 +306,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     )?;
     write_dir_record(
         &mut root_dir_records,
-        "fullerene",
+        "FULLERENE_IMG",
         LBA_FULLERENE_FILE,
         fat32_size,
         false,
@@ -314,7 +314,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     )?;
     write_dir_record(
         &mut root_dir_records,
-        "boot.catalog",
+        "BOOT.CATALOG",
         LBA_BOOT_CATALOG,
         ISO_SECTOR_SIZE as u32,
         false,
@@ -322,7 +322,7 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     )?;
     write_dir_record(
         &mut root_dir_records,
-        "BOOT-NOEMUL.IMG",
+        "BOOT_NOEMUL.IMG",
         lba_fat32,
         fat32_size,
         false,
