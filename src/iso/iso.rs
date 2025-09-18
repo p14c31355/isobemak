@@ -10,6 +10,8 @@ use std::path::Path;
 
 /// Creates an ISO image from a bootable image file.
 pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<()> {
+    let boot_img_metadata = std::fs::metadata(boot_img_path)?;
+    let boot_img_size = boot_img_metadata.len();
     let boot_img_sectors_u64 = boot_img_size.div_ceil(512);
     if boot_img_sectors_u64 > u16::MAX as u64 {
         return Err(io::Error::new(
