@@ -206,8 +206,8 @@ fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
 }
 
 /// Creates a directory record for an ISO 9660 filesystem.
-fn write_dir_record(name: &str, lba: u32, is_self: bool) -> io::Result<Vec<u8>> {
-    let name_len = if is_self { 1 } else { name.len() };
+fn write_dir_record(name: &str, lba: u32, is_self_or_parent: bool) -> io::Result<Vec<u8>> {
+    let name_len = if is_self_or_parent { 1 } else { name.len() };
     let record_len = 34 + name_len;
     let mut record = vec![0u8; record_len];
 
@@ -218,10 +218,17 @@ fn write_dir_record(name: &str, lba: u32, is_self: bool) -> io::Result<Vec<u8>> 
     record[14..18].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_be_bytes());
     record[25] = 2; // Directory flag
 
-    // Set parent/self flags if applicable
-    if name == "." || name == ".." {
-        record[32] = 1;
-        record[33] = 0;
+    // Set self/parent flags if applicable
+    if is_self_or_parent {
+        if name == "." {
+            record[32] = 1;
+            record[33] = 0;
+            record[34] = 0x00; // Self-record name
+        } else if name == ".." {
+            record[32] = 1;
+            record[33] = 0;
+            record[34] = 0x01; // Parent-record name
+        }
     } else {
         record[32] = name_len as u8;
         record[33] = 0;
@@ -288,10 +295,10 @@ pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result
     // Self-record
     root_dir_records.write_all(&write_dir_record(".", LBA_ROOT_DIR, true)?)?;
     // Parent-record
-    root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, false)?)?;
+    root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, true)?)?;
     // Boot-NoEmul.img file record
     root_dir_records.write_all(&write_file_record(
-        "Boot-NoEmul.img",
+        "BOOT-NOEMUL.IMG", // ファイル名をISO 9660の慣例に従い大文字にする
         lba_fat32,
         fat32_size,
     )?)?;
