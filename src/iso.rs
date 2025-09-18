@@ -1,9 +1,9 @@
 // isobemak/src/iso.rs
 // ISO + El Torito
-use crate::utils::{pad_to_lba, update_4byte_fields, ISO_SECTOR_SIZE};
+use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
 use std::{
     fs::File,
-    io::{self, Seek, SeekFrom, Write},
+    io::{self, Seek, Write},
     path::Path,
 };
 
@@ -45,12 +45,7 @@ const LBA_BOOT_DIR: u32 = 22;
 const LBA_BOOT_IMG: u32 = 23; // Start of the embedded bootable image
 
 /// Creates an ISO 9660 directory record.
-fn create_iso9660_dir_record(
-    lba: u32,
-    data_len: u32,
-    flags: u8,
-    file_id_str: &str,
-) -> Vec<u8> {
+fn create_iso9660_dir_record(lba: u32, data_len: u32, flags: u8, file_id_str: &str) -> Vec<u8> {
     let file_id_vec: Vec<u8>;
     let file_id_bytes: &[u8];
     let actual_file_id_len: u8;
@@ -59,16 +54,18 @@ fn create_iso9660_dir_record(
         "." => {
             file_id_bytes = b"\x00";
             actual_file_id_len = 1;
-        },
+        }
         ".." => {
             file_id_bytes = b"\x01";
             actual_file_id_len = 1;
-        },
+        }
         _ => {
-            if flags & 0x02 != 0 { // Directory
+            if flags & 0x02 != 0 {
+                // Directory
                 file_id_bytes = file_id_str.as_bytes();
                 actual_file_id_len = file_id_str.len() as u8;
-            } else { // File
+            } else {
+                // File
                 let mut name = file_id_str.to_string();
                 if !name.contains('.') {
                     name.push_str(".1");
@@ -233,9 +230,9 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
 
     // 1. Get the size of the boot image
     let boot_img_metadata = std::fs::metadata(boot_img_path)?;
-    let boot_img_sectors = (boot_img_metadata.len() as u32 + 511) / 512;
+    let boot_img_sectors = (boot_img_metadata.len() as u32).div_ceil(512);
     let boot_img_size = boot_img_metadata.len();
-    
+
     let mut iso = File::create(iso_path)?;
 
     // 2. Write Volume Descriptors (PVD, BRVD, VDT)
@@ -245,18 +242,24 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     write_volume_descriptor_terminator(&mut iso)?;
 
     // 3. Write the boot catalog (LBA 19)
-    write_boot_catalog(
-        &mut iso,
-        LBA_BOOT_IMG,
-        boot_img_sectors as u16,
-    )?;
+    write_boot_catalog(&mut iso, LBA_BOOT_IMG, boot_img_sectors as u16)?;
 
     // 4. Construct ISO 9660 directory structure
     // Root Directory (LBA 20)
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
     let mut root_dir_content = Vec::new();
-    root_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, 0x02, "."));
-    root_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, 0x02, ".."));
+    root_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        ".",
+    ));
+    root_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        "..",
+    ));
 
     root_dir_content.extend_from_slice(&create_iso9660_dir_record(
         LBA_EFI_DIR,
@@ -277,8 +280,18 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     // EFI Directory (LBA 21)
     pad_to_lba(&mut iso, LBA_EFI_DIR)?;
     let mut efi_dir_content = Vec::new();
-    efi_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, 0x02, "."));
-    efi_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_ROOT_DIR, ISO_SECTOR_SIZE as u32, 0x02, ".."));
+    efi_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_EFI_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        ".",
+    ));
+    efi_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        "..",
+    ));
 
     efi_dir_content.extend_from_slice(&create_iso9660_dir_record(
         LBA_BOOT_DIR,
@@ -293,8 +306,18 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     // BOOT Directory (LBA 22)
     pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
     let mut boot_dir_content = Vec::new();
-    boot_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_BOOT_DIR, ISO_SECTOR_SIZE as u32, 0x02, "."));
-    boot_dir_content.extend_from_slice(&create_iso9660_dir_record(LBA_EFI_DIR, ISO_SECTOR_SIZE as u32, 0x02, ".."));
+    boot_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_BOOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        ".",
+    ));
+    boot_dir_content.extend_from_slice(&create_iso9660_dir_record(
+        LBA_EFI_DIR,
+        ISO_SECTOR_SIZE as u32,
+        0x02,
+        "..",
+    ));
 
     boot_dir_content.extend_from_slice(&create_iso9660_dir_record(
         LBA_BOOT_IMG,
@@ -325,6 +348,9 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
 
     iso.set_len(total_sectors as u64 * ISO_SECTOR_SIZE as u64)?;
 
-    println!("create_iso_from_img: ISO created with {} sectors.", total_sectors);
+    println!(
+        "create_iso_from_img: ISO created with {} sectors.",
+        total_sectors
+    );
     Ok(())
 }

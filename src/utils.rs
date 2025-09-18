@@ -5,7 +5,7 @@ pub const FAT32_SECTOR_SIZE: u64 = 512;
 
 use std::{
     fs::File,
-    io::{self, Read, Write, Seek, SeekFrom},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
