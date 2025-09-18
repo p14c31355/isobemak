@@ -344,7 +344,7 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
 
     // 6. Finalize ISO file by updating the total number of sectors.
     let final_pos = iso.stream_position()?;
-    let total_sectors = ((final_pos + ISO_SECTOR_SIZE as u64 - 1) / ISO_SECTOR_SIZE as u64) as u32;
+    let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     update_4byte_fields(
         &mut iso,
