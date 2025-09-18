@@ -74,7 +74,9 @@ fn create_iso9660_dir_record(lba: u32, data_len: u32, flags: u8, file_id_str: &s
         }
     };
     // Directory records must be an even length.
-    let record_len = 33 + actual_file_id_len + (actual_file_id_len % 2);
+    let record_len_usize = 33 + actual_file_id_len as usize + (actual_file_id_len as usize % 2);
+    assert!(record_len_usize <= u8::MAX as usize, "Directory record length exceeds 255 bytes");
+    let record_len = record_len_usize as u8;
     let mut record = vec![0u8; record_len as usize];
 
     record[0] = record_len; // Length of Directory Record
