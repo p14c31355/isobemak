@@ -230,12 +230,13 @@ fn write_dir_record(
         record[32] = 1;
         record[33] = 0;
         match name {
-            "." => record[34] = 0x00, // Self-record name
+            "." => record[34] = 0x00,  // Self-record name
             ".." => record[34] = 0x01, // Parent-record name
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
-                    "is_self_or_parent is true but name is not '.' or '..'"))
+                    "is_self_or_parent is true but name is not '.' or '..'",
+                ));
             }
         }
     } else {
