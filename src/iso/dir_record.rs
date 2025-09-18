@@ -1,6 +1,5 @@
 // isobemak/src/dir_record.rs
 
-
 /// ISO9660 directory record structure
 pub struct IsoDirEntry<'a> {
     pub lba: u32,
@@ -17,10 +16,17 @@ impl<'a> IsoDirEntry<'a> {
         let actual_file_id_len: u8;
 
         match self.name {
-            "." => { file_id_bytes = b"\x00"; actual_file_id_len = 1; }
-            ".." => { file_id_bytes = b"\x01"; actual_file_id_len = 1; }
+            "." => {
+                file_id_bytes = b"\x00";
+                actual_file_id_len = 1;
+            }
+            ".." => {
+                file_id_bytes = b"\x01";
+                actual_file_id_len = 1;
+            }
             _ => {
-                if self.flags & 0x02 != 0 { // Directory
+                if self.flags & 0x02 != 0 {
+                    // Directory
                     file_id_bytes = self.name.as_bytes();
                     actual_file_id_len = self.name.len() as u8;
                 } else {
@@ -33,7 +39,10 @@ impl<'a> IsoDirEntry<'a> {
         };
 
         let record_len_usize = 33 + actual_file_id_len as usize + (actual_file_id_len as usize % 2);
-        assert!(record_len_usize <= u8::MAX as usize, "Directory record length exceeds 255 bytes");
+        assert!(
+            record_len_usize <= u8::MAX as usize,
+            "Directory record length exceeds 255 bytes"
+        );
         let record_len = record_len_usize as u8;
         let mut record = vec![0u8; record_len as usize];
 

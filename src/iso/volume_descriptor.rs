@@ -33,25 +33,37 @@ pub fn write_primary_volume_descriptor(
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
-    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4].copy_from_slice(&total_sectors.to_le_bytes());
-    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8].copy_from_slice(&total_sectors.to_be_bytes());
+    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
+        .copy_from_slice(&total_sectors.to_le_bytes());
+    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
+        .copy_from_slice(&total_sectors.to_be_bytes());
 
     pvd[PVD_VOL_SET_SIZE_OFFSET..PVD_VOL_SET_SIZE_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
-    pvd[PVD_VOL_SET_SIZE_OFFSET + 2..PVD_VOL_SET_SIZE_OFFSET + 4].copy_from_slice(&1u16.to_be_bytes());
+    pvd[PVD_VOL_SET_SIZE_OFFSET + 2..PVD_VOL_SET_SIZE_OFFSET + 4]
+        .copy_from_slice(&1u16.to_be_bytes());
     pvd[PVD_VOL_SEQ_NUM_OFFSET..PVD_VOL_SEQ_NUM_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
-    pvd[PVD_VOL_SEQ_NUM_OFFSET + 2..PVD_VOL_SEQ_NUM_OFFSET + 4].copy_from_slice(&1u16.to_be_bytes());
-    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2].copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_le_bytes());
-    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 4].copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_be_bytes());
-    pvd[PVD_PATH_TABLE_SIZE_OFFSET..PVD_PATH_TABLE_SIZE_OFFSET + 4].copy_from_slice(&0u32.to_le_bytes());
-    pvd[PVD_PATH_TABLE_SIZE_OFFSET + 4..PVD_PATH_TABLE_SIZE_OFFSET + 8].copy_from_slice(&0u32.to_be_bytes());
+    pvd[PVD_VOL_SEQ_NUM_OFFSET + 2..PVD_VOL_SEQ_NUM_OFFSET + 4]
+        .copy_from_slice(&1u16.to_be_bytes());
+    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2]
+        .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_le_bytes());
+    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 4]
+        .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_be_bytes());
+    pvd[PVD_PATH_TABLE_SIZE_OFFSET..PVD_PATH_TABLE_SIZE_OFFSET + 4]
+        .copy_from_slice(&0u32.to_le_bytes());
+    pvd[PVD_PATH_TABLE_SIZE_OFFSET + 4..PVD_PATH_TABLE_SIZE_OFFSET + 8]
+        .copy_from_slice(&0u32.to_be_bytes());
 
     let record_bytes = root_entry.to_bytes();
-    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + record_bytes.len()].copy_from_slice(&record_bytes);
+    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + record_bytes.len()]
+        .copy_from_slice(&record_bytes);
 
     iso.write_all(&pvd)
 }
 
-pub fn write_boot_record_volume_descriptor(iso: &mut File, boot_catalog_lba: u32) -> io::Result<()> {
+pub fn write_boot_record_volume_descriptor(
+    iso: &mut File,
+    boot_catalog_lba: u32,
+) -> io::Result<()> {
     pad_to_lba(iso, 17)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];
     brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
