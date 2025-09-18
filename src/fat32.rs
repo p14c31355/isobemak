@@ -7,7 +7,9 @@ use std::{
     path::Path,
 };
 
-const FAT32_IMAGE_SECTOR_COUNT: u64 = 2048;
+// To ensure the volume is formatted as FAT32, we must use a sufficiently large size.
+// 65536 sectors (32MB) is a common minimum for FAT32 to be recognized correctly.
+const FAT32_IMAGE_SECTOR_COUNT: u64 = 65536;
 const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
 
 /// Copies a file from the host filesystem into a FAT32 directory.
