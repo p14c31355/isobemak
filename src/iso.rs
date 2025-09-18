@@ -24,10 +24,10 @@ const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
 
 // Constants for El Torito boot catalog.
+const LBA_BOOT_CATALOG: u32 = 19; // Define LBA for the Boot Catalog
 const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
 const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
 const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
-const BOOT_CATALOG_NO_EMULATION: u8 = 0x00;
 const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 
 // New constants for Boot Catalog
@@ -140,7 +140,6 @@ fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 /// Correctly writes the El Torito boot catalog.
 /// It takes the LBA and size of the boot image to create a bootable entry.
 fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> io::Result<()> {
-    const LBA_BOOT_CATALOG: u32 = 19;
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
     let mut cat = [0u8; ISO_SECTOR_SIZE];
 
@@ -163,11 +162,14 @@ fn write_boot_catalog(iso: &mut File, boot_img_lba: u32, boot_img_size: u32) -> 
     cat[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
 
+    // Boot entry
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
-    entry[1] = BOOT_CATALOG_NO_EMULATION;
+    // For UEFI boot, the media type should be 0xEF (EFI)
+    entry[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
 
     // Boot image sector count (512-byte sectors)
+    // The spec says 'number of 512-byte blocks'
     let sector_count_512 = boot_img_size.div_ceil(512);
     let sector_count_u16 = if sector_count_512 > 0xFFFF {
         0xFFFF
@@ -197,116 +199,204 @@ fn update_total_sectors(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// Reads the entire FAT32 image from a specified path and returns its content.
-fn read_fat32_img_from_path(img_path: &Path) -> io::Result<Vec<u8>> {
-    let mut img_file = File::open(img_path)?;
+/// Reads the entire file from a specified path and returns its content.
+fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
+    let mut file = File::open(file_path)?;
     let mut content = Vec::new();
-    img_file.read_to_end(&mut content)?;
+    file.read_to_end(&mut content)?;
     Ok(content)
 }
 
 /// Creates a directory record for an ISO 9660 filesystem.
-fn write_dir_record(name: &str, lba: u32, is_self: bool) -> io::Result<Vec<u8>> {
-    let name_len = if is_self { 1 } else { name.len() };
-    let record_len = 34 + name_len;
-    let mut record = vec![0u8; record_len];
-
-    record[0] = record_len as u8;
-    record[2..6].copy_from_slice(&lba.to_le_bytes());
-    record[6..10].copy_from_slice(&lba.to_be_bytes());
-    record[10..14].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_le_bytes());
-    record[14..18].copy_from_slice(&(ISO_SECTOR_SIZE as u32).to_be_bytes());
-    record[25] = 2; // Directory flag
-
-    // Set parent/self flags if applicable
-    if name == "." || name == ".." {
-        record[32] = 1;
-        record[33] = 0;
+fn write_dir_record(
+    writer: &mut Vec<u8>,
+    name: &str,
+    lba: u32,
+    size: u32,
+    is_dir: bool,
+    is_self_or_parent: bool,
+) -> io::Result<()> {
+    let name_len = if is_self_or_parent {
+        1
     } else {
-        record[32] = name_len as u8;
-        record[33] = 0;
-        record[34..34 + name_len].copy_from_slice(name.as_bytes());
-    }
-
-    Ok(record)
-}
-
-/// Creates a file record for an ISO 9660 filesystem.
-fn write_file_record(name: &str, lba: u32, size: u32) -> io::Result<Vec<u8>> {
-    let name_len = name.len();
-    let record_len = 34 + name_len;
+        // Truncate name to 12 chars if it ends with .EFI
+        // ISO 9660 Joliet and Rock Ridge can handle longer names, but for
+        // a basic implementation, we'll follow the 8.3 convention for simplicity
+        if name.len() > 12 && name.to_ascii_uppercase().ends_with(".EFI") {
+            12 // Name length for EFI files should be 12 (8 chars for name, 3 for ext, 1 for separator)
+        } else {
+            name.len()
+        }
+    };
+    let record_len = 33 + name_len + 1;
     let mut record = vec![0u8; record_len];
+
     record[0] = record_len as u8;
     record[2..6].copy_from_slice(&lba.to_le_bytes());
     record[6..10].copy_from_slice(&lba.to_be_bytes());
     record[10..14].copy_from_slice(&size.to_le_bytes());
     record[14..18].copy_from_slice(&size.to_be_bytes());
-    record[25] = 0; // File flag
-    record[32] = name_len as u8;
-    record[33] = 0;
-    record[34..34 + name_len].copy_from_slice(name.as_bytes());
+    record[25] = if is_dir { 2 } else { 0 }; // Directory flag
 
-    Ok(record)
+    // Set self/parent flags if applicable
+    if is_self_or_parent {
+        record[32] = 1;
+        record[33] = 0;
+        match name {
+            "." => record[34] = 0x00,  // Self-record name
+            ".." => record[34] = 0x01, // Parent-record name
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "is_self_or_parent is true but name is not '.' or '..'",
+                ));
+            }
+        }
+    } else {
+        let mut name_bytes = name.as_bytes().to_vec();
+        // Truncate name if necessary and add version
+        if name_bytes.len() > name_len {
+            name_bytes.truncate(name_len);
+        }
+
+        record[32] = name_len as u8;
+        record[33..33 + name_bytes.len()].copy_from_slice(&name_bytes);
+        record[33 + name_bytes.len()] = 0x01;
+    }
+
+    writer.write_all(&record)?;
+    Ok(())
 }
 
-/// Creates an ISO image from a FAT32 image file.
-pub fn create_iso_from_img(iso_path: &Path, fat32_img_path: &Path) -> io::Result<()> {
-    println!("create_iso_from_img: Creating ISO from FAT32 image.");
+/// Creates an ISO image from an EFI image file.
+pub fn create_iso_from_img(iso_path: &Path, efi_img_path: &Path) -> io::Result<()> {
+    println!("create_iso_from_img: Starting creation of ISO.");
+
+    // Read the EFI image content directly. No need for FAT32 wrapper.
+    let efi_content = read_file_from_path(efi_img_path)?;
+    let efi_size = efi_content.len() as u32;
+
+    // Correctly define LBA allocation to avoid conflicts
+    const LBA_ROOT_DIR: u32 = 20;
+    const LBA_EFI_DIR: u32 = LBA_ROOT_DIR + 1;
+    const LBA_EFI_BOOT_DIR: u32 = LBA_EFI_DIR + 1;
+    const LBA_BOOTX64_EFI: u32 = LBA_EFI_BOOT_DIR + 1;
 
     let mut iso = File::create(iso_path)?;
-    io::copy(
-        &mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 * 16),
-        &mut iso,
-    )?;
-
-    const LBA_PVD: u32 = 16;
-    const LBA_BRVD: u32 = 17;
-    const LBA_VDT: u32 = 18;
-    const LBA_BOOT_CATALOG: u32 = 19;
-    const LBA_ROOT_DIR: u32 = 20;
-
-    let fat32_content = read_fat32_img_from_path(fat32_img_path)?;
-    let fat32_size = fat32_content.len() as u32;
-
-    // Calculate LBA for FAT32 image, accounting for padding and records
-    let lba_fat32 = LBA_ROOT_DIR + 1;
 
     // --- 1. Write Volume Descriptors. PVD total sectors will be patched later. ---
     write_primary_volume_descriptor(&mut iso, 0, LBA_ROOT_DIR)?;
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
-    // --- 2. Write the boot catalog. ---
+    // --- 2. Write the boot catalog for UEFI. ---
     pad_to_lba(&mut iso, LBA_BOOT_CATALOG)?;
-    write_boot_catalog(&mut iso, lba_fat32, fat32_size)?;
+    // The boot image LBA is the location of the BOOTX64.EFI file itself
+    write_boot_catalog(&mut iso, LBA_BOOTX64_EFI, efi_size)?;
 
     // --- 3. Write ISO9660 root directory and file records. ---
     pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
-
     let mut root_dir_records = Vec::new();
-
-    // Self-record
-    root_dir_records.write_all(&write_dir_record(".", LBA_ROOT_DIR, true)?)?;
-    // Parent-record
-    root_dir_records.write_all(&write_dir_record("..", LBA_ROOT_DIR, false)?)?;
-    // Boot-NoEmul.img file record
-    root_dir_records.write_all(&write_file_record(
-        "Boot-NoEmul.img",
-        lba_fat32,
-        fat32_size,
-    )?)?;
-
-    // Pad the root directory sector to ensure it takes up one full sector
-    let _padding = ISO_SECTOR_SIZE - root_dir_records.len();
+    write_dir_record(
+        &mut root_dir_records,
+        ".",
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut root_dir_records,
+        "..",
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut root_dir_records,
+        "EFI",
+        LBA_EFI_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        false,
+    )?;
+    write_dir_record(
+        &mut root_dir_records,
+        "BOOT.CATALOG",
+        LBA_BOOT_CATALOG,
+        ISO_SECTOR_SIZE as u32,
+        false,
+        false,
+    )?;
     root_dir_records.resize(ISO_SECTOR_SIZE, 0);
-
     iso.write_all(&root_dir_records)?;
 
-    // --- 4. Write the FAT32 image content to the ISO. ---
-    pad_to_lba(&mut iso, lba_fat32)?;
-    iso.write_all(&fat32_content)?;
+    // --- 4. Write the 'EFI' directory record. ---
+    pad_to_lba(&mut iso, LBA_EFI_DIR)?;
+    let mut efi_dir_records = Vec::new();
+    write_dir_record(
+        &mut efi_dir_records,
+        ".",
+        LBA_EFI_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut efi_dir_records,
+        "..",
+        LBA_ROOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut efi_dir_records,
+        "BOOT",
+        LBA_EFI_BOOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        false,
+    )?;
+    efi_dir_records.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&efi_dir_records)?;
 
-    // --- 5. Finalize ISO file by updating the total number of sectors. ---
+    // --- 5. Write the 'EFI/BOOT' directory record. ---
+    pad_to_lba(&mut iso, LBA_EFI_BOOT_DIR)?;
+    let mut efi_boot_dir_records = Vec::new();
+    write_dir_record(
+        &mut efi_boot_dir_records,
+        ".",
+        LBA_EFI_BOOT_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut efi_boot_dir_records,
+        "..",
+        LBA_EFI_DIR,
+        ISO_SECTOR_SIZE as u32,
+        true,
+        true,
+    )?;
+    write_dir_record(
+        &mut efi_boot_dir_records,
+        "BOOTX64.EFI",
+        LBA_BOOTX64_EFI,
+        efi_size,
+        false,
+        false,
+    )?;
+    efi_boot_dir_records.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&efi_boot_dir_records)?;
+
+    // --- 6. Write the EFI image content. ---
+    pad_to_lba(&mut iso, LBA_BOOTX64_EFI)?;
+    iso.write_all(&efi_content)?;
+
+    // --- 7. Finalize ISO file by updating the total number of sectors. ---
     iso.seek(io::SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
