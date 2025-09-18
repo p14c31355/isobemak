@@ -10,10 +10,14 @@ use std::path::Path;
 
 /// Creates an ISO image from a bootable image file.
 pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<()> {
-    println!("create_iso_from_img: Starting ISO creation");
-
-    let boot_img_size = std::fs::metadata(boot_img_path)?.len();
-    let boot_img_sectors = boot_img_size.div_ceil(512) as u16;
+    let boot_img_sectors_u64 = boot_img_size.div_ceil(512);
+    if boot_img_sectors_u64 > u16::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Boot image is too large for El Torito specification",
+        ));
+    }
+    let boot_img_sectors = boot_img_sectors_u64 as u16;
 
     let mut iso = File::create(iso_path)?;
 
