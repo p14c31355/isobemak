@@ -14,14 +14,13 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     let boot_img_size = boot_img_metadata.len();
 
     // The boot image sector count must be in 512-byte units, as per the El Torito specification.
-    let boot_img_sectors_u64 = boot_img_size.div_ceil(512);
-    if boot_img_sectors_u64 > u16::MAX as u64 {
+    let boot_img_sectors = boot_img_size.div_ceil(512);
+    if boot_img_sectors > u16::MAX as u64 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             "Boot image is too large for El Torito specification",
         ));
     }
-    let boot_img_sectors = boot_img_size.div_ceil(512); // in 512-byte sectors
     let mut iso = File::create(iso_path)?;
 
     let root_entry = IsoDirEntry {
