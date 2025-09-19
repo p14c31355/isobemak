@@ -4,12 +4,12 @@ use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
 use std::fs::File;
-use std::io::{self, copy, Read, Seek, Write};
+use std::io::{self, Read, Seek, Write, copy};
 use std::path::Path;
 
 /// Creates an ISO image from a bootable FAT image file, ensuring both BOOTX64.EFI and KERNEL.EFI
 /// inside the FAT image are included in the ISO.
-/// 
+///
 /// # Arguments
 /// * `iso_path` - The path to write the resulting ISO.
 /// * `fat_img_path` - Path to the FAT32 image containing BOOTX64.EFI and KERNEL.EFI.
@@ -52,11 +52,36 @@ pub fn create_iso_from_img(
     // Root directory
     pad_to_lba(&mut iso, 20)?;
     let root_dir = [
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." }.to_bytes(),
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." }.to_bytes(),
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "EFI" }.to_bytes(),
-        IsoDirEntry { lba: LBA_BOOT_CATALOG, size: ISO_SECTOR_SIZE as u32, flags: 0x00, name: "BOOT.CATALOG" }.to_bytes(),
-    ].concat();
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "EFI",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: LBA_BOOT_CATALOG,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x00,
+            name: "BOOT.CATALOG",
+        }
+        .to_bytes(),
+    ]
+    .concat();
     let mut root_dir_content = root_dir;
     root_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&root_dir_content)?;
@@ -64,10 +89,29 @@ pub fn create_iso_from_img(
     // EFI directory
     pad_to_lba(&mut iso, 21)?;
     let efi_dir = [
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." }.to_bytes(),
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." }.to_bytes(),
-        IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "BOOT" }.to_bytes(),
-    ].concat();
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: 22,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "BOOT",
+        }
+        .to_bytes(),
+    ]
+    .concat();
     let mut efi_dir_content = efi_dir;
     efi_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_dir_content)?;
@@ -75,11 +119,30 @@ pub fn create_iso_from_img(
     // BOOT directory
     pad_to_lba(&mut iso, 22)?;
     let boot_dir = [
-        IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." }.to_bytes(),
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." }.to_bytes(),
+        IsoDirEntry {
+            lba: 22,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        }
+        .to_bytes(),
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        }
+        .to_bytes(),
         // Include the entire FAT image as BOOTX64.EFI (for UEFI firmware)
-        IsoDirEntry { lba: boot_img_lba, size: fat_img_size as u32, flags: 0x00, name: "BOOTX64.EFI" }.to_bytes(),
-    ].concat();
+        IsoDirEntry {
+            lba: boot_img_lba,
+            size: fat_img_size as u32,
+            flags: 0x00,
+            name: "BOOTX64.EFI",
+        }
+        .to_bytes(),
+    ]
+    .concat();
     let mut boot_dir_content = boot_dir;
     boot_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&boot_dir_content)?;
@@ -112,8 +175,17 @@ pub fn create_iso_from_img(
         ));
     }
 
-    update_4byte_fields(&mut iso, 16, PVD_TOTAL_SECTORS_OFFSET, PVD_TOTAL_SECTORS_OFFSET + 4, total_sectors as u32)?;
+    update_4byte_fields(
+        &mut iso,
+        16,
+        PVD_TOTAL_SECTORS_OFFSET,
+        PVD_TOTAL_SECTORS_OFFSET + 4,
+        total_sectors as u32,
+    )?;
 
-    println!("create_iso_from_img: ISO created with {} sectors", total_sectors);
+    println!(
+        "create_iso_from_img: ISO created with {} sectors",
+        total_sectors
+    );
     Ok(())
 }
