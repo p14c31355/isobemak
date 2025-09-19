@@ -1,7 +1,6 @@
-// isobemak/src/lib.rs
 use crate::fat::create_fat_image;
 use crate::iso::create_iso_from_img;
-use std::{io, io::Write, path::Path, fs};
+use std::{io, io::Write, path::Path};
 use tempfile::NamedTempFile;
 
 mod fat;
@@ -16,21 +15,18 @@ pub fn create_disk_and_iso(
 ) -> io::Result<()> {
     println!("create_disk_and_iso: Starting process...");
 
-    // 1. Create a temporary FAT32 image file.
     let mut fat_img_file = NamedTempFile::new()?;
     let fat_img_path = fat_img_file.path().to_owned();
 
-    let _fat_image_actual_size =
-        create_fat_image(fat_img_file.as_file_mut(), loader_path, kernel_path)?;
-
+    let _fat_image_size = create_fat_image(fat_img_file.as_file_mut(), loader_path, kernel_path)?;
 
     fat_img_file.as_file_mut().flush()?;
 
-    let loader_metadata = fs::metadata(loader_path)?;
-    let loader_size = loader_metadata.len() as u32;
-    create_iso_from_img(iso_path, &fat_img_path, loader_size)?;
+    let boot_img_size = std::fs::metadata(loader_path)?.len();
+    let boot_img_sectors = boot_img_size.div_ceil(512);
 
-    // 4. The temporary file will be automatically deleted when it goes out of scope.
+    create_iso_from_img(iso_path, loader_path, boot_img_sectors as u32 * 512)?;
+
     println!("create_disk_and_iso: Process complete. ISO created successfully.");
     Ok(())
 }

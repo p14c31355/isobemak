@@ -1,4 +1,4 @@
-// isobemak/src/fat32.rs
+// isobemak/src/fat.rs
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::File,
