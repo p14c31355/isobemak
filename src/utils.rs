@@ -27,7 +27,6 @@ pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     }
     Ok(())
 }
-}
 
 /// A helper function to update two 4-byte fields at different offsets
 /// within a single ISO sector (2048 bytes). This is used for the
