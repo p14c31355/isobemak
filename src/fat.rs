@@ -64,7 +64,8 @@ pub fn create_fat_image(
     );
 
     // Determine FAT type based on total size
-    let fat_type = if total_size < 32 * 1024 * 1024 { // Use FAT16 for volumes smaller than 32MB
+    let fat_type = if total_size < 32 * 1024 * 1024 {
+        // Use FAT16 for volumes smaller than 32MB
         println!("create_fat_image: Formatting volume as FAT16 due to size.");
         FatType::Fat16
     } else {
