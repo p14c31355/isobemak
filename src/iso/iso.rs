@@ -178,7 +178,6 @@ pub fn create_iso_from_img(
         PVD_TOTAL_SECTORS_OFFSET + 4,
         total_sectors as u32,
     )?;
-    iso.set_len(total_sectors * ISO_SECTOR_SIZE as u64)?;
 
     println!(
         "create_iso_from_img: ISO created with {} sectors",
