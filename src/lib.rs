@@ -22,7 +22,8 @@ pub fn create_disk_and_iso(
 
     // 2. Create and populate the FAT32 filesystem.
     // Capture the actual size returned by create_fat32_image.
-    let fat32_image_actual_size = create_fat32_image(fat32_img_file.as_file_mut(), loader_path, kernel_path)?;
+    let fat32_image_actual_size =
+        create_fat32_image(fat32_img_file.as_file_mut(), loader_path, kernel_path)?;
 
     // Ensure the file is flushed to disk before create_iso_from_img reads it.
     fat32_img_file.as_file_mut().flush()?;
