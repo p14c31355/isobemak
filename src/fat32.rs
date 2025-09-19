@@ -50,7 +50,7 @@ pub fn create_fat32_image(
     let content_size = loader_size + kernel_size;
 
     // Add overhead, enforce a minimum size for FAT32, then round up to the nearest sector.
-    const MIN_FAT32_SIZE: u64 = 33 * 1024 * 1024;
+    const MIN_FAT32_SIZE: u64 = 65535 * 512; // Max sectors for El Torito Nsect (u16::MAX) * 512 bytes
     const FAT32_OVERHEAD: u64 = 2 * 1024 * 1024;
     let mut total_size = (content_size + FAT32_OVERHEAD).max(MIN_FAT32_SIZE);
     total_size = total_size.div_ceil(FAT32_SECTOR_SIZE) * FAT32_SECTOR_SIZE;
