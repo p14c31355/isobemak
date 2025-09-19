@@ -50,8 +50,7 @@ pub fn create_fat32_image(
     let mut total_size = bellows_size + kernel_size;
 
     // Round up to the next sector boundary (FAT32_SECTOR_SIZE)
-    total_size = ((total_size + FAT32_SECTOR_SIZE as u64 - 1) / FAT32_SECTOR_SIZE as u64)
-        * FAT32_SECTOR_SIZE as u64;
+    total_size = total_size.div_ceil(FAT32_SECTOR_SIZE) * FAT32_SECTOR_SIZE;
 
     // Optionally add extra 2 MB to be safe
     total_size += 2 * 1024 * 1024;

@@ -21,7 +21,7 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
             "Boot image is too large for El Torito specification",
         ));
     }
-    let boot_img_sectors = (boot_img_size + 511) / 512; // in 512-byte sectors
+    let boot_img_sectors = boot_img_size.div_ceil(512); // in 512-byte sectors
     let mut iso = File::create(iso_path)?;
 
     let root_entry = IsoDirEntry {
@@ -141,7 +141,7 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     pad_to_lba(&mut iso, boot_img_lba)?;
     let mut boot_img_file = File::open(boot_img_path)?;
     let written_size = copy(&mut boot_img_file, &mut iso)?;
-    let padded_size = boot_img_sectors as u64 * 512;
+    let padded_size = boot_img_sectors * 512;
     if written_size < padded_size {
         let padding = vec![0u8; (padded_size - written_size) as usize];
         iso.write_all(&padding)?;
