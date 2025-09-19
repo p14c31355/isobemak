@@ -34,7 +34,7 @@ pub fn create_fat32_image(
     if !bellows_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("bellows.efi not found at {:?}", bellows_path),
+            format!("Loader file not found at {:?}", bellows_path),
         ));
     }
     if !kernel_path.exists() {
