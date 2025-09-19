@@ -1,5 +1,4 @@
 // isobemak/src/fat32.rs
-use crate::utils::FAT32_SECTOR_SIZE;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::File,
