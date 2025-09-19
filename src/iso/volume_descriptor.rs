@@ -1,4 +1,4 @@
-// isobemak/src/volume_descriptor.rs
+// isobemak/src/iso/volume_descriptor.rs
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
@@ -82,4 +82,17 @@ pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
     term[1..6].copy_from_slice(ISO_ID);
     term[6] = ISO_VERSION;
     iso.write_all(&term)
+}
+
+/// A combined function to write all necessary volume descriptors in sequence.
+pub fn write_volume_descriptors(
+    iso: &mut File,
+    total_sectors: u32,
+    boot_catalog_lba: u32,
+    root_entry: &IsoDirEntry,
+) -> io::Result<()> {
+    write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
+    write_boot_record_volume_descriptor(iso, boot_catalog_lba)?;
+    write_volume_descriptor_terminator(iso)?;
+    Ok(())
 }

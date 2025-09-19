@@ -27,15 +27,14 @@ pub fn create_iso_from_img(
 
     let mut iso = File::create(iso_path)?;
 
+    // Write the Volume Descriptors.
     let root_entry = IsoDirEntry {
         lba: 20,
         size: ISO_SECTOR_SIZE as u32,
         flags: 0x02,
         name: ".",
     };
-    write_primary_volume_descriptor(&mut iso, 0, &root_entry)?;
-    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
-    write_volume_descriptor_terminator(&mut iso)?;
+    write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
     // The start LBA for the boot image. This is an ISO 9660 LBA (2048-byte unit).
     let boot_img_lba = 23;
@@ -150,8 +149,28 @@ pub fn create_iso_from_img(
         io::copy(&mut io::repeat(0).take(padding_size), &mut iso)?;
     }
 
+    // Ensure the ISO is padded to the next ISO_SECTOR_SIZE boundary before calculating total sectors.
+    let current_pos = iso.stream_position()?;
+    let remainder = current_pos % ISO_SECTOR_SIZE as u64;
+    if remainder != 0 {
+        let padding_needed = (ISO_SECTOR_SIZE as u64) - remainder;
+        io::copy(&mut io::repeat(0).take(padding_needed), &mut iso)?;
+    }
+
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+
+    if total_sectors > u32::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "ISO image too large: {} sectors, maximum is {}",
+                total_sectors,
+                u32::MAX
+            ),
+        ));
+    }
+
     update_4byte_fields(
         &mut iso,
         16,
@@ -159,7 +178,6 @@ pub fn create_iso_from_img(
         PVD_TOTAL_SECTORS_OFFSET + 4,
         total_sectors as u32,
     )?;
-    iso.set_len(total_sectors * ISO_SECTOR_SIZE as u64)?;
 
     println!(
         "create_iso_from_img: ISO created with {} sectors",
