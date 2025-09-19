@@ -47,13 +47,13 @@ pub fn create_fat32_image(
     // Calculate the minimum image size based on both files
     let bellows_size = bellows_path.metadata()?.len();
     let kernel_size = kernel_path.metadata()?.len();
-    let mut total_size = bellows_size + kernel_size;
+    let content_size = bellows_size + kernel_size;
 
-    // Round up to the next sector boundary (FAT32_SECTOR_SIZE)
+    // Add overhead, enforce a minimum size for FAT32, then round up to the nearest sector.
+    const MIN_FAT32_SIZE: u64 = 33 * 1024 * 1024;
+    const FAT32_OVERHEAD: u64 = 2 * 1024 * 1024;
+    let mut total_size = (content_size + FAT32_OVERHEAD).max(MIN_FAT32_SIZE);
     total_size = total_size.div_ceil(FAT32_SECTOR_SIZE) * FAT32_SECTOR_SIZE;
-
-    // Optionally add extra 2 MB to be safe
-    total_size += 2 * 1024 * 1024;
 
     writer.set_len(total_size)?;
     println!(
