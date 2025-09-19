@@ -64,13 +64,12 @@ pub fn create_fat_image(
     );
 
     // Determine FAT type based on total size
-    let fat_type = if total_size <= 4_294_967_295 {
-        // Max size for FAT16 is around 4GB
-        println!("create_fat_image: Formatting volume as FAT32 due to size.");
-        FatType::Fat32
-    } else {
+    let fat_type = if total_size < 32 * 1024 * 1024 { // Use FAT16 for volumes smaller than 32MB
         println!("create_fat_image: Formatting volume as FAT16 due to size.");
         FatType::Fat16
+    } else {
+        println!("create_fat_image: Formatting volume as FAT32 due to size.");
+        FatType::Fat32
     };
 
     // Format the file as a FAT volume
