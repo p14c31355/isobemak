@@ -25,16 +25,16 @@ fn copy_to_fat<T: Read + Write + Seek>(
 /// The image size is dynamically calculated based on the size of the bootloader and kernel.
 pub fn create_fat32_image(
     writer: &mut File,
-    bellows_path: &Path,
+    loader_path: &Path,
     kernel_path: &Path,
 ) -> io::Result<u32> {
     println!("create_fat32_image: Starting creation of FAT32 image.");
 
     // Ensure both files exist
-    if !bellows_path.exists() {
+    if !loader_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("Loader file not found at {:?}", bellows_path),
+            format!("Loader file not found at {:?}", loader_path),
         ));
     }
     if !kernel_path.exists() {
@@ -45,9 +45,9 @@ pub fn create_fat32_image(
     }
 
     // Calculate the minimum image size based on both files
-    let bellows_size = bellows_path.metadata()?.len();
+    let loader_size = loader_path.metadata()?.len();
     let kernel_size = kernel_path.metadata()?.len();
-    let content_size = bellows_size + kernel_size;
+    let content_size = loader_size + kernel_size;
 
     // Add overhead, enforce a minimum size for FAT32, then round up to the nearest sector.
     const MIN_FAT32_SIZE: u64 = 33 * 1024 * 1024;
@@ -76,7 +76,7 @@ pub fn create_fat32_image(
 
     // Copy the bootloader and kernel into the FAT32 filesystem
     println!("create_fat32_image: Copying bootloader and kernel.");
-    copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
+    copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
     copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
     println!("create_fat32_image: FAT32 image creation complete.");
