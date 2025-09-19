@@ -150,8 +150,25 @@ pub fn create_iso_from_img(
         io::copy(&mut io::repeat(0).take(padding_size), &mut iso)?;
     }
 
+    // Ensure the ISO is padded to the next ISO_SECTOR_SIZE boundary before calculating total sectors.
+    let current_pos = iso.stream_position()?;
+    let lba_to_pad_to = current_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    pad_to_lba(&mut iso, lba_to_pad_to)?;
+
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+
+    if total_sectors > u32::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!(
+                "ISO image too large: {} sectors, maximum is {}",
+                total_sectors,
+                u32::MAX
+            ),
+        ));
+    }
+
     update_4byte_fields(
         &mut iso,
         16,
