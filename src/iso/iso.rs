@@ -1,25 +1,29 @@
-// isobemak/src/iso.rs
-
-use crate::iso::boot_catalog::*;
+// src/iso/iso.rs
+use crate::iso::boot_catalog::{LBA_BOOT_CATALOG, write_boot_catalog};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
 use std::fs::File;
-use std::io::{self, Seek, Write, copy};
+use std::io::{self, Read, Seek, Write, copy};
 use std::path::Path;
 
 /// Creates an ISO image from a bootable image file.
-pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<()> {
-    let boot_img_metadata = std::fs::metadata(boot_img_path)?;
-    let boot_img_size = boot_img_metadata.len();
-    let boot_img_sectors_u64 = boot_img_size.div_ceil(512);
-    if boot_img_sectors_u64 > u16::MAX as u64 {
+pub fn create_iso_from_img(
+    iso_path: &Path,
+    boot_img_path: &Path,
+    boot_img_actual_size: u32,
+) -> io::Result<()> {
+    // Use the provided actual size directly.
+    let boot_img_size = boot_img_actual_size as u64;
+
+    // The boot image sector count must be in 512-byte units, as per the El Torito specification.
+    let boot_img_sectors = boot_img_size.div_ceil(512);
+    if boot_img_sectors > u16::MAX as u64 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "Boot image is too large for El Torito specification",
+            format!("Boot image too large: {} sectors", boot_img_sectors),
         ));
     }
-    let boot_img_sectors = boot_img_sectors_u64 as u16;
 
     let mut iso = File::create(iso_path)?;
 
@@ -33,7 +37,12 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
     write_volume_descriptor_terminator(&mut iso)?;
 
-    write_boot_catalog(&mut iso, 23, boot_img_sectors)?;
+    // The start LBA for the boot image. This is an ISO 9660 LBA (2048-byte unit).
+    let boot_img_lba = 23;
+
+    // Write the El Torito boot catalog.
+    // This function expects the boot image LBA (2048-byte units) and the sector count (512-byte units).
+    write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors as u16)?;
 
     // ISO9660 directories simplified
     pad_to_lba(&mut iso, 20)?;
@@ -118,7 +127,8 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
         }
         .to_bytes(),
         IsoDirEntry {
-            lba: 23,
+            // Use the correct ISO 9660 LBA for the boot image entry.
+            lba: boot_img_lba,
             size: boot_img_size as u32,
             flags: 0x00,
             name: "BOOTX64.EFI",
@@ -130,9 +140,15 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     boot_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&boot_dir_content)?;
 
-    pad_to_lba(&mut iso, 23)?;
+    // Pad to the correct LBA and copy the boot image content.
+    pad_to_lba(&mut iso, boot_img_lba)?;
     let mut boot_img_file = File::open(boot_img_path)?;
-    copy(&mut boot_img_file, &mut iso)?;
+    let written_size = copy(&mut boot_img_file, &mut iso)?;
+    let padded_size = boot_img_sectors * 512;
+    if written_size < padded_size {
+        let padding_size = padded_size - written_size;
+        io::copy(&mut io::repeat(0).take(padding_size), &mut iso)?;
+    }
 
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
