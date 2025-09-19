@@ -1,4 +1,4 @@
-// isobemak/src/boot_catalog.rs
+// isobemak/src/iso/boot_catalog.rs
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
 use std::io::{self, Write};
@@ -39,10 +39,13 @@ pub fn write_boot_catalog(
 
     // Boot entry
     let mut entry = [0u8; 32];
-    entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID;
-    entry[1] = 0x00;
-    entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes());
-    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes());
+    entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // 0x88 (bootable)
+    entry[1] = 0x00; // Boot Media Type = 0 (No emulation)
+    entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment = 0x0000 (UEFI)
+    entry[4] = 0x00; // System Type = 0x00 (UEFI)
+    entry[5] = 0x00; // Unused
+    entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector Count
+    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes()); // LBA
     cat[32..64].copy_from_slice(&entry);
 
     iso.write_all(&cat)

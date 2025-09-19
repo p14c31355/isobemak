@@ -7,12 +7,6 @@ use std::{
     path::Path,
 };
 
-// To ensure the volume is formatted as FAT32, we must use a sufficiently large size.
-// A cluster count greater than 65524 is required for FAT32.
-// 131072 sectors (64MB) will result in a cluster count well over this limit.
-const FAT32_IMAGE_SECTOR_COUNT: u64 = 131072;
-const FAT32_IMAGE_SIZE: u64 = FAT32_IMAGE_SECTOR_COUNT * FAT32_SECTOR_SIZE;
-
 /// Copies a file from the host filesystem into a FAT32 directory.
 fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
@@ -28,7 +22,7 @@ fn copy_to_fat<T: Read + Write + Seek>(
 }
 
 /// Creates a FAT32 image file and populates it with the necessary files for UEFI boot.
-/// This function uses the `fatfs` crate for high-level filesystem operations.
+/// The image size is dynamically calculated based on the size of the bootloader and kernel.
 pub fn create_fat32_image(
     writer: &mut File,
     bellows_path: &Path,
@@ -36,41 +30,56 @@ pub fn create_fat32_image(
 ) -> io::Result<u32> {
     println!("create_fat32_image: Starting creation of FAT32 image.");
 
-    // 1. Set the size of the image file
-    writer.set_len(FAT32_IMAGE_SIZE)?;
-
-    // 2. Format the file as a FAT32 volume
-    println!("create_fat32_image: Formatting volume as FAT32.");
-    fatfs::format_volume(
-        &mut *writer,
-        FormatVolumeOptions::new().fat_type(FatType::Fat32),
-    )?;
-
-    // 3. Get the root directory and create the necessary directory structure
-    let fs = FileSystem::new(&mut *writer, FsOptions::new())?;
-    let root_dir = fs.root_dir();
-    let efi_dir = root_dir.create_dir("EFI")?;
-    let boot_dir = efi_dir.create_dir("BOOT")?;
-
-    // 4. Copy the bootloader and kernel into the FAT32 filesystem
-    println!("create_fat32_image: Copying bootloader and kernel.");
-
+    // Ensure both files exist
     if !bellows_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("bellows.efi not found at {:?}", bellows_path),
         ));
     }
-    copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
-
     if !kernel_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("kernel.bin not found at {:?}", kernel_path),
         ));
     }
+
+    // Calculate the minimum image size based on both files
+    let bellows_size = bellows_path.metadata()?.len();
+    let kernel_size = kernel_path.metadata()?.len();
+    let mut total_size = bellows_size + kernel_size;
+
+    // Round up to the next sector boundary (FAT32_SECTOR_SIZE)
+    total_size = ((total_size + FAT32_SECTOR_SIZE as u64 - 1) / FAT32_SECTOR_SIZE as u64)
+        * FAT32_SECTOR_SIZE as u64;
+
+    // Optionally add extra 2 MB to be safe
+    total_size += 2 * 1024 * 1024;
+
+    writer.set_len(total_size)?;
+    println!(
+        "create_fat32_image: FAT32 image size set to {} bytes.",
+        total_size
+    );
+
+    // Format the file as a FAT32 volume
+    println!("create_fat32_image: Formatting volume as FAT32.");
+    fatfs::format_volume(
+        &mut *writer,
+        FormatVolumeOptions::new().fat_type(FatType::Fat32),
+    )?;
+
+    // Open filesystem and create directories
+    let fs = FileSystem::new(&mut *writer, FsOptions::new())?;
+    let root_dir = fs.root_dir();
+    let efi_dir = root_dir.create_dir("EFI")?;
+    let boot_dir = efi_dir.create_dir("BOOT")?;
+
+    // Copy the bootloader and kernel into the FAT32 filesystem
+    println!("create_fat32_image: Copying bootloader and kernel.");
+    copy_to_fat(&boot_dir, bellows_path, "BOOTX64.EFI")?;
     copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
     println!("create_fat32_image: FAT32 image creation complete.");
-    Ok(FAT32_IMAGE_SIZE as u32)
+    Ok(total_size as u32)
 }
