@@ -18,12 +18,12 @@ pub fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
 }
 
 /// Pads the ISO file with zeros to align to a specific LBA.
-pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
-    let target_pos = lba as u64 * ISO_SECTOR_SIZE as u64;
-    let current_pos = iso.stream_position()?;
-    if current_pos < target_pos {
-        let padding_bytes = target_pos - current_pos;
-        io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
+pub fn pad_to_lba(f: &mut File, lba: u32) -> io::Result<()> {
+    let pos = f.stream_position()?; 
+    let target = lba as u64 * ISO_SECTOR_SIZE as u64;
+    if pos < target {
+        let pad = vec![0u8; (target - pos) as usize];
+        f.write_all(&pad)?;
     }
     Ok(())
 }
