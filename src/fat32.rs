@@ -40,7 +40,7 @@ pub fn create_fat32_image(
     if !kernel_path.exists() {
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
-            format!("kernel.bin not found at {:?}", kernel_path),
+            format!("Kernel file not found at {:?}", kernel_path),
         ));
     }
 
