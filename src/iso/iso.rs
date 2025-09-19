@@ -27,15 +27,14 @@ pub fn create_iso_from_img(
 
     let mut iso = File::create(iso_path)?;
 
+    // Write the Volume Descriptors.
     let root_entry = IsoDirEntry {
         lba: 20,
         size: ISO_SECTOR_SIZE as u32,
         flags: 0x02,
         name: ".",
     };
-    write_primary_volume_descriptor(&mut iso, 0, &root_entry)?;
-    write_boot_record_volume_descriptor(&mut iso, LBA_BOOT_CATALOG)?;
-    write_volume_descriptor_terminator(&mut iso)?;
+    write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
     // The start LBA for the boot image. This is an ISO 9660 LBA (2048-byte unit).
     let boot_img_lba = 23;

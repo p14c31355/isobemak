@@ -1,4 +1,4 @@
-// isobemak/src/dir_record.rs
+// isobemak/src/iso/dir_record.rs
 
 /// ISO9660 directory record structure
 pub struct IsoDirEntry<'a> {
