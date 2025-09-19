@@ -143,8 +143,8 @@ pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<
     let written_size = copy(&mut boot_img_file, &mut iso)?;
     let padded_size = boot_img_sectors * 512;
     if written_size < padded_size {
-        let padding = vec![0u8; (padded_size - written_size) as usize];
-        iso.write_all(&padding)?;
+        let padding_size = padded_size - written_size;
+        io::copy(&mut io::repeat(0).take(padding_size), &mut iso)?;
     }
 
     let final_pos = iso.stream_position()?;
