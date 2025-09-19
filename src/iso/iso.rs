@@ -152,8 +152,11 @@ pub fn create_iso_from_img(
 
     // Ensure the ISO is padded to the next ISO_SECTOR_SIZE boundary before calculating total sectors.
     let current_pos = iso.stream_position()?;
-    let lba_to_pad_to = current_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-    pad_to_lba(&mut iso, lba_to_pad_to)?;
+    let remainder = current_pos % ISO_SECTOR_SIZE as u64;
+    if remainder != 0 {
+        let padding_needed = (ISO_SECTOR_SIZE as u64) - remainder;
+        io::copy(&mut io::repeat(0).take(padding_needed), &mut iso)?;
+    }
 
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
