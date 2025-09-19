@@ -80,5 +80,5 @@ pub fn create_fat32_image(
     copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
     println!("create_fat32_image: FAT32 image creation complete.");
-    Ok(total_size as u32)
+    Ok(u32::try_from(total_size).map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Image size exceeds 4GB limit"))?)
 }
