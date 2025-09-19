@@ -53,7 +53,7 @@ pub fn create_fat32_image(
     total_size = total_size.div_ceil(FAT32_SECTOR_SIZE) * FAT32_SECTOR_SIZE;
 
     // Optionally add extra 2 MB to be safe
-    total_size = (total_size + 2 * 1024 * 1024).max(64 * 1024 * 1024);
+    total_size += 2 * 1024 * 1024;
 
     writer.set_len(total_size)?;
     println!(

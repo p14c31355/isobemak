@@ -5,7 +5,7 @@ use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
 use std::fs::File;
-use std::io::{self, Seek, Write, copy};
+use std::io::{self, Seek, Write, copy, Read};
 use std::path::Path;
 
 /// Creates an ISO image from a bootable image file.
