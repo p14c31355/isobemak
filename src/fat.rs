@@ -49,7 +49,7 @@ pub fn create_fat_image(
     let content_size = loader_size + kernel_size;
 
     // Add overhead and enforce a minimum size.
-    const MIN_FAT_SIZE: u64 = 65535 * 512; // Max sectors for El Torito Nsect (u16::MAX) * 512 bytes
+    const MIN_FAT_SIZE: u64 = 65535 * 512; // ~32MB. Set a minimum size to ensure enough clusters for FAT32 formatting.
     const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;
     let mut total_size = (content_size + FAT_OVERHEAD).max(MIN_FAT_SIZE);
 
