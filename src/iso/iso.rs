@@ -1,6 +1,5 @@
-// isobemak/src/iso.rs
-
-use crate::iso::boot_catalog::*;
+// src/iso/iso.rs
+use crate::iso::boot_catalog::{write_boot_catalog, LBA_BOOT_CATALOG};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
@@ -9,9 +8,9 @@ use std::io::{self, Read, Seek, Write, copy};
 use std::path::Path;
 
 /// Creates an ISO image from a bootable image file.
-pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path) -> io::Result<()> {
-    let boot_img_metadata = std::fs::metadata(boot_img_path)?;
-    let boot_img_size = boot_img_metadata.len();
+pub fn create_iso_from_img(iso_path: &Path, boot_img_path: &Path, boot_img_actual_size: u32) -> io::Result<()> {
+    // Use the provided actual size directly.
+    let boot_img_size = boot_img_actual_size as u64;
 
     // The boot image sector count must be in 512-byte units, as per the El Torito specification.
     let boot_img_sectors = boot_img_size.div_ceil(512);
