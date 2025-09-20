@@ -68,7 +68,7 @@ pub fn create_iso_from_img(
         .map(|e| e.to_bytes().len())
         .sum::<usize>() as u32;
 
-    let mut efi_dir_entries_structs = vec![
+    let mut efi_dir_entries_structs = [
         IsoDirEntry {
             lba: 21,
             size: 0,
