@@ -23,7 +23,7 @@ pub fn create_disk_and_iso(
 
     // --- 1. Create the FAT image ---
     // The FAT image will contain BOOTX64.EFI and KERNEL.EFI automatically.
-    create_fat_image(fat_img_path, loader_path, kernel_path)?;
+    let _ = create_fat_image(fat_img_path, loader_path, kernel_path)?;
     println!(
         "create_disk_and_iso: FAT image created at {:?}",
         fat_img_path
