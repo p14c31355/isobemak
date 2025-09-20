@@ -19,7 +19,6 @@ pub fn create_iso_from_img(
     // --- Create FAT image and get padded size ---
     let fat_img_size = std::fs::metadata(fat_img_path)?.len();
     let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
-    let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
 
     // --- Define LBAs ---
     let boot_img_lba = 23; // LBA where Boot-NoEmul.img will be placed
@@ -118,7 +117,7 @@ pub fn create_iso_from_img(
 
     // --- Write directories to ISO ---
     pad_to_lba(&mut iso, 20)?;
-    for e in &root_dir_entries {
+    for e in &boot_dir_entries {
         iso.write_all(&e.to_bytes())?;
     }
     pad_to_lba(&mut iso, 21)?;
