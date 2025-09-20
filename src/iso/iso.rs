@@ -11,6 +11,14 @@ const LBA_ROOT_DIR: u32 = 20;
 const LBA_EFI_DIR: u32 = 21;
 const LBA_BOOT_DIR: u32 = 22;
 
+fn write_directory(iso: &mut File, lba: u32, entries: &[IsoDirEntry]) -> io::Result<()> {
+    pad_to_lba(iso, lba)?;
+    for e in entries {
+        iso.write_all(&e.to_bytes())?;
+    }
+    Ok(())
+}
+
 /// Creates an ISO 9660 image with a FAT boot image (El Torito) and a UEFI kernel.
 pub fn create_iso_from_img(
     iso_path: &Path,
