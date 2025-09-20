@@ -7,8 +7,8 @@ use std::fs::File;
 use std::io::{self, copy, Seek, SeekFrom, Write, Read};
 use std::path::Path;
 
-/// Creates an ISO image from a bootable FAT image file and a kernel EFI file.
-/// Both files are placed in the same BOOT directory for minimal ISO9660.
+/// Creates a minimal ISO containing a FAT boot image (BOOTX64.EFI) and kernel (KERNEL.EFI)
+/// in the same BOOT directory, with proper El Torito catalog.
 pub fn create_iso_from_img(
     iso_path: &Path,
     fat_img_path: &Path,
@@ -63,7 +63,7 @@ pub fn create_iso_from_img(
     efi_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_dir_content)?;
 
-    // --- BOOT Directory ---
+    // --- BOOT Directory (initial) ---
     pad_to_lba(&mut iso, 22)?;
     let mut boot_dir_entries = vec![
         IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." }.to_bytes(),
@@ -86,28 +86,28 @@ pub fn create_iso_from_img(
     }
 
     // --- Copy Kernel.EFI ---
-    let kernel_lba = iso.stream_position()? / ISO_SECTOR_SIZE as u64;
-    pad_to_lba(&mut iso, kernel_lba as u32)?;
+    let kernel_lba = boot_img_lba + boot_img_sectors as u32; // Next free LBA after FAT image
+    pad_to_lba(&mut iso, kernel_lba)?;
     let mut kernel_file = File::open(kernel_path)?;
     let kernel_size = copy(&mut kernel_file, &mut iso)? as u32;
 
     // --- Update BOOT Directory with Kernel entry ---
     boot_dir_entries.push(
         IsoDirEntry {
-            lba: kernel_lba as u32,
+            lba: kernel_lba,
             size: kernel_size,
             flags: 0x00,
             name: "KERNEL.EFI",
         }.to_bytes()
     );
-    // Re-pad and overwrite BOOT directory
+    // Re-pad BOOT directory
     let mut final_boot_dir = boot_dir_entries.concat();
     let pad_sectors = (final_boot_dir.len() + ISO_SECTOR_SIZE - 1) / ISO_SECTOR_SIZE;
     final_boot_dir.resize(pad_sectors * ISO_SECTOR_SIZE, 0);
     iso.seek(SeekFrom::Start(22 * ISO_SECTOR_SIZE as u64))?;
     iso.write_all(&final_boot_dir)?;
 
-    // --- Final ISO Padding ---
+    // --- Final ISO padding ---
     let current_pos = iso.stream_position()?;
     let remainder = current_pos % ISO_SECTOR_SIZE as u64;
     if remainder != 0 {
