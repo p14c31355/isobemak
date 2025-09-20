@@ -2,7 +2,7 @@
 use crate::utils;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
-    fs::{File, OpenOptions},
+    fs::OpenOptions,
     io::{self, Seek, Write},
     path::Path,
 };
