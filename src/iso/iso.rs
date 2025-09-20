@@ -21,24 +21,23 @@ fn write_directory(iso: &mut File, lba: u32, entries: &[IsoDirEntry]) -> io::Res
     iso.write_all(&dir_content)
 }
 
-/// Creates an ISO 9660 image with a FAT boot image (El Torito) and a UEFI kernel.
+/// Creates an ISO 9660 image for UEFI boot without requiring a BIOS boot image.
+/// The ISO contains EFI/BOOT/BOOTX64.EFI and KERNEL.EFI.
 pub fn create_iso_from_img(
     iso_path: &Path,
-    fat_img_path: &Path,
+    loader_path: &Path,
     kernel_path: &Path,
 ) -> io::Result<()> {
-    // Open ISO file for writing
     let mut iso = File::create(iso_path)?;
 
-    // Create FAT image and get padded size
-    let fat_img_size = std::fs::metadata(fat_img_path)?.len();
-    let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
+    // Get metadata once to avoid redundant syscalls
+    let loader_size = std::fs::metadata(loader_path)?.len() as u32;
+    let kernel_size = std::fs::metadata(kernel_path)?.len() as u32;
 
-    // Define LBAs
-    let boot_img_lba = 23; // LBA where Boot-NoEmul.img will be placed
-    let kernel_metadata = std::fs::metadata(kernel_path)?;
-    let kernel_size = kernel_metadata.len() as u32;
-    let kernel_lba = boot_img_lba + fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    // Calculate LBAs for loader and kernel to avoid file overwrites
+    let loader_lba = LBA_BOOT_DIR + 1;
+    let loader_sectors = loader_size.div_ceil(ISO_SECTOR_SIZE as u32);
+    let kernel_lba = loader_lba + loader_sectors;
 
     // Write Primary Volume Descriptor
     let root_entry = IsoDirEntry {
@@ -49,19 +48,10 @@ pub fn create_iso_from_img(
     };
     write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
-    // Write El Torito Boot Catalog
-    if fat_img_sectors > u16::MAX as u32 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "Boot image too large for boot catalog: {} 512-byte sectors",
-                fat_img_sectors
-            ),
-        ));
-    }
-    write_boot_catalog(&mut iso, boot_img_lba, fat_img_sectors as u16)?;
+    // Write El Torito Boot Catalog (No Emulation)
+    write_boot_catalog(&mut iso, loader_lba, 0)?; // sectors=0 for UEFI No Emulation
 
-    // Prepare directory entries
+    // Directory entries
     let root_dir_entries = [
         IsoDirEntry {
             lba: LBA_ROOT_DIR,
@@ -82,6 +72,7 @@ pub fn create_iso_from_img(
             name: "EFI",
         },
     ];
+
     let efi_dir_entries = [
         IsoDirEntry {
             lba: LBA_EFI_DIR,
@@ -102,6 +93,7 @@ pub fn create_iso_from_img(
             name: "BOOT",
         },
     ];
+
     let boot_dir_entries = [
         IsoDirEntry {
             lba: LBA_BOOT_DIR,
@@ -116,8 +108,8 @@ pub fn create_iso_from_img(
             name: "..",
         },
         IsoDirEntry {
-            lba: boot_img_lba,
-            size: fat_img_size as u32,
+            lba: loader_lba,
+            size: loader_size,
             flags: 0x00,
             name: "BOOTX64.EFI",
         },
@@ -129,22 +121,22 @@ pub fn create_iso_from_img(
         },
     ];
 
-    // Write directories to ISO
+    // Write directories
     write_directory(&mut iso, LBA_ROOT_DIR, &root_dir_entries)?;
     write_directory(&mut iso, LBA_EFI_DIR, &efi_dir_entries)?;
     write_directory(&mut iso, LBA_BOOT_DIR, &boot_dir_entries)?;
 
-    // Copy FAT boot image
-    pad_to_lba(&mut iso, boot_img_lba)?;
-    let mut fat_file = File::open(fat_img_path)?;
-    copy(&mut fat_file, &mut iso)?;
+    // Copy loader (BOOTX64.EFI)
+    pad_to_lba(&mut iso, loader_lba)?;
+    let mut loader_file = File::open(loader_path)?;
+    copy(&mut loader_file, &mut iso)?;
 
     // Copy kernel
     pad_to_lba(&mut iso, kernel_lba)?;
     let mut kernel_file = File::open(kernel_path)?;
     copy(&mut kernel_file, &mut iso)?;
 
-    // Final padding to ISO sector
+    // Final padding
     let current_pos = iso.stream_position()?;
     let remainder = current_pos % ISO_SECTOR_SIZE as u64;
     if remainder != 0 {
