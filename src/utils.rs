@@ -5,7 +5,7 @@ pub const ISO_SECTOR_SIZE: usize = 2048;
 use fatfs::{self};
 use std::{
     fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
+    io::{self, Read, Seek, Write},
     path::Path,
 };
 

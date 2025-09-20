@@ -2,7 +2,7 @@
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
-use std::io::{self, Write, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 
 pub const ISO_VOLUME_DESCRIPTOR_TERMINATOR: u8 = 255;
 pub const ISO_VOLUME_DESCRIPTOR_PRIMARY: u8 = 1;
@@ -118,10 +118,7 @@ pub fn write_volume_descriptors(
 }
 
 /// Updates the total sector count in the Primary Volume Descriptor (PVD).
-pub fn update_total_sectors_in_pvd(
-    iso: &mut File,
-    total_sectors: u32,
-) -> io::Result<()> {
+pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     update_4byte_fields(
         iso,
         16,

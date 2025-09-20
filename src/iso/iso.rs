@@ -25,8 +25,7 @@ pub fn create_iso_from_img(
     let kernel_size = kernel_metadata.len() as u32;
 
     // Calculate kernel LBA
-    let kernel_lba =
-        boot_img_lba + fat_img_size_u64.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    let kernel_lba = boot_img_lba + fat_img_size_u64.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     // Define directory entries with calculated LBAs and sizes
     let boot_dir_entries_structs_with_kernel = vec![
