@@ -23,7 +23,7 @@ pub fn create_disk_and_iso(
     println!("create_disk_and_iso: Starting process...");
 
     // 1. Create the FAT image.
-    let _ = create_fat_image(fat_img_path, loader_path, kernel_path)?;
+    create_fat_image(fat_img_path, loader_path, kernel_path)?;
     println!(
         "create_disk_and_iso: FAT image created at {:?}",
         fat_img_path
