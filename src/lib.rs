@@ -25,7 +25,7 @@ pub fn create_disk_and_iso(
     let boot_img_size = std::fs::metadata(loader_path)?.len();
     let boot_img_sectors = boot_img_size.div_ceil(512);
 
-    create_iso_from_img(iso_path, loader_path, boot_img_sectors as u32 * 512)?;
+    create_iso_from_img(iso_path, loader_path, kernel_path, boot_img_sectors as u32 * 512)?;
 
     println!("create_disk_and_iso: Process complete. ISO created successfully.");
     Ok(())
