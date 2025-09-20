@@ -82,7 +82,9 @@ pub fn create_fat_image(
     utils::copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
     utils::copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
-    println!("create_fat_image: FAT image creation complete.");
-    u32::try_from(total_size)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Image size exceeds 4GB limit"))
+     println!("create_fat_image: FAT image creation complete.");
+    if total_size > u32::MAX as u64 {
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "Image size exceeds 4GB limit"));
+    }
+    Ok(())
 }
