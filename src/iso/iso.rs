@@ -102,7 +102,7 @@ pub fn create_iso_from_img(
             name: ".",
         },
         IsoDirEntry {
-            lba: 22,
+            lba: 21,
             size: ISO_SECTOR_SIZE as u32,
             flags: 0x02,
             name: "..",
