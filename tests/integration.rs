@@ -5,7 +5,7 @@ use std::{
 };
 
 use isobemak::create_disk_and_iso;
-use tempfile::{tempdir, NamedTempFile};
+use tempfile::{NamedTempFile, tempdir};
 
 #[test]
 fn test_create_disk_and_iso() -> io::Result<()> {
