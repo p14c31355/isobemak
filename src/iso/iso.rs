@@ -30,9 +30,16 @@ pub fn create_iso_from_img(
 ) -> io::Result<()> {
     let mut iso = File::create(iso_path)?;
 
-    // Determine LBAs for kernel
-    let kernel_size = std::fs::metadata(kernel_path)?.len() as u32;
-    let kernel_lba = LBA_BOOT_DIR + 1; // kernel placed after BOOT directory
+    // Get metadata once to avoid redundant syscalls
+    let loader_metadata = std::fs::metadata(loader_path)?;
+    let loader_size = loader_metadata.len() as u32;
+    let kernel_metadata = std::fs::metadata(kernel_path)?;
+    let kernel_size = kernel_metadata.len() as u32;
+
+    // Calculate LBAs for loader and kernel to avoid file overwrites
+    let loader_lba = LBA_BOOT_DIR + 1;
+    let loader_sectors = (loader_size as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+    let kernel_lba = loader_lba + loader_sectors;
 
     // Write Primary Volume Descriptor
     let root_entry = IsoDirEntry {
@@ -44,7 +51,7 @@ pub fn create_iso_from_img(
     write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
     // Write El Torito Boot Catalog (No Emulation)
-    write_boot_catalog(&mut iso, LBA_BOOT_DIR, 0)?; // sectors=0 for UEFI No Emulation
+    write_boot_catalog(&mut iso, loader_lba, 0)?; // sectors=0 for UEFI No Emulation
 
     // Directory entries
     let root_dir_entries = [
@@ -103,8 +110,8 @@ pub fn create_iso_from_img(
             name: "..",
         },
         IsoDirEntry {
-            lba: LBA_BOOT_DIR,
-            size: std::fs::metadata(loader_path)?.len() as u32,
+            lba: loader_lba,
+            size: loader_size,
             flags: 0x00,
             name: "BOOTX64.EFI",
         },
@@ -122,7 +129,7 @@ pub fn create_iso_from_img(
     write_directory(&mut iso, LBA_BOOT_DIR, &boot_dir_entries)?;
 
     // Copy loader (BOOTX64.EFI)
-    pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
+    pad_to_lba(&mut iso, loader_lba)?;
     let mut loader_file = File::open(loader_path)?;
     copy(&mut loader_file, &mut iso)?;
 
