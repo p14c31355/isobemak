@@ -24,7 +24,7 @@ pub fn create_iso_from_img(
     let boot_img_lba = 23; // LBA where Boot-NoEmul.img will be placed
     let kernel_metadata = std::fs::metadata(kernel_path)?;
     let kernel_size = kernel_metadata.len() as u32;
-    let kernel_lba = boot_img_lba + fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    let kernel_lba = boot_img_lba + (fat_img_size as u64).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     // --- Write Primary Volume Descriptor ---
     let root_entry = IsoDirEntry {
