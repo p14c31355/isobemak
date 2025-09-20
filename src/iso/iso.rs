@@ -41,12 +41,12 @@ pub fn create_iso_from_img(
             flags: 0x02,
             name: "..",
         },
-        IsoDirEntry {
-            lba: boot_img_lba,
-            size: fat_img_padded_size,
-            flags: 0x00,
-            name: "BOOTX64.EFI",
-        },
+        // IsoDirEntry {
+        //     lba: boot_img_lba,
+        //     size: fat_img_padded_size,
+        //     flags: 0x00,
+        //     name: "BOOTX64.EFI",
+        // },
         IsoDirEntry {
             lba: kernel_lba,
             size: kernel_size,
