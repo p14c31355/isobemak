@@ -31,10 +31,8 @@ pub fn create_iso_from_img(
     let mut iso = File::create(iso_path)?;
 
     // Get metadata once to avoid redundant syscalls
-    let loader_metadata = std::fs::metadata(loader_path)?;
-    let loader_size = loader_metadata.len() as u32;
-    let kernel_metadata = std::fs::metadata(kernel_path)?;
-    let kernel_size = kernel_metadata.len() as u32;
+    let loader_size = std::fs::metadata(loader_path)?.len() as u32;
+    let kernel_size = std::fs::metadata(kernel_path)?.len() as u32;
 
     // Calculate LBAs for loader and kernel to avoid file overwrites
     let loader_lba = LBA_BOOT_DIR + 1;
