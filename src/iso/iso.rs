@@ -38,7 +38,7 @@ pub fn create_iso_from_img(
 
     // Calculate LBAs for loader and kernel to avoid file overwrites
     let loader_lba = LBA_BOOT_DIR + 1;
-    let loader_sectors = (loader_size as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+    let loader_sectors = loader_size.div_ceil(ISO_SECTOR_SIZE as u32);
     let kernel_lba = loader_lba + loader_sectors;
 
     // Write Primary Volume Descriptor
