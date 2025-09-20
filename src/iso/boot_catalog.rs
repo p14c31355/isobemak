@@ -40,7 +40,7 @@ pub fn write_boot_catalog(
     // Temporarily zero out the checksum field for calculation
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2].copy_from_slice(&[0, 0]);
     let mut sum: u16 = 0;
-    for i in (0..30).step_by(2) {
+    for i in (0..32).step_by(2) {
         sum = sum.wrapping_add(u16::from_le_bytes([val[i], val[i + 1]]));
     }
     let checksum = 0u16.wrapping_sub(sum);
