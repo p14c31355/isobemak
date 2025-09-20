@@ -2,7 +2,7 @@
 use crate::iso::boot_catalog::{LBA_BOOT_CATALOG, write_boot_catalog};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
-use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba, update_4byte_fields};
+use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write, copy};
 use std::path::Path;
@@ -12,31 +12,23 @@ pub fn create_iso_from_img(
     iso_path: &Path,
     fat_img_path: &Path,
     kernel_path: &Path,
-    fat_img_actual_size: u32,
+    fat_img_padded_size: u32,
 ) -> io::Result<()> {
-    let fat_img_size = fat_img_actual_size as u64;
-    let boot_img_sectors_512 = fat_img_size.div_ceil(512) as u32;
-    let boot_img_sectors_iso = fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-
-    if boot_img_sectors_iso > u32::MAX {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Boot image too large: {} sectors", boot_img_sectors_iso),
-        ));
-    }
+    let fat_img_size_u64 = fat_img_padded_size as u64;
+    let boot_img_sectors_512 = fat_img_size_u64.div_ceil(512) as u32;
 
     let mut iso = File::create(iso_path)?;
     let boot_img_lba = 23;
 
-    // Get kernel size early
+    // Get kernel size
     let kernel_metadata = std::fs::metadata(kernel_path)?;
     let kernel_size = kernel_metadata.len() as u32;
-    let _kernel_sectors = kernel_size.div_ceil(ISO_SECTOR_SIZE as u32);
 
+    // Calculate kernel LBA
     let kernel_lba =
-        boot_img_lba + (boot_img_sectors_512 as u64 * 512).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+        boot_img_lba + fat_img_size_u64.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
-    // Define structs with placeholder sizes first
+    // Define directory entries with calculated LBAs and sizes
     let boot_dir_entries_structs_with_kernel = vec![
         IsoDirEntry {
             lba: 22,
@@ -52,7 +44,7 @@ pub fn create_iso_from_img(
         },
         IsoDirEntry {
             lba: boot_img_lba,
-            size: fat_img_size as u32,
+            size: fat_img_padded_size,
             flags: 0x00,
             name: "BOOTX64.EFI",
         },
@@ -112,15 +104,10 @@ pub fn create_iso_from_img(
         },
     ];
 
-    // Calculate sizes based on the defined structs
-    let root_dir_size = ISO_SECTOR_SIZE as u32;
-
-    // Update sizes in the structs (already set to ISO_SECTOR_SIZE as u32)
-    // No need to update here as they are already set to the correct padded size.
-
+    // Define the root directory entry for the PVD
     let root_entry = IsoDirEntry {
         lba: 20,
-        size: root_dir_size,
+        size: ISO_SECTOR_SIZE as u32,
         flags: 0x02,
         name: ".",
     };
@@ -138,7 +125,7 @@ pub fn create_iso_from_img(
     }
     write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors_512 as u16)?;
 
-    // --- Root Directory ---
+    // --- Write Root Directory ---
     pad_to_lba(&mut iso, 20)?;
     let root_dir_entries_bytes = root_dir_entries_structs
         .iter()
@@ -148,7 +135,7 @@ pub fn create_iso_from_img(
     root_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&root_dir_content)?;
 
-    // --- EFI Directory ---
+    // --- Write EFI Directory ---
     pad_to_lba(&mut iso, 21)?;
     let efi_dir_entries_bytes = efi_dir_entries_structs
         .iter()
@@ -158,11 +145,10 @@ pub fn create_iso_from_img(
     efi_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_dir_content)?;
 
-    // --- BOOT Directory (initial) ---
+    // --- Write BOOT Directory ---
     pad_to_lba(&mut iso, 22)?;
     let boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel;
 
-    // Reserve space for BOOT directory
     let boot_dir_content_bytes = boot_dir_entries_structs_final
         .iter()
         .flat_map(|e| e.to_bytes())
@@ -175,7 +161,7 @@ pub fn create_iso_from_img(
     pad_to_lba(&mut iso, boot_img_lba)?;
     let mut fat_file = File::open(fat_img_path)?;
     let written_fat = copy(&mut fat_file, &mut iso)?;
-    let fat_padded = boot_img_sectors_iso as u64 * ISO_SECTOR_SIZE as u64;
+    let fat_padded = fat_img_padded_size as u64;
     if written_fat < fat_padded {
         io::copy(&mut io::repeat(0).take(fat_padded - written_fat), &mut iso)?;
     }
@@ -196,7 +182,7 @@ pub fn create_iso_from_img(
     }
 
     // --- Update Total Sectors in PVD ---
-    iso.seek(SeekFrom::End(0))?; // Seek to end to get accurate final_pos
+    iso.seek(SeekFrom::End(0))?;
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
     if total_sectors > u32::MAX as u64 {
@@ -205,13 +191,7 @@ pub fn create_iso_from_img(
             "ISO image too large",
         ));
     }
-    update_4byte_fields(
-        &mut iso,
-        16,
-        PVD_TOTAL_SECTORS_OFFSET,
-        PVD_TOTAL_SECTORS_OFFSET + 4,
-        total_sectors as u32,
-    )?;
+    update_total_sectors_in_pvd(&mut iso, total_sectors as u32)?;
 
     println!(
         "create_iso_from_img: ISO created with {} sectors",

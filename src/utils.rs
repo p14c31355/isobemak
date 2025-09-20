@@ -29,27 +29,6 @@ pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     Ok(())
 }
 
-/// A helper function to update two 4-byte fields at different offsets
-/// within a single ISO sector (2048 bytes). This is used for the
-/// total sector count in the PVD.
-pub fn update_4byte_fields(
-    iso: &mut File,
-    base_lba: u32,
-    offset1: usize,
-    offset2: usize,
-    value: u32,
-) -> io::Result<()> {
-    let base_offset = base_lba as u64 * ISO_SECTOR_SIZE as u64;
-
-    iso.seek(SeekFrom::Start(base_offset + offset1 as u64))?;
-    iso.write_all(&value.to_le_bytes())?;
-
-    iso.seek(SeekFrom::Start(base_offset + offset2 as u64))?;
-    iso.write_all(&value.to_be_bytes())?;
-
-    Ok(())
-}
-
 /// Copies a file from the host filesystem into a FAT directory.
 pub fn copy_to_fat<T: Read + Write + Seek>(
     dir: &fatfs::Dir<T>,
