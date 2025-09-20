@@ -15,8 +15,8 @@ pub fn create_iso_from_img(
     fat_img_actual_size: u32,
 ) -> io::Result<()> {
     let fat_img_size = fat_img_actual_size as u64;
-    let boot_img_sectors = fat_img_size.div_ceil(512);
-    if boot_img_sectors > u16::MAX as u64 {
+    let boot_img_sectors = fat_img_size.div_ceil(512) as u32;
+    if boot_img_sectors > u32::MAX {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("Boot image too large: {} sectors", boot_img_sectors),
@@ -29,10 +29,10 @@ pub fn create_iso_from_img(
     // Get kernel size early
     let kernel_metadata = std::fs::metadata(kernel_path)?;
     let kernel_size = kernel_metadata.len() as u32;
-    let kernel_sectors = kernel_size.div_ceil(ISO_SECTOR_SIZE as u32);
+    let _kernel_sectors = kernel_size.div_ceil(ISO_SECTOR_SIZE as u32);
 
     let kernel_lba =
-        boot_img_lba + (boot_img_sectors * 512).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+        boot_img_lba + (boot_img_sectors as u64 * 512).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     // Define structs with placeholder sizes first
     let boot_dir_entries_structs_with_kernel = vec![
@@ -125,7 +125,7 @@ pub fn create_iso_from_img(
     write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
     // --- El Torito Boot Catalog ---
-    write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors as u16)?;
+    write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors)?;
 
     // --- Root Directory ---
     pad_to_lba(&mut iso, 20)?;
@@ -164,7 +164,7 @@ pub fn create_iso_from_img(
     pad_to_lba(&mut iso, boot_img_lba)?;
     let mut fat_file = File::open(fat_img_path)?;
     let written_fat = copy(&mut fat_file, &mut iso)?;
-    let fat_padded = boot_img_sectors * 512;
+    let fat_padded = boot_img_sectors as u64 * 512;
     if written_fat < fat_padded {
         io::copy(&mut io::repeat(0).take(fat_padded - written_fat), &mut iso)?;
     }

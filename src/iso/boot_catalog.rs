@@ -18,7 +18,7 @@ pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 pub fn write_boot_catalog(
     iso: &mut File,
     boot_img_lba: u32,
-    boot_img_sectors: u16,
+    boot_img_sectors: u32,
 ) -> io::Result<()> {
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
 
@@ -55,8 +55,8 @@ pub fn write_boot_catalog(
     entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
     entry[4] = BOOT_CATALOG_EFI_PLATFORM_ID; // System Type
     entry[5] = 0x00; // Unused
-    entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector count (512-byte sectors)
-    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes()); // LBA
+    entry[6..10].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector count (512-byte sectors)
+    entry[10..14].copy_from_slice(&boot_img_lba.to_le_bytes());
     catalog[32..64].copy_from_slice(&entry);
 
     iso.write_all(&catalog)

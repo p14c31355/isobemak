@@ -3,19 +3,20 @@ use crate::utils;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::File,
-    io::{self},
+    io::{self, Seek},
     path::Path,
 };
 
 /// Creates a FAT image file and populates it with the necessary files for UEFI boot.
 /// The image size and format (FAT16 or FAT32) are dynamically calculated based on the size of the bootloader and kernel.
 pub fn create_fat_image(
-    writer: &mut File,
+    fat_img_path: &Path,
     loader_path: &Path,
     kernel_path: &Path,
 ) -> io::Result<u32> {
     println!("create_fat_image: Starting creation of FAT image.");
 
+    let mut writer = File::create(fat_img_path)?;
     // Ensure both files exist
     if !loader_path.exists() {
         return Err(io::Error::new(
@@ -61,10 +62,15 @@ pub fn create_fat_image(
     };
 
     // Format the file as a FAT volume
-    fatfs::format_volume(&mut *writer, FormatVolumeOptions::new().fat_type(fat_type))?;
+    fatfs::format_volume(&mut writer, FormatVolumeOptions::new().fat_type(fat_type))?;
+
+    drop(writer);
+    let mut writer = File::options().read(true).write(true).open(fat_img_path)?;
+
+    writer.seek(io::SeekFrom::Start(0))?;
 
     // Open filesystem and create directories
-    let fs = FileSystem::new(&mut *writer, FsOptions::new())?;
+    let fs = FileSystem::new(&mut writer, FsOptions::new())?;
     let root_dir = fs.root_dir();
     let efi_dir = root_dir.create_dir("EFI")?;
     let boot_dir = efi_dir.create_dir("BOOT")?;

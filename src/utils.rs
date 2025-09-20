@@ -1,7 +1,6 @@
 // isobemak/src/utils.rs
 
 pub const ISO_SECTOR_SIZE: usize = 2048;
-pub const FAT32_SECTOR_SIZE: u64 = 512;
 
 use fatfs::{self};
 use std::{
@@ -11,6 +10,7 @@ use std::{
 };
 
 /// Reads the entire file from a specified path and returns its content.
+#[allow(dead_code)]
 pub fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
     let mut file = File::open(file_path)?;
     let mut content = Vec::new();

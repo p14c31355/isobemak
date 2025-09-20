@@ -1,7 +1,6 @@
 use crate::fat::create_fat_image;
 use crate::iso::create_iso_from_img;
-use std::{io, io::Write, path::Path};
-use tempfile::NamedTempFile;
+use std::{io, path::{Path, PathBuf}}; // io::Write を削除
 
 mod fat;
 mod iso;
@@ -12,18 +11,14 @@ pub fn create_disk_and_iso(
     iso_path: &Path,
     loader_path: &Path,
     kernel_path: &Path,
-) -> io::Result<()> {
+    fat_img_path: &Path,
+) -> io::Result<PathBuf> {
     println!("create_disk_and_iso: Starting process...");
 
-    let mut fat_img_file = NamedTempFile::new()?;
-    let fat_img_path = fat_img_file.path().to_owned();
-
-    let _fat_image_size = create_fat_image(fat_img_file.as_file_mut(), loader_path, kernel_path)?;
-
-    fat_img_file.as_file_mut().flush()?;
+    let _fat_image_size = create_fat_image(fat_img_path, loader_path, kernel_path)?;
 
     let boot_img_size = std::fs::metadata(loader_path)?.len();
-    let boot_img_sectors = boot_img_size.div_ceil(512);
+    let _boot_img_sectors = boot_img_size.div_ceil(512);
 
     let fat_img_metadata = std::fs::metadata(&fat_img_path)?;
     let fat_img_padded_size = (fat_img_metadata.len()).div_ceil(512) * 512;
@@ -35,5 +30,5 @@ pub fn create_disk_and_iso(
     )?;
 
     println!("create_disk_and_iso: Process complete. ISO created successfully.");
-    Ok(())
+    Ok(fat_img_path.to_owned())
 }
