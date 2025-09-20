@@ -1,10 +1,10 @@
 // src/builder.rs
 use crate::fat;
+use crate::iso::iso::create_iso_from_img;
 use std::{
     io,
     path::{Path, PathBuf},
 };
-use crate::iso::iso::create_iso_from_img;
 
 /// High-level function to create the FAT image and then the final ISO.
 ///
