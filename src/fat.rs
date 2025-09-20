@@ -86,5 +86,5 @@ pub fn create_fat_image(
     if total_size > u32::MAX as u64 {
         return Err(io::Error::new(io::ErrorKind::InvalidInput, "Image size exceeds 4GB limit"));
     }
-    Ok(())
+    Ok(total_size as u32)
 }
