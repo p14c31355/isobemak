@@ -112,8 +112,6 @@ pub fn create_iso_from_img(
     ];
 
     // Calculate sizes based on the defined structs
-    let boot_dir_final_size = ISO_SECTOR_SIZE as u32;
-    let efi_dir_size = ISO_SECTOR_SIZE as u32;
     let root_dir_size = ISO_SECTOR_SIZE as u32;
 
     // Update sizes in the structs (already set to ISO_SECTOR_SIZE as u32)
