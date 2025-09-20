@@ -21,7 +21,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     File::create(&kernel_path)?.write_all(b"this is a mock kernel file")?;
 
     // Call the main function
-    create_disk_and_iso(&iso_path, &bellows_path, &kernel_path)?;
+    create_disk_and_iso(&iso_path, &bellows_path, &kernel_path, &fat_img_path)?;
 
     // Assert that the files were created
     assert!(iso_path.exists());
