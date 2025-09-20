@@ -177,17 +177,6 @@ pub fn create_iso_from_img(
     let mut kernel_file = File::open(kernel_path)?;
     copy(&mut kernel_file, &mut iso)?;
 
-    // Re-calculate final BOOT directory size and re-pad
-    let final_boot_dir_bytes = boot_dir_entries_structs_final
-        .iter()
-        .flat_map(|e| e.to_bytes())
-        .collect::<Vec<u8>>();
-    let pad_sectors = final_boot_dir_bytes.len().div_ceil(ISO_SECTOR_SIZE);
-    let mut final_boot_dir = final_boot_dir_bytes;
-    final_boot_dir.resize(pad_sectors * ISO_SECTOR_SIZE, 0);
-    iso.seek(SeekFrom::Start(22 * ISO_SECTOR_SIZE as u64))?;
-    iso.write_all(&final_boot_dir)?;
-
     // --- Final ISO Padding ---
     let current_pos = iso.stream_position()?;
     let remainder = current_pos % ISO_SECTOR_SIZE as u64;
