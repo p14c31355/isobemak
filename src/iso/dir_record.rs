@@ -30,22 +30,9 @@ impl<'a> IsoDirEntry<'a> {
                     file_id_bytes = self.name.as_bytes();
                     actual_file_id_len = self.name.len() as u8;
                 } else {
-                    // File: Convert to ISO 9660 8.3 format (e.g., "FILENAME.EXT" -> "FILENAMEEXT")
-                    let mut name_parts: Vec<&str> = self.name.split('.').collect();
-                    let mut file_id_string = String::new();
-
-                    if name_parts.len() > 1 {
-                        // Extract extension
-                        let ext = name_parts.pop().unwrap();
-                        // Combine name parts without dot
-                        file_id_string.push_str(&name_parts.join(""));
-                        // Add extension
-                        file_id_string.push_str(ext);
-                    } else {
-                        file_id_string.push_str(self.name);
-                    }
-
-                    file_id_vec = file_id_string.to_uppercase().into_bytes(); // 大文字に変換
+                                        // File identifiers in ISO 9660 should be uppercase and can include a version number.
+                    let name_with_version = format!("{};1", self.name.to_uppercase());
+                    file_id_vec = name_with_version.into_bytes();
                     file_id_bytes = &file_id_vec;
                     actual_file_id_len = file_id_vec.len() as u8;
                 }

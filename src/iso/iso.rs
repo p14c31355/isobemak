@@ -136,7 +136,7 @@ pub fn create_iso_from_img(
             ),
         ));
     }
-    write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors_512)?;
+    write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors_512 as u16)?;
 
     // --- Root Directory ---
     pad_to_lba(&mut iso, 20)?;
