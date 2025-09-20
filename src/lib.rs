@@ -10,6 +10,10 @@ mod iso;
 mod utils;
 
 /// High-level function to create the FAT image and then the final ISO.
+///
+/// This function creates a FAT image at `fat_img_path` and embeds it into an ISO
+/// at `iso_path`. The caller is responsible for managing the lifecycle of the
+/// `fat_img_path` file, including cleanup if it is temporary.
 pub fn create_disk_and_iso(
     iso_path: &Path,
     loader_path: &Path,
