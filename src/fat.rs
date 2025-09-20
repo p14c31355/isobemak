@@ -2,8 +2,8 @@
 use crate::utils;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
-    fs::File,
-    io::{self, Seek},
+    fs::{File, OpenOptions},
+    io::{self, Seek, Write},
     path::Path,
 };
 
@@ -16,7 +16,6 @@ pub fn create_fat_image(
 ) -> io::Result<u32> {
     println!("create_fat_image: Starting creation of FAT image.");
 
-    let mut writer = File::create(fat_img_path)?;
     // Ensure both files exist
     if !loader_path.exists() {
         return Err(io::Error::new(
@@ -37,7 +36,7 @@ pub fn create_fat_image(
     let content_size = loader_size + kernel_size;
 
     // Add overhead and enforce a minimum size.
-    const MIN_FAT_SIZE: u64 = 65535 * 512; // ~32MB. Set a minimum size to ensure enough clusters for FAT32 formatting.
+    const MIN_FAT_SIZE: u64 = 64 * 1024 * 1024; // 64MB. Ensure FAT32 formatting.
     const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;
     let mut total_size = (content_size + FAT_OVERHEAD).max(MIN_FAT_SIZE);
 
@@ -45,15 +44,8 @@ pub fn create_fat_image(
     const SECTOR_SIZE: u64 = 512;
     total_size = total_size.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
 
-    writer.set_len(total_size)?;
-    println!(
-        "create_fat_image: FAT image size set to {} bytes.",
-        total_size
-    );
-
     // Determine FAT type based on total size
     let fat_type = if total_size < 32 * 1024 * 1024 {
-        // Use FAT16 for volumes smaller than 32MB
         println!("create_fat_image: Formatting volume as FAT16 due to size.");
         FatType::Fat16
     } else {
@@ -61,16 +53,26 @@ pub fn create_fat_image(
         FatType::Fat32
     };
 
-    // Format the file as a FAT volume
-    fatfs::format_volume(&mut writer, FormatVolumeOptions::new().fat_type(fat_type))?;
+    // Create the file and set its length
+    let mut file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true) // ファイルが存在する場合は切り詰める
+        .open(fat_img_path)?;
+    file.set_len(total_size)?;
+    println!(
+        "create_fat_image: FAT image size set to {} bytes.",
+        total_size
+    );
 
-    drop(writer);
-    let mut writer = File::options().read(true).write(true).open(fat_img_path)?;
-
-    writer.seek(io::SeekFrom::Start(0))?;
+    // Format the FAT image
+    fatfs::format_volume(&mut file, FormatVolumeOptions::new().fat_type(fat_type))?;
+    file.flush()?; // Ensure all data is written to disk
+    file.seek(io::SeekFrom::Start(0))?; // ファイルポインタを先頭に戻す
 
     // Open filesystem and create directories
-    let fs = FileSystem::new(&mut writer, FsOptions::new())?;
+    let fs = FileSystem::new(&mut file, FsOptions::new())?;
     let root_dir = fs.root_dir();
     let efi_dir = root_dir.create_dir("EFI")?;
     let boot_dir = efi_dir.create_dir("BOOT")?;
