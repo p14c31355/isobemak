@@ -130,7 +130,10 @@ pub fn create_iso_from_img(
     if boot_img_sectors_512 > u16::MAX as u32 {
         return Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("Boot image too large for boot catalog: {} 512-byte sectors", boot_img_sectors_512),
+            format!(
+                "Boot image too large for boot catalog: {} 512-byte sectors",
+                boot_img_sectors_512
+            ),
         ));
     }
     write_boot_catalog(&mut iso, boot_img_lba, boot_img_sectors_512)?;
