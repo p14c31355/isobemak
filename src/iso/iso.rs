@@ -32,7 +32,8 @@ pub fn create_iso_from_img(
     let kernel_size = kernel_metadata.len() as u32;
     let kernel_sectors = kernel_size.div_ceil(ISO_SECTOR_SIZE as u32);
 
-    let kernel_lba = boot_img_lba + (boot_img_sectors as u64 * 512).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    let kernel_lba =
+        boot_img_lba + (boot_img_sectors * 512).div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     // Define structs with placeholder sizes first
     let boot_dir_entries_structs_with_kernel = vec![
