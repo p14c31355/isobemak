@@ -59,7 +59,7 @@ pub fn create_iso_from_img(
             size: kernel_size,
             flags: 0x00,
             name: "KERNEL.EFI",
-        }, // KERNEL.EFIを最初から含める
+        },
     ];
 
     // Calculate sizes based on the defined structs
@@ -86,7 +86,7 @@ pub fn create_iso_from_img(
             size: boot_dir_final_size,
             flags: 0x02,
             name: "BOOT",
-        }, // boot_dir_final_sizeを使用
+        },
     ];
     let efi_dir_size = efi_dir_entries_structs
         .iter()
@@ -196,14 +196,6 @@ pub fn create_iso_from_img(
     let mut kernel_file = File::open(kernel_path)?;
     copy(&mut kernel_file, &mut iso)?;
 
-    // --- Update BOOT Directory with Kernel entry ---
-    // この部分は削除
-    // boot_dir_entries_structs_final.push(IsoDirEntry {
-    //     lba: kernel_lba,
-    //     size: kernel_size,
-    //     flags: 0x00,
-    //     name: "KERNEL.EFI",
-    // });
     // Re-calculate final BOOT directory size and re-pad
     let final_boot_dir_bytes = boot_dir_entries_structs_final
         .iter()
