@@ -35,24 +35,79 @@ pub fn create_iso_from_img(
     let kernel_lba = boot_img_lba + boot_img_sectors as u32;
 
     // Define structs with placeholder sizes first
-    let mut boot_dir_entries_structs_with_kernel = vec![
-        IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: boot_img_lba, size: fat_img_size as u32, flags: 0x00, name: "BOOTX64.EFI" },
-        IsoDirEntry { lba: kernel_lba, size: kernel_size, flags: 0x00, name: "KERNEL.EFI" },
+    let boot_dir_entries_structs_with_kernel = vec![
+        IsoDirEntry {
+            lba: 22,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: boot_img_lba,
+            size: fat_img_size as u32,
+            flags: 0x00,
+            name: "BOOTX64.EFI",
+        },
+        IsoDirEntry {
+            lba: kernel_lba,
+            size: kernel_size,
+            flags: 0x00,
+            name: "KERNEL.EFI",
+        },
     ];
 
-    let mut efi_dir_entries_structs = vec![
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "BOOT" },
+    let efi_dir_entries_structs = [
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: 22,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "BOOT",
+        },
     ];
 
-    let mut root_dir_entries_structs = vec![
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "EFI" },
-        IsoDirEntry { lba: LBA_BOOT_CATALOG, size: ISO_SECTOR_SIZE as u32, flags: 0x00, name: "BOOT.CATALOG" },
+    let root_dir_entries_structs = [
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 20,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: 21,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "EFI",
+        },
+        IsoDirEntry {
+            lba: LBA_BOOT_CATALOG,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x00,
+            name: "BOOT.CATALOG",
+        },
     ];
 
     // Calculate sizes based on the defined structs
@@ -96,7 +151,7 @@ pub fn create_iso_from_img(
 
     // --- BOOT Directory (initial) ---
     pad_to_lba(&mut iso, 22)?;
-    let mut boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel;
+    let boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel;
 
     // Reserve space for BOOT directory
     let boot_dir_content_bytes = boot_dir_entries_structs_final
@@ -126,7 +181,7 @@ pub fn create_iso_from_img(
         .iter()
         .flat_map(|e| e.to_bytes())
         .collect::<Vec<u8>>();
-    let pad_sectors = (final_boot_dir_bytes.len() + ISO_SECTOR_SIZE - 1) / ISO_SECTOR_SIZE;
+    let pad_sectors = final_boot_dir_bytes.len().div_ceil(ISO_SECTOR_SIZE);
     let mut final_boot_dir = final_boot_dir_bytes;
     final_boot_dir.resize(pad_sectors * ISO_SECTOR_SIZE, 0);
     iso.seek(SeekFrom::Start(22 * ISO_SECTOR_SIZE as u64))?;
