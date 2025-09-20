@@ -22,7 +22,7 @@ impl<'a> IsoBuilder<'a> {
     fn new(iso_path: &Path, fat_img_path: &'a Path, kernel_path: &'a Path) -> io::Result<Self> {
         let iso_file = File::create(iso_path)?;
         let fat_img_size = std::fs::metadata(fat_img_path)?.len();
-        
+
         let boot_img_lba = 23;
         let fat_sectors = fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
         let kernel_lba = boot_img_lba + fat_sectors;
@@ -62,32 +62,86 @@ impl<'a> IsoBuilder<'a> {
                 ),
             ));
         }
-        write_boot_catalog(&mut self.iso_file, self.boot_img_lba, fat_img_sectors as u16)
+        write_boot_catalog(
+            &mut self.iso_file,
+            self.boot_img_lba,
+            fat_img_sectors as u16,
+        )
     }
 
     /// Writes the directory records for the ISO filesystem.
     fn write_directories(&mut self) -> io::Result<()> {
         let root_dir_entries = [
-            IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-            IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-            IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "EFI" },
+            IsoDirEntry {
+                lba: 20,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: ".",
+            },
+            IsoDirEntry {
+                lba: 20,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "..",
+            },
+            IsoDirEntry {
+                lba: 21,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "EFI",
+            },
         ];
         self.write_directory_sector(20, &root_dir_entries)?;
 
         let efi_dir_entries = [
-            IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-            IsoDirEntry { lba: 20, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-            IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "BOOT" },
+            IsoDirEntry {
+                lba: 21,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: ".",
+            },
+            IsoDirEntry {
+                lba: 20,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "..",
+            },
+            IsoDirEntry {
+                lba: 22,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "BOOT",
+            },
         ];
         self.write_directory_sector(21, &efi_dir_entries)?;
 
         let kernel_size = std::fs::metadata(self.kernel_path)?.len() as u32;
         let fat_img_size = std::fs::metadata(self.fat_img_path)?.len() as u32;
         let boot_dir_entries = [
-            IsoDirEntry { lba: 22, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-            IsoDirEntry { lba: 21, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-            IsoDirEntry { lba: self.boot_img_lba, size: fat_img_size, flags: 0x00, name: "BOOTX64.EFI" },
-            IsoDirEntry { lba: self.kernel_lba, size: kernel_size, flags: 0x00, name: "KERNEL.EFI" },
+            IsoDirEntry {
+                lba: 22,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: ".",
+            },
+            IsoDirEntry {
+                lba: 21,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "..",
+            },
+            IsoDirEntry {
+                lba: self.boot_img_lba,
+                size: fat_img_size,
+                flags: 0x00,
+                name: "BOOTX64.EFI",
+            },
+            IsoDirEntry {
+                lba: self.kernel_lba,
+                size: kernel_size,
+                flags: 0x00,
+                name: "KERNEL.EFI",
+            },
         ];
         self.write_directory_sector(22, &boot_dir_entries)?;
         Ok(())
