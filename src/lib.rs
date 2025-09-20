@@ -3,7 +3,7 @@ use crate::iso::create_iso_from_img;
 use std::{
     io,
     path::{Path, PathBuf},
-}; // io::Write を削除
+};
 
 mod fat;
 mod iso;

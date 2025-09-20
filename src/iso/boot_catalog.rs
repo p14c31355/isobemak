@@ -18,7 +18,7 @@ pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 pub fn write_boot_catalog(
     iso: &mut File,
     boot_img_lba: u32,
-    boot_img_sectors: u16, // u32 から u16 に戻す
+    boot_img_sectors: u16,
 ) -> io::Result<()> {
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
 

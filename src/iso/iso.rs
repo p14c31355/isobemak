@@ -15,8 +15,8 @@ pub fn create_iso_from_img(
     fat_img_actual_size: u32,
 ) -> io::Result<()> {
     let fat_img_size = fat_img_actual_size as u64;
-    let boot_img_sectors_512 = fat_img_size.div_ceil(512) as u32; // 512バイトセクター単位
-    let boot_img_sectors_iso = fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32; // ISOセクター単位
+    let boot_img_sectors_512 = fat_img_size.div_ceil(512) as u32;
+    let boot_img_sectors_iso = fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
 
     if boot_img_sectors_iso > u32::MAX {
         return Err(io::Error::new(
@@ -175,7 +175,7 @@ pub fn create_iso_from_img(
     pad_to_lba(&mut iso, boot_img_lba)?;
     let mut fat_file = File::open(fat_img_path)?;
     let written_fat = copy(&mut fat_file, &mut iso)?;
-    let fat_padded = boot_img_sectors_iso as u64 * ISO_SECTOR_SIZE as u64; // ISOセクターサイズでパディング
+    let fat_padded = boot_img_sectors_iso as u64 * ISO_SECTOR_SIZE as u64;
     if written_fat < fat_padded {
         io::copy(&mut io::repeat(0).take(fat_padded - written_fat), &mut iso)?;
     }

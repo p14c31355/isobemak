@@ -58,7 +58,7 @@ pub fn create_fat_image(
         .read(true)
         .write(true)
         .create(true)
-        .truncate(true) // ファイルが存在する場合は切り詰める
+        .truncate(true)
         .open(fat_img_path)?;
     file.set_len(total_size)?;
     println!(
@@ -69,7 +69,7 @@ pub fn create_fat_image(
     // Format the FAT image
     fatfs::format_volume(&mut file, FormatVolumeOptions::new().fat_type(fat_type))?;
     file.flush()?; // Ensure all data is written to disk
-    file.seek(io::SeekFrom::Start(0))?; // ファイルポインタを先頭に戻す
+    file.seek(io::SeekFrom::Start(0))?;
 
     // Open filesystem and create directories
     let fs = FileSystem::new(&mut file, FsOptions::new())?;
