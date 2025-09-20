@@ -130,18 +130,9 @@ pub fn create_iso_from_img(
     ];
 
     // Write directories to ISO
-    pad_to_lba(&mut iso, LBA_ROOT_DIR)?;
-    for e in &root_dir_entries {
-        iso.write_all(&e.to_bytes())?;
-    }
-    pad_to_lba(&mut iso, LBA_EFI_DIR)?;
-    for e in &efi_dir_entries {
-        iso.write_all(&e.to_bytes())?;
-    }
-    pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
-    for e in &boot_dir_entries {
-        iso.write_all(&e.to_bytes())?;
-    }
+    write_directory(&mut iso, LBA_ROOT_DIR, &root_dir_entries)?;
+    write_directory(&mut iso, LBA_EFI_DIR, &efi_dir_entries)?;
+    write_directory(&mut iso, LBA_BOOT_DIR, &boot_dir_entries)?;
 
     // Copy FAT boot image
     pad_to_lba(&mut iso, boot_img_lba)?;
