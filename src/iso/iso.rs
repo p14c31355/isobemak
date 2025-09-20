@@ -36,7 +36,6 @@ pub fn create_iso_from_img(
 
     // Define structs with placeholder sizes first
     let mut boot_dir_entries_structs_with_kernel = vec![
-        // 名前を変更
         IsoDirEntry {
             lba: 22,
             size: 0,
