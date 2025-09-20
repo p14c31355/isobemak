@@ -13,10 +13,12 @@ const LBA_BOOT_DIR: u32 = 22;
 
 fn write_directory(iso: &mut File, lba: u32, entries: &[IsoDirEntry]) -> io::Result<()> {
     pad_to_lba(iso, lba)?;
+    let mut dir_content = Vec::new();
     for e in entries {
-        iso.write_all(&e.to_bytes())?;
+        dir_content.extend_from_slice(&e.to_bytes());
     }
-    Ok(())
+    dir_content.resize(ISO_SECTOR_SIZE, 0);
+    iso.write_all(&dir_content)
 }
 
 /// Creates an ISO 9660 image with a FAT boot image (El Torito) and a UEFI kernel.
