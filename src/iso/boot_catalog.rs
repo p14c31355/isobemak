@@ -12,7 +12,7 @@ pub const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
 pub const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
 pub const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 pub const ID_FIELD_OFFSET: usize = 4;
-pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 2;
+pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 
 /// Writes an El Torito boot catalog for UEFI.
 pub fn write_boot_catalog(
@@ -40,8 +40,7 @@ pub fn write_boot_catalog(
     // Temporarily zero out the checksum field for calculation
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2].copy_from_slice(&[0, 0]);
     let mut sum: u16 = 0;
-    for i in (0..32).step_by(2) {
-        // Iterate over all 32 bytes
+    for i in (0..30).step_by(2) {
         sum = sum.wrapping_add(u16::from_le_bytes([val[i], val[i + 1]]));
     }
     let checksum = 0u16.wrapping_sub(sum);
