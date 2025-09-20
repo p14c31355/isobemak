@@ -24,14 +24,14 @@ pub fn write_boot_catalog(
 
     let mut catalog = [0u8; ISO_SECTOR_SIZE];
 
-    // --- Validation Entry (32 bytes) ---
+    // Validation Entry (32 bytes)
     let mut val = [0u8; 32];
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
     val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
 
-    // ID string "UEFI" + zero padding (32 bytes)
+    // ID string "UEFI" + zero padding (24 bytes total)
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
-        .copy_from_slice(b"UEFI\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0"); // 4 bytes for "UEFI" + 20 null bytes = 24 bytes
+        .copy_from_slice(b"UEFI\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0\0");
 
     // Signature 0xAA55 at offset 30
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
@@ -48,7 +48,7 @@ pub fn write_boot_catalog(
         .copy_from_slice(&checksum.to_le_bytes());
     catalog[0..32].copy_from_slice(&val);
 
-    // --- Default Boot Entry (32 bytes) ---
+    // Default Boot Entry (32 bytes)
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // Bootable
     entry[1] = 0x00; // No Emulation

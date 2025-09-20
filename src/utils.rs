@@ -1,7 +1,4 @@
 // isobemak/src/utils.rs
-
-pub const ISO_SECTOR_SIZE: usize = 2048;
-
 use fatfs::{self};
 use std::{
     fs::File,
@@ -9,14 +6,7 @@ use std::{
     path::Path,
 };
 
-/// Reads the entire file from a specified path and returns its content.
-#[allow(dead_code)]
-pub fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
-    let mut file = File::open(file_path)?;
-    let mut content = Vec::new();
-    file.read_to_end(&mut content)?;
-    Ok(content)
-}
+pub const ISO_SECTOR_SIZE: usize = 2048;
 
 /// Pads the ISO file with zeros to align to a specific LBA.
 pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {

@@ -1,3 +1,4 @@
+// lib.rs
 use crate::fat::create_fat_image;
 use crate::iso::create_iso_from_img;
 use std::{
@@ -21,16 +22,14 @@ pub fn create_disk_and_iso(
 ) -> io::Result<PathBuf> {
     println!("create_disk_and_iso: Starting process...");
 
-    // --- 1. Create the FAT image ---
-    // The FAT image will contain BOOTX64.EFI and KERNEL.EFI automatically.
+    // 1. Create the FAT image.
     let _ = create_fat_image(fat_img_path, loader_path, kernel_path)?;
     println!(
         "create_disk_and_iso: FAT image created at {:?}",
         fat_img_path
     );
 
-    // --- 2. Create the ISO from the FAT image ---
-    // The ISO will be El Torito compliant and include the FAT boot image.
+    // 2. Create the ISO from the FAT image.
     create_iso_from_img(iso_path, fat_img_path, kernel_path)?;
     println!(
         "create_disk_and_iso: ISO created successfully at {:?}",
