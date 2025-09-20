@@ -40,7 +40,8 @@ pub fn write_boot_catalog(
     // Temporarily zero out the checksum field for calculation
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2].copy_from_slice(&[0, 0]);
     let mut sum: u16 = 0;
-    for i in (0..32).step_by(2) { // Iterate over all 32 bytes
+    for i in (0..32).step_by(2) {
+        // Iterate over all 32 bytes
         sum = sum.wrapping_add(u16::from_le_bytes([val[i], val[i + 1]]));
     }
     let checksum = 0u16.wrapping_sub(sum);
@@ -51,12 +52,12 @@ pub fn write_boot_catalog(
     // --- Default Boot Entry (32 bytes) ---
     let mut entry = [0u8; 32];
     entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // Bootable
-    entry[1] = 0x00;                              // No Emulation
+    entry[1] = 0x00; // No Emulation
     entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
-    entry[4] = BOOT_CATALOG_EFI_PLATFORM_ID;      // System Type
-    entry[5] = 0x00;                              // Unused
+    entry[4] = BOOT_CATALOG_EFI_PLATFORM_ID; // System Type
+    entry[5] = 0x00; // Unused
     entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector count (512-byte sectors)
-    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes());    // LBA
+    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes()); // LBA
     catalog[32..64].copy_from_slice(&entry);
 
     iso.write_all(&catalog)

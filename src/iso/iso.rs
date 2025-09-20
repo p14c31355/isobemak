@@ -35,30 +35,98 @@ pub fn create_iso_from_img(
     let kernel_lba = boot_img_lba + boot_img_sectors as u32;
 
     // Define structs with placeholder sizes first
-    let mut boot_dir_entries_structs_with_kernel = vec![ // 名前を変更
-        IsoDirEntry { lba: 22, size: 0, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 21, size: 0, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: boot_img_lba, size: fat_img_size as u32, flags: 0x00, name: "BOOTX64.EFI" },
-        IsoDirEntry { lba: kernel_lba, size: kernel_size, flags: 0x00, name: "KERNEL.EFI" }, // KERNEL.EFIを最初から含める
+    let mut boot_dir_entries_structs_with_kernel = vec![
+        // 名前を変更
+        IsoDirEntry {
+            lba: 22,
+            size: 0,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 21,
+            size: 0,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: boot_img_lba,
+            size: fat_img_size as u32,
+            flags: 0x00,
+            name: "BOOTX64.EFI",
+        },
+        IsoDirEntry {
+            lba: kernel_lba,
+            size: kernel_size,
+            flags: 0x00,
+            name: "KERNEL.EFI",
+        }, // KERNEL.EFIを最初から含める
     ];
 
     // Calculate sizes based on the defined structs
-    let boot_dir_final_size = boot_dir_entries_structs_with_kernel.iter().flat_map(|e| e.to_bytes()).collect::<Vec<u8>>().len() as u32;
+    let boot_dir_final_size = boot_dir_entries_structs_with_kernel
+        .iter()
+        .flat_map(|e| e.to_bytes())
+        .collect::<Vec<u8>>()
+        .len() as u32;
 
     let mut efi_dir_entries_structs = vec![
-        IsoDirEntry { lba: 21, size: 0, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 20, size: 0, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: 22, size: boot_dir_final_size, flags: 0x02, name: "BOOT" }, // boot_dir_final_sizeを使用
+        IsoDirEntry {
+            lba: 21,
+            size: 0,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 20,
+            size: 0,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: 22,
+            size: boot_dir_final_size,
+            flags: 0x02,
+            name: "BOOT",
+        }, // boot_dir_final_sizeを使用
     ];
-    let efi_dir_size = efi_dir_entries_structs.iter().flat_map(|e| e.to_bytes()).collect::<Vec<u8>>().len() as u32;
+    let efi_dir_size = efi_dir_entries_structs
+        .iter()
+        .flat_map(|e| e.to_bytes())
+        .collect::<Vec<u8>>()
+        .len() as u32;
 
-    let mut root_dir_entries_structs = vec![
-        IsoDirEntry { lba: 20, size: 0, flags: 0x02, name: "." },
-        IsoDirEntry { lba: 20, size: 0, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: 21, size: efi_dir_size, flags: 0x02, name: "EFI" },
-        IsoDirEntry { lba: LBA_BOOT_CATALOG, size: ISO_SECTOR_SIZE as u32, flags: 0x00, name: "BOOT.CATALOG" },
+    let mut root_dir_entries_structs = [
+        IsoDirEntry {
+            lba: 20,
+            size: 0,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: 20,
+            size: 0,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: 21,
+            size: efi_dir_size,
+            flags: 0x02,
+            name: "EFI",
+        },
+        IsoDirEntry {
+            lba: LBA_BOOT_CATALOG,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x00,
+            name: "BOOT.CATALOG",
+        },
     ];
-    let root_dir_size = root_dir_entries_structs.iter().flat_map(|e| e.to_bytes()).collect::<Vec<u8>>().len() as u32;
+    let root_dir_size = root_dir_entries_structs
+        .iter()
+        .flat_map(|e| e.to_bytes())
+        .collect::<Vec<u8>>()
+        .len() as u32;
 
     // Update sizes in the structs
     boot_dir_entries_structs_with_kernel[0].size = boot_dir_final_size;
@@ -105,7 +173,7 @@ pub fn create_iso_from_img(
 
     // --- BOOT Directory (initial) ---
     pad_to_lba(&mut iso, 22)?;
-    let mut boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel; // Use the structs directly
+    let boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel; // Use the structs directly
 
     // Reserve space for BOOT directory
     let boot_dir_content_bytes = boot_dir_entries_structs_final
@@ -143,7 +211,7 @@ pub fn create_iso_from_img(
         .iter()
         .flat_map(|e| e.to_bytes())
         .collect::<Vec<u8>>();
-    let pad_sectors = (final_boot_dir_bytes.len() + ISO_SECTOR_SIZE - 1) / ISO_SECTOR_SIZE;
+    let pad_sectors = final_boot_dir_bytes.len().div_ceil(ISO_SECTOR_SIZE);
     let mut final_boot_dir = final_boot_dir_bytes;
     final_boot_dir.resize(pad_sectors * ISO_SECTOR_SIZE, 0);
     iso.seek(SeekFrom::Start(22 * ISO_SECTOR_SIZE as u64))?;
