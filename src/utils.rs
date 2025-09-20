@@ -8,6 +8,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
+use fatfs::{self, ReadWriteSeek};
 
 /// Reads the entire file from a specified path and returns its content.
 pub fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {
@@ -46,5 +47,19 @@ pub fn update_4byte_fields(
     iso.seek(SeekFrom::Start(base_offset + offset2 as u64))?;
     iso.write_all(&value.to_be_bytes())?;
 
+    Ok(())
+}
+
+/// Copies a file from the host filesystem into a FAT directory.
+pub fn copy_to_fat<T: Read + Write + Seek>(
+    dir: &fatfs::Dir<T>,
+    src_path: &Path,
+    dest: &str,
+) -> io::Result<()> {
+    let mut src_file = File::open(src_path)?;
+    let mut f = dir.create_file(dest)?;
+    io::copy(&mut src_file, &mut f)?;
+    f.flush()?;
+    println!("Copied {} to {} in FAT image.", src_path.display(), dest);
     Ok(())
 }

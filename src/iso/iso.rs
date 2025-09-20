@@ -7,8 +7,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write, copy};
 use std::path::Path;
 
-/// Creates a minimal ISO with FAT boot image (BOOTX64.EFI) and kernel (KERNEL.EFI)
-/// in the same BOOT directory.
+/// Creates a minimal ISO with a FAT boot image and a kernel.
 pub fn create_iso_from_img(
     iso_path: &Path,
     fat_img_path: &Path,
@@ -112,6 +111,8 @@ pub fn create_iso_from_img(
     ];
 
     // Calculate sizes based on the defined structs
+    let boot_dir_final_size = ISO_SECTOR_SIZE as u32;
+    let efi_dir_size = ISO_SECTOR_SIZE as u32;
     let root_dir_size = ISO_SECTOR_SIZE as u32;
 
     // Update sizes in the structs (already set to ISO_SECTOR_SIZE as u32)

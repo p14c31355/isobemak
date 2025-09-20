@@ -5,20 +5,7 @@ use std::{
     io::{self, Read, Seek, Write},
     path::Path,
 };
-
-/// Copies a file from the host filesystem into a FAT directory.
-fn copy_to_fat<T: Read + Write + Seek>(
-    dir: &fatfs::Dir<T>,
-    src_path: &Path,
-    dest: &str,
-) -> io::Result<()> {
-    let mut src_file = File::open(src_path)?;
-    let mut f = dir.create_file(dest)?;
-    io::copy(&mut src_file, &mut f)?;
-    f.flush()?;
-    println!("Copied {} to {} in FAT image.", src_path.display(), dest);
-    Ok(())
-}
+use crate::utils;
 
 /// Creates a FAT image file and populates it with the necessary files for UEFI boot.
 /// The image size and format (FAT16 or FAT32) are dynamically calculated based on the size of the bootloader and kernel.
@@ -84,8 +71,8 @@ pub fn create_fat_image(
 
     // Copy the bootloader and kernel into the FAT filesystem
     println!("create_fat_image: Copying bootloader and kernel.");
-    copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
-    copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
+    utils::copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
+    utils::copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
     println!("create_fat_image: FAT image creation complete.");
     u32::try_from(total_size)
