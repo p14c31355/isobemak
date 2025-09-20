@@ -2,7 +2,7 @@
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
-use std::io::{self, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 
 pub const ISO_VOLUME_DESCRIPTOR_TERMINATOR: u8 = 255;
 pub const ISO_VOLUME_DESCRIPTOR_PRIMARY: u8 = 1;
@@ -16,6 +16,26 @@ pub const PVD_VOL_SET_SIZE_OFFSET: usize = 120;
 pub const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
 pub const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 pub const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
+
+/// A helper function to update two 4-byte fields at different offsets
+/// within a single ISO sector (2048 bytes).
+fn update_4byte_fields(
+    iso: &mut File,
+    base_lba: u32,
+    offset1: usize,
+    offset2: usize,
+    value: u32,
+) -> io::Result<()> {
+    let base_offset = base_lba as u64 * ISO_SECTOR_SIZE as u64;
+
+    iso.seek(SeekFrom::Start(base_offset + offset1 as u64))?;
+    iso.write_all(&value.to_le_bytes())?;
+
+    iso.seek(SeekFrom::Start(base_offset + offset2 as u64))?;
+    iso.write_all(&value.to_be_bytes())?;
+
+    Ok(())
+}
 
 pub fn write_primary_volume_descriptor(
     iso: &mut File,
@@ -95,4 +115,15 @@ pub fn write_volume_descriptors(
     write_boot_record_volume_descriptor(iso, boot_catalog_lba)?;
     write_volume_descriptor_terminator(iso)?;
     Ok(())
+}
+
+/// Updates the total sector count in the Primary Volume Descriptor (PVD).
+pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
+    update_4byte_fields(
+        iso,
+        16,
+        PVD_TOTAL_SECTORS_OFFSET,
+        PVD_TOTAL_SECTORS_OFFSET + 4,
+        total_sectors,
+    )
 }
