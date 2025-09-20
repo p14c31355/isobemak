@@ -55,7 +55,7 @@ pub fn write_boot_catalog(
     entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
     entry[4] = BOOT_CATALOG_EFI_PLATFORM_ID; // System Type
     entry[5] = 0x00; // Unused
-    entry[6..8].copy_from_slice(&(boot_img_sectors as u16).to_le_bytes()); // Sector count (u16, in 512-byte sectors)
+    entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector count (u16, in 512-byte sectors)
     entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes());
     catalog[32..64].copy_from_slice(&entry);
 
