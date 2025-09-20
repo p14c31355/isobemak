@@ -66,9 +66,8 @@ pub fn create_iso_from_img(
     // Calculate sizes based on the defined structs
     let boot_dir_final_size = boot_dir_entries_structs_with_kernel
         .iter()
-        .flat_map(|e| e.to_bytes())
-        .collect::<Vec<u8>>()
-        .len() as u32;
+        .map(|e| e.to_bytes().len())
+        .sum::<usize>() as u32;
 
     let mut efi_dir_entries_structs = vec![
         IsoDirEntry {
