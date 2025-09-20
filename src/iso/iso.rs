@@ -171,17 +171,17 @@ pub fn create_iso_from_img(
     efi_dir_content.resize(ISO_SECTOR_SIZE, 0);
     iso.write_all(&efi_dir_content)?;
 
-    // --- BOOT Directory (initial) ---
+    // --- BOOT Directory ---
     pad_to_lba(&mut iso, 22)?;
     let boot_dir_entries_structs_final = boot_dir_entries_structs_with_kernel; // Use the structs directly
 
-    // Reserve space for BOOT directory
-    let boot_dir_content_bytes = boot_dir_entries_structs_final
+    let mut boot_dir_content = boot_dir_entries_structs_final
         .iter()
         .flat_map(|e| e.to_bytes())
         .collect::<Vec<u8>>();
-    let mut boot_dir_content = boot_dir_content_bytes;
-    boot_dir_content.resize(ISO_SECTOR_SIZE, 0);
+
+    let required_size = boot_dir_content.len().div_ceil(ISO_SECTOR_SIZE) * ISO_SECTOR_SIZE;
+    boot_dir_content.resize(required_size, 0);
     iso.write_all(&boot_dir_content)?;
 
     // --- Copy FAT Boot Image ---
