@@ -36,7 +36,7 @@ pub fn create_fat_image(
     let content_size = loader_size + kernel_size;
 
     // Add overhead and enforce a minimum size.
-    const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensure FAT16 formatting for El Torito compatibility.
+    const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensures FAT16 formatting.
     const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;
     let mut total_size = (content_size + FAT_OVERHEAD).max(MIN_FAT_SIZE);
 
@@ -83,6 +83,11 @@ pub fn create_fat_image(
     utils::copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
     println!("create_fat_image: FAT image creation complete.");
-    u32::try_from(total_size)
-        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "Image size exceeds 4GB limit"))
+    if total_size > u32::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "Image size exceeds 4GB limit",
+        ));
+    }
+    Ok(total_size as u32)
 }
