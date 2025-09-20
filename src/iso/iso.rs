@@ -21,24 +21,18 @@ fn write_directory(iso: &mut File, lba: u32, entries: &[IsoDirEntry]) -> io::Res
     iso.write_all(&dir_content)
 }
 
-/// Creates an ISO 9660 image with a FAT boot image (El Torito) and a UEFI kernel.
+/// Creates an ISO 9660 image for UEFI boot without requiring a BIOS boot image.
+/// The ISO contains EFI/BOOT/BOOTX64.EFI and KERNEL.EFI.
 pub fn create_iso_from_img(
     iso_path: &Path,
-    fat_img_path: &Path,
+    loader_path: &Path,
     kernel_path: &Path,
 ) -> io::Result<()> {
-    // Open ISO file for writing
     let mut iso = File::create(iso_path)?;
 
-    // Create FAT image and get padded size
-    let fat_img_size = std::fs::metadata(fat_img_path)?.len();
-    let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
-
-    // Define LBAs
-    let boot_img_lba = 23; // LBA where Boot-NoEmul.img will be placed
-    let kernel_metadata = std::fs::metadata(kernel_path)?;
-    let kernel_size = kernel_metadata.len() as u32;
-    let kernel_lba = boot_img_lba + fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+    // Determine LBAs for kernel
+    let kernel_size = std::fs::metadata(kernel_path)?.len() as u32;
+    let kernel_lba = LBA_BOOT_DIR + 1; // kernel placed after BOOT directory
 
     // Write Primary Volume Descriptor
     let root_entry = IsoDirEntry {
@@ -49,125 +43,59 @@ pub fn create_iso_from_img(
     };
     write_volume_descriptors(&mut iso, 0, LBA_BOOT_CATALOG, &root_entry)?;
 
-    // Write El Torito Boot Catalog
-    if fat_img_sectors > u16::MAX as u32 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!(
-                "Boot image too large for boot catalog: {} 512-byte sectors",
-                fat_img_sectors
-            ),
-        ));
-    }
-    write_boot_catalog(&mut iso, boot_img_lba, fat_img_sectors as u16)?;
+    // Write El Torito Boot Catalog (No Emulation)
+    write_boot_catalog(&mut iso, LBA_BOOT_DIR, 0)?; // sectors=0 for UEFI No Emulation
 
-    // Prepare directory entries
+    // Directory entries
     let root_dir_entries = [
-        IsoDirEntry {
-            lba: LBA_ROOT_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        },
-        IsoDirEntry {
-            lba: LBA_ROOT_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "..",
-        },
-        IsoDirEntry {
-            lba: LBA_EFI_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "EFI",
-        },
-    ];
-    let efi_dir_entries = [
-        IsoDirEntry {
-            lba: LBA_EFI_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        },
-        IsoDirEntry {
-            lba: LBA_ROOT_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "..",
-        },
-        IsoDirEntry {
-            lba: LBA_BOOT_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "BOOT",
-        },
-    ];
-    let boot_dir_entries = [
-        IsoDirEntry {
-            lba: LBA_BOOT_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        },
-        IsoDirEntry {
-            lba: LBA_EFI_DIR,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "..",
-        },
-        IsoDirEntry {
-            lba: boot_img_lba,
-            size: fat_img_size as u32,
-            flags: 0x00,
-            name: "BOOTX64.EFI",
-        },
-        IsoDirEntry {
-            lba: kernel_lba,
-            size: kernel_size,
-            flags: 0x00,
-            name: "KERNEL.EFI",
-        },
+        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
+        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
+        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "EFI" },
     ];
 
-    // Write directories to ISO
+    let efi_dir_entries = [
+        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
+        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
+        IsoDirEntry { lba: LBA_BOOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "BOOT" },
+    ];
+
+    let boot_dir_entries = [
+        IsoDirEntry { lba: LBA_BOOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
+        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
+        IsoDirEntry { lba: LBA_BOOT_DIR, size: std::fs::metadata(loader_path)?.len() as u32, flags: 0x00, name: "BOOTX64.EFI" },
+        IsoDirEntry { lba: kernel_lba, size: kernel_size, flags: 0x00, name: "KERNEL.EFI" },
+    ];
+
+    // Write directories
     write_directory(&mut iso, LBA_ROOT_DIR, &root_dir_entries)?;
     write_directory(&mut iso, LBA_EFI_DIR, &efi_dir_entries)?;
     write_directory(&mut iso, LBA_BOOT_DIR, &boot_dir_entries)?;
 
-    // Copy FAT boot image
-    pad_to_lba(&mut iso, boot_img_lba)?;
-    let mut fat_file = File::open(fat_img_path)?;
-    copy(&mut fat_file, &mut iso)?;
+    // Copy loader (BOOTX64.EFI)
+    pad_to_lba(&mut iso, LBA_BOOT_DIR)?;
+    let mut loader_file = File::open(loader_path)?;
+    copy(&mut loader_file, &mut iso)?;
 
     // Copy kernel
     pad_to_lba(&mut iso, kernel_lba)?;
     let mut kernel_file = File::open(kernel_path)?;
     copy(&mut kernel_file, &mut iso)?;
 
-    // Final padding to ISO sector
+    // Final padding
     let current_pos = iso.stream_position()?;
     let remainder = current_pos % ISO_SECTOR_SIZE as u64;
     if remainder != 0 {
-        io::copy(
-            &mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 - remainder),
-            &mut iso,
-        )?;
+        io::copy(&mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 - remainder), &mut iso)?;
     }
 
     // Update PVD total sectors
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
     if total_sectors > u32::MAX as u64 {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "ISO image too large",
-        ));
+        return Err(io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"));
     }
     update_total_sectors_in_pvd(&mut iso, total_sectors as u32)?;
 
-    println!(
-        "create_iso_from_img: ISO created with {} sectors",
-        total_sectors
-    );
+    println!("create_iso_from_img: ISO created with {} sectors", total_sectors);
     Ok(())
 }
