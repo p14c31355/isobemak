@@ -3,12 +3,12 @@
 pub const ISO_SECTOR_SIZE: usize = 2048;
 pub const FAT32_SECTOR_SIZE: u64 = 512;
 
+use fatfs::{self};
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
-use fatfs::{self, ReadWriteSeek};
 
 /// Reads the entire file from a specified path and returns its content.
 pub fn read_file_from_path(file_path: &Path) -> io::Result<Vec<u8>> {

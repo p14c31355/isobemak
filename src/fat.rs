@@ -1,11 +1,11 @@
 // isobemak/src/fat.rs
+use crate::utils;
 use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
     fs::File,
-    io::{self, Read, Seek, Write},
+    io::{self},
     path::Path,
 };
-use crate::utils;
 
 /// Creates a FAT image file and populates it with the necessary files for UEFI boot.
 /// The image size and format (FAT16 or FAT32) are dynamically calculated based on the size of the bootloader and kernel.
