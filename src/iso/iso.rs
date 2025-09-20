@@ -49,30 +49,24 @@ pub fn create_iso_from_img(
     write_boot_catalog(&mut iso, boot_img_lba, fat_img_sectors as u16)?;
 
     // --- Prepare directory entries ---
-    let root_dir_entries = [
+        let boot_dir_entries = [
         IsoDirEntry {
-            lba: 20,
+            lba: 22,
             size: ISO_SECTOR_SIZE as u32,
             flags: 0x02,
             name: ".",
         },
         IsoDirEntry {
-            lba: 20,
+            lba: 21,
             size: ISO_SECTOR_SIZE as u32,
             flags: 0x02,
             name: "..",
         },
         IsoDirEntry {
-            lba: 21,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "EFI",
-        },
-        IsoDirEntry {
-            lba: LBA_BOOT_CATALOG,
-            size: ISO_SECTOR_SIZE as u32,
+            lba: boot_img_lba,
+            size: fat_img_size as u32,
             flags: 0x00,
-            name: "BOOT.CATALOG",
+            name: "BOOTX64.EFI",
         },
     ];
     let efi_dir_entries = [
