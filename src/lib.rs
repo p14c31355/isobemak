@@ -17,7 +17,10 @@ pub fn create_disk_and_iso(
 
     // Create the ISO from the EFI loader and kernel directly
     create_iso_from_img(iso_path, loader_path, kernel_path)?;
-    println!("create_disk_and_iso: ISO created successfully at {:?}", iso_path);
+    println!(
+        "create_disk_and_iso: ISO created successfully at {:?}",
+        iso_path
+    );
 
     Ok(())
 }

@@ -48,22 +48,72 @@ pub fn create_iso_from_img(
 
     // Directory entries
     let root_dir_entries = [
-        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "EFI" },
+        IsoDirEntry {
+            lba: LBA_ROOT_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: LBA_ROOT_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: LBA_EFI_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "EFI",
+        },
     ];
 
     let efi_dir_entries = [
-        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: LBA_ROOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: LBA_BOOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "BOOT" },
+        IsoDirEntry {
+            lba: LBA_EFI_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: LBA_ROOT_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: LBA_BOOT_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "BOOT",
+        },
     ];
 
     let boot_dir_entries = [
-        IsoDirEntry { lba: LBA_BOOT_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: "." },
-        IsoDirEntry { lba: LBA_EFI_DIR, size: ISO_SECTOR_SIZE as u32, flags: 0x02, name: ".." },
-        IsoDirEntry { lba: LBA_BOOT_DIR, size: std::fs::metadata(loader_path)?.len() as u32, flags: 0x00, name: "BOOTX64.EFI" },
-        IsoDirEntry { lba: kernel_lba, size: kernel_size, flags: 0x00, name: "KERNEL.EFI" },
+        IsoDirEntry {
+            lba: LBA_BOOT_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: ".",
+        },
+        IsoDirEntry {
+            lba: LBA_EFI_DIR,
+            size: ISO_SECTOR_SIZE as u32,
+            flags: 0x02,
+            name: "..",
+        },
+        IsoDirEntry {
+            lba: LBA_BOOT_DIR,
+            size: std::fs::metadata(loader_path)?.len() as u32,
+            flags: 0x00,
+            name: "BOOTX64.EFI",
+        },
+        IsoDirEntry {
+            lba: kernel_lba,
+            size: kernel_size,
+            flags: 0x00,
+            name: "KERNEL.EFI",
+        },
     ];
 
     // Write directories
@@ -85,17 +135,26 @@ pub fn create_iso_from_img(
     let current_pos = iso.stream_position()?;
     let remainder = current_pos % ISO_SECTOR_SIZE as u64;
     if remainder != 0 {
-        io::copy(&mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 - remainder), &mut iso)?;
+        io::copy(
+            &mut io::repeat(0).take(ISO_SECTOR_SIZE as u64 - remainder),
+            &mut iso,
+        )?;
     }
 
     // Update PVD total sectors
     let final_pos = iso.stream_position()?;
     let total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
     if total_sectors > u32::MAX as u64 {
-        return Err(io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ISO image too large",
+        ));
     }
     update_total_sectors_in_pvd(&mut iso, total_sectors as u32)?;
 
-    println!("create_iso_from_img: ISO created with {} sectors", total_sectors);
+    println!(
+        "create_iso_from_img: ISO created with {} sectors",
+        total_sectors
+    );
     Ok(())
 }
