@@ -4,7 +4,7 @@
 // Public modules for interacting with the library's core functionalities.
 pub mod fat;
 pub mod iso;
-
+pub mod utils;
 // The builder module contains high-level orchestration logic
 // for creating a complete disk and ISO image.
 pub mod builder;

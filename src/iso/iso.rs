@@ -22,8 +22,7 @@ impl<'a> IsoBuilder<'a> {
     fn new(iso_path: &Path, fat_img_path: &'a Path, kernel_path: &'a Path) -> io::Result<Self> {
         let iso_file = File::create(iso_path)?;
         let fat_img_size = std::fs::metadata(fat_img_path)?.len();
-        let kernel_size = std::fs::metadata(kernel_path)?.len();
-
+        
         let boot_img_lba = 23;
         let fat_sectors = fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
         let kernel_lba = boot_img_lba + fat_sectors;

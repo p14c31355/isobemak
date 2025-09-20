@@ -1,10 +1,10 @@
 // src/builder.rs
 use crate::fat;
-use crate::iso;
 use std::{
     io,
     path::{Path, PathBuf},
 };
+use crate::iso::iso::create_iso_from_img;
 
 /// High-level function to create the FAT image and then the final ISO.
 ///
@@ -26,7 +26,7 @@ pub fn create_disk_and_iso(
     );
 
     // 2. Create the ISO from the FAT image.
-    iso::create_iso_from_img(iso_path, fat_img_path, kernel_path)?;
+    create_iso_from_img(iso_path, fat_img_path, kernel_path)?;
     println!(
         "create_disk_and_iso: ISO created successfully at {:?}",
         iso_path
