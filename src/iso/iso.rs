@@ -17,7 +17,8 @@ pub fn create_iso_from_img(
     let mut iso = File::create(iso_path)?;
 
     // --- Create FAT image and get padded size ---
-    let fat_img_size = crate::fat::create_fat_image(fat_img_path, fat_img_path, kernel_path)?;
+    let fat_img_size = u32::try_from(std::fs::metadata(fat_img_path)?.len())
+        .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "FAT image size exceeds 4GB"))?;
     let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
 
     // --- Define LBAs ---
