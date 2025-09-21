@@ -336,10 +336,12 @@ impl IsoBuilder {
         }
 
         // Update PVD total sectors
-                let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+        let final_pos = iso_file.stream_position()?;
+                        let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
         self.total_sectors = u32::try_from(total_sectors_u64).map_err(|_| {
             io::Error::new(io::ErrorKind::InvalidInput, "ISO image is too large")
         })?;
+
         update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
 
         println!("ISO created with {} sectors", self.total_sectors);
