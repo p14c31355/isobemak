@@ -34,6 +34,24 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
         .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
+
+    // Find the first bootable entry to get its sector count for the default boot header Nsect.
+    // Nsect in the default header is a single byte and can only represent up to 255 sectors.
+    // If the calculated sectors exceed 255, we cap it at 255.
+    // If sectors is 0 (e.g., empty boot image), we set Nsect to 1.
+    let mut default_nsect: u16 = 1; // Default to 1 if no bootable entry or size is 0
+    if let Some(first_bootable_entry) = entries.iter().find(|e| e.bootable) {
+        let sectors = first_bootable_entry.boot_image_sectors;
+        if sectors > 0 {
+            default_nsect = sectors.min(255); // Cap at 255 for 1-byte field
+        }
+    }
+    val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
+
+    // Set Bootoff (LBA of the boot catalog)
+    val[28..30].copy_from_slice(&LBA_BOOT_CATALOG.to_le_bytes());
+
+    // Set Signature
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
 
     // Checksum calculation

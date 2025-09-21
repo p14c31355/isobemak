@@ -234,7 +234,8 @@ impl IsoBuilder {
                 let boot_image_sectors_u64 = if boot_image_size == 0 {
                     1 // Minimum 1 sector if it's a bootable entry, even if empty.
                 } else {
-                    boot_image_size.div_ceil(512)
+                    // El Torito sector count is based on ISO logical block size (2048 bytes)
+                    boot_image_size.div_ceil(ISO_SECTOR_SIZE as u64)
                 };
 
                 if boot_image_sectors_u64 > u16::MAX as u64 {
@@ -259,7 +260,8 @@ impl IsoBuilder {
                 let uefi_fat_img_sectors_u64 = if uefi_fat_img_size == 0 {
                     1 // Minimum 1 sector if it's a bootable entry, even if empty.
                 } else {
-                    uefi_fat_img_size.div_ceil(512)
+                    // El Torito sector count is based on ISO logical block size (2048 bytes)
+                    uefi_fat_img_size.div_ceil(ISO_SECTOR_SIZE as u64)
                 };
 
                 if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
