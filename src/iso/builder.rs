@@ -5,12 +5,12 @@ use std::fs::File;
 use std::io::{self, Read, Seek, Write, copy};
 use std::path::{Path, PathBuf};
 
-use crate::iso_builder::BootInfo;
 use crate::iso::boot_catalog::{
     BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, LBA_BOOT_CATALOG, write_boot_catalog,
 };
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
+use crate::iso_builder::BootInfo;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 
 pub enum IsoFsNode {
