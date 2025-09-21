@@ -6,9 +6,10 @@ use std::{
     path::Path,
 };
 
+/// The standard size of an ISO 9660 sector in bytes.
 pub const ISO_SECTOR_SIZE: usize = 2048;
 
-/// Pads the ISO file with zeros to align to a specific LBA.
+/// Pads the ISO file with zeros to align to a specific LBA (Logical Block Address).
 pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     let target_pos = lba as u64 * ISO_SECTOR_SIZE as u64;
     let current_pos = iso.stream_position()?;
@@ -29,6 +30,5 @@ pub fn copy_to_fat<T: Read + Write + Seek>(
     let mut f = dir.create_file(dest)?;
     io::copy(&mut src_file, &mut f)?;
     f.flush()?;
-    println!("Copied {} to {} in FAT image.", src_path.display(), dest);
     Ok(())
 }

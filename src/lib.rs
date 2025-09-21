@@ -1,27 +1,24 @@
-// lib.rs
 //! A library for creating bootable ISO 9660 images with UEFI support.
 
 // Public modules for interacting with the library's core functionalities.
 pub mod fat;
 pub mod iso;
 pub mod utils;
-// The builder module contains high-level orchestration logic
-// for creating a complete disk and ISO image.
-pub mod iso_builder;
 
 #[cfg(test)]
 mod tests {
-    use super::iso_builder::{
+    use super::iso::builder::{
         BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, create_custom_iso,
     };
     use std::io;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
-    // Helper function to create dummy files and IsoImage
+    /// Helper function to create dummy files and IsoImage for testing.
     fn setup_iso_creation(
         temp_dir: &Path,
     ) -> io::Result<(IsoImage, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
+        // Create dummy files
         let isolinux_bin_path = temp_dir.join("isolinux.bin");
         std::fs::write(&isolinux_bin_path, b"dummy isolinux.bin")?;
 
@@ -37,12 +34,9 @@ mod tests {
         let initrd_img_path = temp_dir.join("initrd.img");
         std::fs::write(&initrd_img_path, b"dummy initrd.img")?;
 
+        // Create the IsoImage configuration
         let iso_image = IsoImage {
             files: vec![
-                IsoImageFile {
-                    source: isolinux_bin_path.clone(),
-                    destination: "isolinux/isolinux.bin".to_string(),
-                },
                 IsoImageFile {
                     source: isolinux_cfg_path.clone(),
                     destination: "isolinux/isolinux.cfg".to_string(),
@@ -58,7 +52,7 @@ mod tests {
             ],
             boot_info: BootInfo {
                 bios_boot: Some(BiosBootInfo {
-                    boot_catalog: PathBuf::from("BOOT.CAT"), // This will be generated
+                    boot_catalog: PathBuf::from("BOOT.CAT"),
                     boot_image: isolinux_bin_path.clone(),
                     destination_in_iso: "isolinux/isolinux.bin".to_string(),
                 }),
@@ -84,19 +78,14 @@ mod tests {
         let temp_dir = tempdir()?;
         let iso_output_path = temp_dir.path().join("custom_boot.iso");
 
-        let (
-            iso_image,
-            _isolinux_bin_path,
-            _isolinux_cfg_path,
-            _bootx64_efi_path,
-            _kernel_path,
-            _initrd_img_path,
-        ) = setup_iso_creation(temp_dir.path())?;
+        let (iso_image, ..) = setup_iso_creation(temp_dir.path())?;
 
+        // Create the ISO
         create_custom_iso(&iso_output_path, &iso_image)?;
 
+        // Assert that the ISO file was created and is not empty
         assert!(iso_output_path.exists());
-        println!("Custom ISO created at: {:?}", iso_output_path);
+        assert!(iso_output_path.metadata()?.len() > 0);
 
         Ok(())
     }
