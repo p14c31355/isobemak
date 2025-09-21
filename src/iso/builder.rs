@@ -165,7 +165,7 @@ impl IsoBuilder {
             match node {
                 IsoFsNode::File(file) => {
                     file.lba = *current_lba;
-                    let sectors = (file.size as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+                    let sectors = ((file.size + ISO_SECTOR_SIZE as u64 - 1) / ISO_SECTOR_SIZE as u64) as u32;
                     *current_lba += sectors;
                 }
                 IsoFsNode::Directory(subdir) => {
