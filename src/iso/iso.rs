@@ -1,5 +1,5 @@
 // src/iso/iso.rs
-use crate::iso::boot_catalog::{LBA_BOOT_CATALOG, write_boot_catalog};
+use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::*;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};

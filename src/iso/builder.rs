@@ -1,15 +1,17 @@
 // src/iso/builder.rs
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::io::{self, Write, Seek, copy, Read};
 use std::fs::File;
+use std::io::{self, Read, Seek, Write, copy};
+use std::path::{Path, PathBuf};
 
-use crate::iso::boot_catalog::{LBA_BOOT_CATALOG, write_boot_catalog, BootCatalogEntry, BOOT_CATALOG_EFI_PLATFORM_ID};
+use crate::builder::BootInfo;
+use crate::iso::boot_catalog::{
+    BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, LBA_BOOT_CATALOG, write_boot_catalog,
+};
 use crate::iso::dir_record::IsoDirEntry;
-use crate::iso::volume_descriptor::{write_volume_descriptors, update_total_sectors_in_pvd};
+use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
-use crate::builder::{BootInfo, BiosBootInfo, UefiBootInfo};
 
 pub enum IsoFsNode {
     File(IsoFile),
@@ -26,6 +28,12 @@ pub struct IsoDirectory {
     pub children: HashMap<String, IsoFsNode>,
     pub lba: u32,
     pub size: u32,
+}
+
+impl Default for IsoDirectory {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl IsoDirectory {
@@ -46,6 +54,12 @@ pub struct IsoBuilder {
     total_sectors: u32,
 }
 
+impl Default for IsoBuilder {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl IsoBuilder {
     pub fn new() -> Self {
         Self {
@@ -64,17 +78,35 @@ impl IsoBuilder {
         let components: Vec<_> = path.components().collect();
         if components.len() > 1 {
             for component in components.iter().take(components.len() - 1) {
-                let component_name = component.as_os_str().to_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component"))?.to_string();
-                current_dir = match current_dir.children.entry(component_name).or_insert_with(|| {
-                    IsoFsNode::Directory(IsoDirectory::new())
-                }) {
+                let component_name = component
+                    .as_os_str()
+                    .to_str()
+                    .ok_or_else(|| {
+                        io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
+                    })?
+                    .to_string();
+                current_dir = match current_dir
+                    .children
+                    .entry(component_name)
+                    .or_insert_with(|| IsoFsNode::Directory(IsoDirectory::new()))
+                {
                     IsoFsNode::Directory(dir) => dir,
-                    _ => return Err(io::Error::new(io::ErrorKind::AlreadyExists, format!("{} is not a directory", path_in_iso))),
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::AlreadyExists,
+                            format!("{} is not a directory", path_in_iso),
+                        ));
+                    }
                 };
             }
         }
 
-        let file_name = path.file_name().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?.to_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?.to_string();
+        let file_name = path
+            .file_name()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
+            .to_str()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
+            .to_string();
         let file_size = std::fs::metadata(&real_path)?.len();
 
         let file = IsoFile {
@@ -83,7 +115,9 @@ impl IsoBuilder {
             lba: 0, // LBA will be calculated later
         };
 
-        current_dir.children.insert(file_name, IsoFsNode::File(file));
+        current_dir
+            .children
+            .insert(file_name, IsoFsNode::File(file));
 
         Ok(())
     }
@@ -182,26 +216,37 @@ impl IsoBuilder {
         write_boot_catalog(iso_file, boot_entries)
     }
 
-    fn write_directories(&self, iso_file: &mut File, dir: &IsoDirectory, parent_lba: u32) -> io::Result<()> {
+    fn write_directories(
+        &self,
+        iso_file: &mut File,
+        dir: &IsoDirectory,
+        parent_lba: u32,
+    ) -> io::Result<()> {
         pad_to_lba(iso_file, dir.lba)?;
 
         let mut dir_content = Vec::new();
 
         // Self entry
-        dir_content.extend_from_slice(&IsoDirEntry {
-            lba: dir.lba,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        }.to_bytes());
+        dir_content.extend_from_slice(
+            &IsoDirEntry {
+                lba: dir.lba,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: ".",
+            }
+            .to_bytes(),
+        );
 
         // Parent entry
-        dir_content.extend_from_slice(&IsoDirEntry {
-            lba: parent_lba,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "..",
-        }.to_bytes());
+        dir_content.extend_from_slice(
+            &IsoDirEntry {
+                lba: parent_lba,
+                size: ISO_SECTOR_SIZE as u32,
+                flags: 0x02,
+                name: "..",
+            }
+            .to_bytes(),
+        );
 
         let mut sorted_children: Vec<_> = dir.children.iter().collect();
         sorted_children.sort_by_key(|(name, _)| *name);
@@ -209,20 +254,26 @@ impl IsoBuilder {
         for (name, node) in sorted_children {
             match node {
                 IsoFsNode::File(file) => {
-                    dir_content.extend_from_slice(&IsoDirEntry {
-                        lba: file.lba,
-                        size: file.size as u32,
-                        flags: 0x00,
-                        name: name,
-                    }.to_bytes());
+                    dir_content.extend_from_slice(
+                        &IsoDirEntry {
+                            lba: file.lba,
+                            size: file.size as u32,
+                            flags: 0x00,
+                            name,
+                        }
+                        .to_bytes(),
+                    );
                 }
                 IsoFsNode::Directory(subdir) => {
-                    dir_content.extend_from_slice(&IsoDirEntry {
-                        lba: subdir.lba,
-                        size: ISO_SECTOR_SIZE as u32,
-                        flags: 0x02,
-                        name: name,
-                    }.to_bytes());
+                    dir_content.extend_from_slice(
+                        &IsoDirEntry {
+                            lba: subdir.lba,
+                            size: ISO_SECTOR_SIZE as u32,
+                            flags: 0x02,
+                            name,
+                        }
+                        .to_bytes(),
+                    );
                     self.write_directories(iso_file, subdir, dir.lba)?;
                 }
             }
@@ -269,10 +320,7 @@ impl IsoBuilder {
         self.total_sectors = (final_pos as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
         update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
 
-        println!(
-            "ISO created with {} sectors",
-            self.total_sectors
-        );
+        println!("ISO created with {} sectors", self.total_sectors);
         Ok(())
     }
 
@@ -281,21 +329,38 @@ impl IsoBuilder {
         let components: Vec<_> = Path::new(path).components().collect();
 
         for (i, component) in components.iter().enumerate() {
-            let component_name = component.as_os_str().to_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component"))?;
-            if i == components.len() - 1 { // Last component, could be file or directory
+            let component_name = component.as_os_str().to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
+            })?;
+            if i == components.len() - 1 {
+                // Last component, could be file or directory
                 match current_dir.children.get(component_name) {
                     Some(IsoFsNode::File(file)) => return Ok(file.lba),
                     Some(IsoFsNode::Directory(dir)) => return Ok(dir.lba),
-                    _ => return Err(io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path))),
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("Path not found: {}", path),
+                        ));
+                    }
                 }
-            } else { // Intermediate component, must be a directory
+            } else {
+                // Intermediate component, must be a directory
                 match current_dir.children.get(component_name) {
                     Some(IsoFsNode::Directory(dir)) => current_dir = dir,
-                    _ => return Err(io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path))),
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("Path not found: {}", path),
+                        ));
+                    }
                 }
             }
         }
-        Err(io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path)))
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Path not found: {}", path),
+        ))
     }
 
     fn get_file_size_in_iso(&self, path: &str) -> io::Result<u64> {
@@ -303,19 +368,36 @@ impl IsoBuilder {
         let components: Vec<_> = Path::new(path).components().collect();
 
         for (i, component) in components.iter().enumerate() {
-            let component_name = component.as_os_str().to_str().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component"))?;
-            if i == components.len() - 1 { // Last component, must be a file
+            let component_name = component.as_os_str().to_str().ok_or_else(|| {
+                io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
+            })?;
+            if i == components.len() - 1 {
+                // Last component, must be a file
                 match current_dir.children.get(component_name) {
                     Some(IsoFsNode::File(file)) => return Ok(file.size),
-                    _ => return Err(io::Error::new(io::ErrorKind::NotFound, format!("File not found: {}", path))),
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("File not found: {}", path),
+                        ));
+                    }
                 }
-            } else { // Intermediate component, must be a directory
+            } else {
+                // Intermediate component, must be a directory
                 match current_dir.children.get(component_name) {
                     Some(IsoFsNode::Directory(dir)) => current_dir = dir,
-                    _ => return Err(io::Error::new(io::ErrorKind::NotFound, format!("File not found: {}", path))),
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("File not found: {}", path),
+                        ));
+                    }
                 }
             }
         }
-        Err(io::Error::new(io::ErrorKind::NotFound, format!("File not found: {}", path)))
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("File not found: {}", path),
+        ))
     }
 }

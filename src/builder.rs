@@ -1,7 +1,7 @@
 // src/builder.rs
 use crate::fat;
-use crate::iso::iso::create_iso_from_img;
 use crate::iso::builder::IsoBuilder as NewIsoBuilder;
+use crate::iso::iso::create_iso_from_img;
 use std::{
     io,
     path::{Path, PathBuf},
@@ -88,7 +88,6 @@ pub fn create_custom_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
 
     Ok(())
 }
-
 
 /// High-level function to create the FAT image and then the final ISO.
 ///

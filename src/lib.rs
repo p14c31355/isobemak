@@ -11,13 +11,17 @@ pub mod builder;
 
 #[cfg(test)]
 mod tests {
-    use super::builder::{create_custom_iso, BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo};
-    use std::path::{Path, PathBuf};
+    use super::builder::{
+        BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, create_custom_iso,
+    };
     use std::io;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
     // Helper function to create dummy files and IsoImage
-    fn setup_iso_creation(temp_dir: &Path) -> io::Result<(IsoImage, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
+    fn setup_iso_creation(
+        temp_dir: &Path,
+    ) -> io::Result<(IsoImage, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
         let isolinux_bin_path = temp_dir.join("isolinux.bin");
         std::fs::write(&isolinux_bin_path, b"dummy isolinux.bin")?;
 
@@ -65,7 +69,14 @@ mod tests {
             },
         };
 
-        Ok((iso_image, isolinux_bin_path, isolinux_cfg_path, bootx64_efi_path, kernel_path, initrd_img_path))
+        Ok((
+            iso_image,
+            isolinux_bin_path,
+            isolinux_cfg_path,
+            bootx64_efi_path,
+            kernel_path,
+            initrd_img_path,
+        ))
     }
 
     #[test]
@@ -73,7 +84,14 @@ mod tests {
         let temp_dir = tempdir()?;
         let iso_output_path = temp_dir.path().join("custom_boot.iso");
 
-        let (iso_image, _isolinux_bin_path, _isolinux_cfg_path, _bootx64_efi_path, _kernel_path, _initrd_img_path) = setup_iso_creation(temp_dir.path())?;
+        let (
+            iso_image,
+            _isolinux_bin_path,
+            _isolinux_cfg_path,
+            _bootx64_efi_path,
+            _kernel_path,
+            _initrd_img_path,
+        ) = setup_iso_creation(temp_dir.path())?;
 
         create_custom_iso(&iso_output_path, &iso_image)?;
 

@@ -21,7 +21,10 @@ pub fn create_fat_image(
 
     // Ensure both files exist
     if !loader_path.exists() {
-        println!("create_fat_image: Loader file NOT found at {:?}", loader_path);
+        println!(
+            "create_fat_image: Loader file NOT found at {:?}",
+            loader_path
+        );
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("Loader file not found at {:?}", loader_path),
@@ -30,7 +33,10 @@ pub fn create_fat_image(
     println!("create_fat_image: Loader file found at {:?}", loader_path);
 
     if !kernel_path.exists() {
-        println!("create_fat_image: Kernel file NOT found at {:?}", kernel_path);
+        println!(
+            "create_fat_image: Kernel file NOT found at {:?}",
+            kernel_path
+        );
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("Kernel file not found at {:?}", kernel_path),
