@@ -230,7 +230,6 @@ impl IsoBuilder {
         if let Some(boot_info) = &self.boot_info {
             // Add BIOS boot entry
             if let Some(bios_boot) = &boot_info.bios_boot {
-                let _boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 let boot_image_sectors_u64 = if boot_image_size == 0 {
                     1 // Minimum 1 sector if it's a bootable entry, even if empty.
