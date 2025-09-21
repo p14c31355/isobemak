@@ -250,14 +250,14 @@ impl IsoBuilder {
             if let Some(uefi_boot) = &boot_info.uefi_boot {
                 let uefi_fat_img_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
-                            let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512);
-            if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "UEFI boot image is too large for the boot catalog (exceeds u16::MAX sectors)",
-                ));
-            }
-            let uefi_fat_img_sectors = uefi_fat_img_sectors_u64 as u16;
+                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512);
+                if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "UEFI boot image is too large for the boot catalog (exceeds u16::MAX sectors)",
+                    ));
+                }
+                let uefi_fat_img_sectors = uefi_fat_img_sectors_u64 as u16;
 
                 boot_entries.push(BootCatalogEntry {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
@@ -299,18 +299,21 @@ impl IsoBuilder {
         });
 
         for (name, node) in &sorted_children {
-                    let (lba, size, flags) = match node {
-            IsoFsNode::File(file) => {
-                let file_size_u32 = u32::try_from(file.size).map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        format!("File '{}' is too large for ISO9660 (exceeds u32::MAX bytes)", name),
-                    )
-                })?;
-                (file.lba, file_size_u32, 0x00)
-            }
-            IsoFsNode::Directory(subdir) => (subdir.lba, ISO_SECTOR_SIZE as u32, 0x02),
-        };
+            let (lba, size, flags) = match node {
+                IsoFsNode::File(file) => {
+                    let file_size_u32 = u32::try_from(file.size).map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!(
+                                "File '{}' is too large for ISO9660 (exceeds u32::MAX bytes)",
+                                name
+                            ),
+                        )
+                    })?;
+                    (file.lba, file_size_u32, 0x00)
+                }
+                IsoFsNode::Directory(subdir) => (subdir.lba, ISO_SECTOR_SIZE as u32, 0x02),
+            };
             dir_entries.push(IsoDirEntry {
                 lba,
                 size,
