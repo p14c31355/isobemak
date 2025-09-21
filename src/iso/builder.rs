@@ -454,7 +454,7 @@ impl IsoBuilder {
 }
 
 /// High-level function to create an ISO 9660 image from a structured `IsoImage`.
-pub fn create_disk_and_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
+pub fn build_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
     let mut iso_builder = IsoBuilder::new();
 
     // Handle UEFI boot image by creating a temporary FAT image.
