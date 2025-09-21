@@ -5,10 +5,13 @@ pub mod fat;
 pub mod iso;
 pub mod utils;
 
+// Re-export the main function for external use.
+pub use iso::builder::create_disk_and_iso;
+
 #[cfg(test)]
 mod tests {
     use super::iso::builder::{
-        BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, create_custom_iso,
+        BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, create_disk_and_iso,
     };
     use std::io;
     use std::path::{Path, PathBuf};
@@ -81,7 +84,7 @@ mod tests {
         let (iso_image, ..) = setup_iso_creation(temp_dir.path())?;
 
         // Create the ISO
-        create_custom_iso(&iso_output_path, &iso_image)?;
+        create_disk_and_iso(&iso_output_path, &iso_image)?;
 
         // Assert that the ISO file was created and is not empty
         assert!(iso_output_path.exists());

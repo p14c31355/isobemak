@@ -7,7 +7,7 @@ use tempfile::NamedTempFile;
 
 use crate::fat;
 use crate::iso::boot_catalog::{
-    BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, LBA_BOOT_CATALOG, write_boot_catalog,
+    BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, write_boot_catalog,
 };
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
@@ -219,7 +219,8 @@ impl IsoBuilder {
             flags: 0x02,
             name: ".",
         };
-        write_volume_descriptors(iso_file, 0, LBA_BOOT_CATALOG, &root_entry)
+        // Pass 0 for total_sectors as a placeholder, it will be updated in finalize.
+        write_volume_descriptors(iso_file, 0, &root_entry)
     }
 
     /// Writes the El Torito boot catalog.
@@ -453,7 +454,7 @@ impl IsoBuilder {
 }
 
 /// High-level function to create an ISO 9660 image from a structured `IsoImage`.
-pub fn create_custom_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
+pub fn create_disk_and_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
     let mut iso_builder = IsoBuilder::new();
 
     // Handle UEFI boot image by creating a temporary FAT image.
@@ -503,6 +504,11 @@ pub fn create_custom_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
                 io::Error::new(io::ErrorKind::InvalidData, "Missing UEFI boot destination")
             })?;
         iso_builder.add_file(&dest, path)?;
+    }
+
+    // Handle BIOS boot image
+    if let Some(bios_boot_info) = &image.boot_info.bios_boot {
+        iso_builder.add_file(&bios_boot_info.destination_in_iso, bios_boot_info.boot_image.clone())?;
     }
 
     // Set boot information for the ISO builder
