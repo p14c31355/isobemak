@@ -1,4 +1,5 @@
 // isobemak/src/iso/volume_descriptor.rs
+use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
@@ -125,11 +126,13 @@ pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 pub fn write_volume_descriptors(
     iso: &mut File,
     total_sectors: u32,
-    boot_catalog_lba: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
-    write_boot_record_volume_descriptor(iso, boot_catalog_lba)?;
+    // Primary Volume Descriptor at LBA 16
     write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
+    // Boot Record Volume Descriptor at LBA 17, pointing to boot catalog at LBA 19
+    write_boot_record_volume_descriptor(iso, LBA_BOOT_CATALOG)?;
+    // Volume Descriptor Terminator at LBA 18
     write_volume_descriptor_terminator(iso)?;
     Ok(())
 }
