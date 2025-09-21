@@ -508,7 +508,10 @@ pub fn create_disk_and_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> 
 
     // Handle BIOS boot image
     if let Some(bios_boot_info) = &image.boot_info.bios_boot {
-        iso_builder.add_file(&bios_boot_info.destination_in_iso, bios_boot_info.boot_image.clone())?;
+        iso_builder.add_file(
+            &bios_boot_info.destination_in_iso,
+            bios_boot_info.boot_image.clone(),
+        )?;
     }
 
     // Set boot information for the ISO builder
