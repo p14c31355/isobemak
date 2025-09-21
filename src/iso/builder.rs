@@ -128,7 +128,7 @@ impl IsoBuilder {
 
     pub fn build(&mut self, iso_path: &Path) -> io::Result<()> {
         self.iso_file = Some(File::create(iso_path)?);
-        let mut iso_file = self.iso_file.take().unwrap(); // Take ownership of the file
+        let mut iso_file = self.iso_file.take().ok_or_else(|| io::Error::new(io::ErrorKind::AlreadyExists, "build() has already been called"))?; // Take ownership of the file
         self.current_lba = 16; // Start after primary and supplementary descriptors
 
         // 1. Calculate LBAs
