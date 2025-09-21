@@ -1,8 +1,9 @@
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read, Seek, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
+use uuid::Uuid;
 
 use crate::fat;
 use crate::iso::boot_catalog::{
@@ -213,10 +214,12 @@ pub fn build(&mut self, iso_path: &Path, esp_size_sectors: u32) -> io::Result<()
         let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
         let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
 
-        let esp_guid = uuid::Uuid::parse_str(crate::gpt::EFI_SYSTEM_PARTITION_GUID).unwrap();
+        let esp_guid_str = crate::gpt::EFI_SYSTEM_PARTITION_GUID;
+        let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
         let partitions = vec![
             crate::gpt::GptPartitionEntry::new(
-                esp_guid,
+                esp_guid_str,
+                &esp_unique_guid_str,
                 esp_partition_start_lba as u64,
                 esp_partition_end_lba as u64,
                 "EFI System Partition",
