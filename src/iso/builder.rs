@@ -230,7 +230,7 @@ impl IsoBuilder {
         if let Some(boot_info) = &self.boot_info {
             // Add BIOS boot entry
             if let Some(bios_boot) = &boot_info.bios_boot {
-                let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
+                let _boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 let mut boot_image_sectors_u64 = boot_image_size.div_ceil(512);
                 // Ensure Nsect is at least 1 if the image is not empty, to avoid invalid 0 value.
