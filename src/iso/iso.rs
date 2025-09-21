@@ -189,7 +189,9 @@ impl<'a> IsoBuilder<'a> {
 
         // Update PVD total sectors
         let final_pos = self.iso_file.stream_position()?;
-        self.total_sectors = (final_pos as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+        let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+        self.total_sectors = u32::try_from(total_sectors_u64)
+            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"))?;
         update_total_sectors_in_pvd(&mut self.iso_file, self.total_sectors)?;
 
         println!(
