@@ -200,7 +200,7 @@ impl IsoBuilder {
             match node {
                 IsoFsNode::File(file) => {
                     file.lba = *current_lba;
-let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+                    let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
                     *current_lba += sectors;
                 }
                 IsoFsNode::Directory(subdir) => {
@@ -380,7 +380,7 @@ let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
         }
 
         let final_pos = iso_file.stream_position()?;
-        let total_sectors_u64 = final_pos.div_ceil((ISO_SECTOR_SIZE as u64));
+        let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
         self.total_sectors = u32::try_from(total_sectors_u64)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"))?;
         update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
