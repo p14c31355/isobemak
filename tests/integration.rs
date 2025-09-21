@@ -9,22 +9,14 @@ use tempfile::tempdir;
 
 // Helper function to create dummy files for this integration test.
 // This is a simplified version of `setup_iso_creation` from the library's internal tests.
-fn setup_integration_test_files(
-    temp_dir: &Path,
-) -> io::Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
+fn setup_integration_test_files(temp_dir: &Path) -> io::Result<(PathBuf, PathBuf)> {
     // Create dummy files needed for the ISO image
     let bellows_path = temp_dir.join("bellows.efi");
     std::fs::write(&bellows_path, b"dummy bellows.efi")?;
 
-    let kernel_path = temp_dir.join("kernel.efi");
-    std::fs::write(&kernel_path, b"dummy kernel.efi")?;
-
-    let fat_img_path = temp_dir.join("fat.img"); // This is for the UEFI FAT image
-    std::fs::write(&fat_img_path, b"dummy fat.img")?;
-
     let iso_path = temp_dir.join("test.iso");
 
-    Ok((bellows_path, kernel_path, fat_img_path, iso_path))
+    Ok((bellows_path, iso_path))
 }
 
 #[test]
@@ -32,8 +24,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let temp_dir = tempdir()?;
 
     // Setup files and paths
-    let (bellows_path, _kernel_path, _fat_img_path, iso_path) =
-        setup_integration_test_files(temp_dir.path())?;
+    let (bellows_path, iso_path) = setup_integration_test_files(temp_dir.path())?;
 
     // Construct the IsoImage configuration
     let iso_image = isobemak::iso::builder::IsoImage {
