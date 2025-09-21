@@ -268,10 +268,16 @@ impl IsoBuilder {
         for (name, node) in sorted_children {
             match node {
                 IsoFsNode::File(file) => {
+                                        let file_size_u32 = u32::try_from(file.size).map_err(|_| {
+                        io::Error::new(
+                            io::ErrorKind::InvalidInput,
+                            format!("File '{}' is too large for ISO9660", name),
+                        )
+                    })?;
                     dir_content.extend_from_slice(
                         &IsoDirEntry {
                             lba: file.lba,
-                            size: file.size as u32,
+                            size: file_size_u32,
                             flags: 0x00,
                             name,
                         }
@@ -330,8 +336,10 @@ impl IsoBuilder {
         }
 
         // Update PVD total sectors
-        let final_pos = iso_file.stream_position()?;
-        self.total_sectors = (final_pos as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
+                let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+        self.total_sectors = u32::try_from(total_sectors_u64).map_err(|_| {
+            io::Error::new(io::ErrorKind::InvalidInput, "ISO image is too large")
+        })?;
         update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
 
         println!("ISO created with {} sectors", self.total_sectors);
