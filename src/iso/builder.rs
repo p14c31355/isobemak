@@ -192,7 +192,14 @@ impl IsoBuilder {
         if let Some(boot_info) = &self.boot_info {
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
-                let boot_image_sectors = (boot_image_size as f64 / 512.0).ceil() as u16;
+                let boot_image_sectors_u64 = boot_image_size.div_ceil(512);
+                if boot_image_sectors_u64 > u16::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "BIOS boot image is too large for the boot catalog",
+                    ));
+                }
+                let boot_image_sectors = boot_image_sectors_u64 as u16;
                 boot_entries.push(BootCatalogEntry {
                     platform_id: 0x00, // 0x00 for x86 BIOS
                     boot_image_lba: self.get_lba_for_path(&bios_boot.destination_in_iso)?,
@@ -204,7 +211,14 @@ impl IsoBuilder {
                 // The UEFI boot image is the FAT image we added as EFI/BOOT/EFI.img
                 let uefi_fat_img_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
-                let uefi_fat_img_sectors = (uefi_fat_img_size as f64 / 512.0).ceil() as u16;
+                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512);
+                if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "UEFI boot image is too large for the boot catalog",
+                    ));
+                }
+                let uefi_fat_img_sectors = uefi_fat_img_sectors_u64 as u16;
                 boot_entries.push(BootCatalogEntry {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: uefi_fat_img_lba,
