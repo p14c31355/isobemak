@@ -61,23 +61,38 @@ pub fn write_primary_volume_descriptor(
     pvd[PVD_VOL_SET_SIZE_OFFSET..PVD_VOL_SET_SIZE_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
     pvd[PVD_VOL_SET_SIZE_OFFSET + 2..PVD_VOL_SET_SIZE_OFFSET + 4]
         .copy_from_slice(&1u16.to_be_bytes());
+
     pvd[PVD_VOL_SEQ_NUM_OFFSET..PVD_VOL_SEQ_NUM_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
     pvd[PVD_VOL_SEQ_NUM_OFFSET + 2..PVD_VOL_SEQ_NUM_OFFSET + 4]
         .copy_from_slice(&1u16.to_be_bytes());
+
     pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2]
         .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_le_bytes());
     pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 4]
         .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_be_bytes());
+
     pvd[PVD_PATH_TABLE_SIZE_OFFSET..PVD_PATH_TABLE_SIZE_OFFSET + 4]
         .copy_from_slice(&0u32.to_le_bytes());
     pvd[PVD_PATH_TABLE_SIZE_OFFSET + 4..PVD_PATH_TABLE_SIZE_OFFSET + 8]
         .copy_from_slice(&0u32.to_be_bytes());
 
-    let record_bytes = root_entry.to_bytes();
-    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + record_bytes.len()]
-        .copy_from_slice(&record_bytes);
+    let root_entry_bytes = root_entry.to_bytes();
+    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_entry_bytes.len()]
+        .copy_from_slice(&root_entry_bytes);
 
-    iso.write_all(&pvd)
+    iso.write_all(&pvd)?;
+
+    Ok(())
+}
+
+pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
+    update_4byte_fields(
+        iso,
+        16,
+        PVD_TOTAL_SECTORS_OFFSET,
+        PVD_TOTAL_SECTORS_OFFSET + 4,
+        total_sectors,
+    )
 }
 
 pub fn write_boot_record_volume_descriptor(
@@ -92,7 +107,8 @@ pub fn write_boot_record_volume_descriptor(
     let spec_name = b"EL TORITO SPECIFICATION";
     brvd[7..7 + spec_name.len()].copy_from_slice(spec_name);
     brvd[71..75].copy_from_slice(&boot_catalog_lba.to_le_bytes());
-    iso.write_all(&brvd)
+    iso.write_all(&brvd)?;
+    Ok(())
 }
 
 pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
@@ -101,7 +117,8 @@ pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
     term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
     term[1..6].copy_from_slice(ISO_ID);
     term[6] = ISO_VERSION;
-    iso.write_all(&term)
+    iso.write_all(&term)?;
+    Ok(())
 }
 
 /// A combined function to write all necessary volume descriptors in sequence.
@@ -111,19 +128,8 @@ pub fn write_volume_descriptors(
     boot_catalog_lba: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
-    write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
     write_boot_record_volume_descriptor(iso, boot_catalog_lba)?;
+    write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
     write_volume_descriptor_terminator(iso)?;
     Ok(())
-}
-
-/// Updates the total sector count in the Primary Volume Descriptor (PVD).
-pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
-    update_4byte_fields(
-        iso,
-        16,
-        PVD_TOTAL_SECTORS_OFFSET,
-        PVD_TOTAL_SECTORS_OFFSET + 4,
-        total_sectors,
-    )
 }
