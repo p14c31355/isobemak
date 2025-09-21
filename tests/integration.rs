@@ -4,7 +4,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use isobemak::iso::builder::create_disk_and_iso;
+use isobemak::iso::builder::build_iso;
 use tempfile::tempdir;
 
 // Helper function to create dummy files for this integration test.
@@ -50,7 +50,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     };
 
     // Call the main function with correct arguments
-    create_disk_and_iso(&iso_path, &iso_image)?;
+    build_iso(&iso_path, &iso_image)?;
 
     // Assert that the ISO file was created
     assert!(iso_path.exists());
