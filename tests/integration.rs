@@ -7,12 +7,8 @@ use std::{
 use isobemak::iso::builder::create_disk_and_iso;
 use tempfile::tempdir;
 
-// Helper function to create dummy files and IsoImage for testing.
-// This function is defined in src/lib.rs, so we need to import it.
-// The original test in tests/integration.rs was not using it.
-// We will use it here to correctly construct the IsoImage.
-// Note: The setup_iso_creation function in src/lib.rs is for its own internal tests.
-// We need to replicate similar logic here for tests/integration.rs.
+// Helper function to create dummy files for this integration test.
+// This is a simplified version of `setup_iso_creation` from the library's internal tests.
 fn setup_integration_test_files(
     temp_dir: &Path,
 ) -> io::Result<(PathBuf, PathBuf, PathBuf, PathBuf)> {
