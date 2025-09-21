@@ -232,18 +232,11 @@ impl IsoBuilder {
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let _boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
-                let mut boot_image_sectors_u64 = boot_image_size.div_ceil(512);
-                // Ensure Nsect is at least 1 if the image is not empty, to avoid invalid 0 value.
-                if boot_image_sectors_u64 == 0 && boot_image_size > 0 {
-                    boot_image_sectors_u64 = 1;
-                } else if boot_image_sectors_u64 == 0 && boot_image_size == 0 {
-                    // If the image is empty, we might still need a placeholder sector if required by spec,
-                    // but for now, let's assume 0 sectors is an error if the file is truly empty and not just a placeholder.
-                    // However, the user stated Nsect=0 is invalid, so we should ensure it's at least 1 if it's meant to be bootable.
-                    // If the boot image is empty, it's likely an error in the input, but to prevent Nsect=0, we set it to 1.
-                    // A more robust solution might involve checking if the boot image is actually needed.
-                    boot_image_sectors_u64 = 1;
-                }
+                let boot_image_sectors_u64 = if boot_image_size == 0 {
+                    1 // Minimum 1 sector if it's a bootable entry, even if empty.
+                } else {
+                    boot_image_size.div_ceil(512)
+                };
 
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
@@ -264,14 +257,11 @@ impl IsoBuilder {
             if let Some(uefi_boot) = &boot_info.uefi_boot {
                 let uefi_fat_img_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
-                let mut uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512);
-                // Ensure Nsect is at least 1 if the image is not empty, to avoid invalid 0 value.
-                if uefi_fat_img_sectors_u64 == 0 && uefi_fat_img_size > 0 {
-                    uefi_fat_img_sectors_u64 = 1;
-                } else if uefi_fat_img_sectors_u64 == 0 && uefi_fat_img_size == 0 {
-                    // Similar logic as BIOS boot for empty UEFI image.
-                    uefi_fat_img_sectors_u64 = 1;
-                }
+                let uefi_fat_img_sectors_u64 = if uefi_fat_img_size == 0 {
+                    1 // Minimum 1 sector if it's a bootable entry, even if empty.
+                } else {
+                    uefi_fat_img_size.div_ceil(512)
+                };
 
                 if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
