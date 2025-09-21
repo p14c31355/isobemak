@@ -41,7 +41,7 @@ pub fn create_fat_image(
 
     // Round up to the nearest sector size
     const SECTOR_SIZE: u64 = 512;
-    total_size = total_size.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
+    total_size = (total_size + SECTOR_SIZE - 1) / SECTOR_SIZE * SECTOR_SIZE;
 
     // Determine FAT type based on size
     let fat_type = if total_size <= 268_435_456 {

@@ -200,7 +200,7 @@ impl IsoBuilder {
             match node {
                 IsoFsNode::File(file) => {
                     file.lba = *current_lba;
-                    let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+                    let sectors = ((file.size + ISO_SECTOR_SIZE as u64 - 1) / (ISO_SECTOR_SIZE as u64)) as u32;
                     *current_lba += sectors;
                 }
                 IsoFsNode::Directory(subdir) => {
@@ -233,7 +233,7 @@ impl IsoBuilder {
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 // El Torito specification requires sector count in 512-byte sectors.
                 // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let boot_image_sectors_u64 = boot_image_size.div_ceil(512).max(1);
+                let boot_image_sectors_u64 = (boot_image_size + 512 - 1) / 512.max(1);
 
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
@@ -256,7 +256,7 @@ impl IsoBuilder {
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
                 // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512).max(1);
+                let uefi_fat_img_sectors_u64 = (uefi_fat_img_size + 512 - 1) / 512.max(1);
 
                 if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
@@ -380,7 +380,7 @@ impl IsoBuilder {
         }
 
         let final_pos = iso_file.stream_position()?;
-        let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
+        let total_sectors_u64 = (final_pos + ISO_SECTOR_SIZE as u64 - 1) / (ISO_SECTOR_SIZE as u64);
         self.total_sectors = u32::try_from(total_sectors_u64)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"))?;
         update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
