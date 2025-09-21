@@ -34,6 +34,25 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
         .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
+
+    // Find the first bootable entry to get its sector count for the default boot header Nsect.
+    // Nsect is a single byte, so the value is capped at 255.
+    // If no bootable entry is found, Nsect defaults to 1.
+    let default_nsect = entries
+        .iter()
+        .find(|e| e.bootable)
+        .map_or(1, |e| e.boot_image_sectors.min(255));
+    val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
+
+    // Set Bootoff (LBA of the boot catalog)
+    // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
+    // This location is immediately overwritten by the checksum calculation later in the function (lines 66-67),
+    // because BOOT_CATALOG_CHECKSUM_OFFSET is also defined as 28.
+    // If you intend to use a vendor-specific field here for Bootoff, you cannot also have a standard El Torito checksum at the same location.
+    // This logic needs to be revisited to either correctly place the Bootoff value or remove this conflicting write.
+    // For now, we remove this write to avoid conflict with the checksum.
+
+    // Set Signature
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
 
     // Checksum calculation

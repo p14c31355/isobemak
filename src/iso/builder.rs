@@ -231,7 +231,10 @@ impl IsoBuilder {
             // Add BIOS boot entry
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
-                let boot_image_sectors_u64 = boot_image_size.div_ceil(512);
+                // El Torito specification requires sector count in 512-byte sectors.
+                // The calculation is simplified to sectors.div_ceil(512).max(1).
+                let boot_image_sectors_u64 = boot_image_size.div_ceil(512).max(1);
+
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -251,7 +254,10 @@ impl IsoBuilder {
             if let Some(uefi_boot) = &boot_info.uefi_boot {
                 let uefi_fat_img_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
-                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512);
+                // El Torito specification requires sector count in 512-byte sectors.
+                // The calculation is simplified to sectors.div_ceil(512).max(1).
+                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512).max(1);
+
                 if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
