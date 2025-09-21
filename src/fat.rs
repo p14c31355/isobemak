@@ -36,8 +36,12 @@ pub fn create_fat_image(
 
     // Add overhead and enforce a minimum size.
     const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensures FAT16 formatting.
-    const FAT_OVERHEAD: u64 = 2 * 1024 * 1024; // 2MB. Overhead for filesystem structures.
-    let total_size = std::cmp::max(content_size + FAT_OVERHEAD, MIN_FAT_SIZE);
+const FAT_OVERHEAD: u64 = 2 * 1024 * 1024; // 2MB. Overhead for filesystem structures.
+let mut total_size = std::cmp::max(content_size + FAT_OVERHEAD, MIN_FAT_SIZE);
+
+// Round up to the nearest sector size
+const SECTOR_SIZE: u64 = 512;
+total_size = total_size.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
 
     // Determine FAT type based on size
     let fat_type = if total_size <= 268_435_456 {
