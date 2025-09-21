@@ -256,7 +256,7 @@ impl IsoBuilder {
                 let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
                 // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let uefi_fat_img_sectors_u64 = (uefi_fat_img_size + 512 - 1) / 512;
+                let uefi_fat_img_sectors_u64 = ((uefi_fat_img_size + 512 - 1) / 512).max(1);
 
                 if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
