@@ -233,7 +233,7 @@ impl IsoBuilder {
                 let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
                 // El Torito specification requires sector count in 512-byte sectors.
                 // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let boot_image_sectors_u64 = (boot_image_size + 512 - 1) / 512;
+                let boot_image_sectors_u64 = ((boot_image_size + 512 - 1) / 512).max(1);
 
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
