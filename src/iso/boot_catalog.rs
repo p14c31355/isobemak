@@ -39,18 +39,19 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Nsect in the default header is a single byte and can only represent up to 255 sectors.
     // If the calculated sectors exceed 255, we cap it at 255.
     // If sectors is 0 (e.g., empty boot image), we set Nsect to 1.
-    let mut default_nsect: u16 = 1; // Default to 1 if no bootable entry or size is 0
-    if let Some(first_bootable_entry) = entries.iter().find(|e| e.bootable) {
-        let sectors = first_bootable_entry.boot_image_sectors;
-        if sectors > 0 {
-            default_nsect = sectors.min(255); // Cap at 255 for 1-byte field
-        }
-    }
+    let default_nsect = entries
+        .iter()
+        .find(|e| e.bootable)
+        .map_or(1, |e| e.boot_image_sectors.min(255));
     val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
 
     // Set Bootoff (LBA of the boot catalog)
     // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
-    val[28..30].copy_from_slice(&(LBA_BOOT_CATALOG as u16).to_le_bytes());
+    // This location is immediately overwritten by the checksum calculation later in the function (lines 66-67),
+    // because BOOT_CATALOG_CHECKSUM_OFFSET is also defined as 28.
+    // If you intend to use a vendor-specific field here for Bootoff, you cannot also have a standard El Torito checksum at the same location.
+    // This logic needs to be revisited to either correctly place the Bootoff value or remove this conflicting write.
+    // For now, we remove this write to avoid conflict with the checksum.
 
     // Set Signature
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
