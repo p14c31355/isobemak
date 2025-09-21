@@ -56,7 +56,15 @@ pub fn create_custom_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
 
         // Create a dummy kernel path in the same directory as the ISO output
         // This ensures it lives long enough and is cleaned up with the temp_dir of the test.
-        let dummy_kernel_path = iso_path.parent().ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "ISO path has no parent directory"))?.join("dummy_kernel_for_fat");
+        let dummy_kernel_path = iso_path
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ISO path has no parent directory",
+                )
+            })?
+            .join("dummy_kernel_for_fat");
         std::fs::write(&dummy_kernel_path, b"")?;
         dummy_kernel_file_for_fat_creation = Some(dummy_kernel_path.clone());
 
