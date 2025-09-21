@@ -38,10 +38,10 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
     // Checksum calculation
     let mut sum: u16 = 0;
-    // Sum the first 15 words (bytes 0 to 27)
-    for i in (0..BOOT_CATALOG_CHECKSUM_OFFSET).step_by(2) {
+    for i in (0..32).step_by(2) {
         sum = sum.wrapping_add(u16::from_le_bytes([val[i], val[i + 1]]));
     }
+
     // Calculate the checksum such that the sum of all 16 words is 0
     let checksum = 0u16.wrapping_sub(sum);
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
