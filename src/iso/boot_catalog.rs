@@ -14,20 +14,27 @@ pub const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 pub const ID_FIELD_OFFSET: usize = 4;
 pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 
-/// Writes an El Torito boot catalog for UEFI.
+pub struct BootCatalogEntry {
+    pub platform_id: u8,
+    pub boot_image_lba: u32,
+    pub boot_image_sectors: u16,
+    pub bootable: bool,
+}
+
+/// Writes an El Torito boot catalog.
 pub fn write_boot_catalog(
     iso: &mut File,
-    boot_img_lba: u32,
-    boot_img_sectors: u16,
+    entries: Vec<BootCatalogEntry>,
 ) -> io::Result<()> {
     pad_to_lba(iso, LBA_BOOT_CATALOG)?;
 
     let mut catalog = [0u8; ISO_SECTOR_SIZE];
+    let mut offset = 0;
 
     // Validation Entry (32 bytes)
     let mut val = [0u8; 32];
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
-    val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
+    val[1] = BOOT_CATALOG_EFI_PLATFORM_ID; // This is for the primary boot entry, usually UEFI
 
     // ID string "UEFI" + zero padding (24 bytes total)
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
@@ -46,18 +53,22 @@ pub fn write_boot_catalog(
     let checksum = 0u16.wrapping_sub(sum);
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
-    catalog[0..32].copy_from_slice(&val);
+    catalog[offset..offset + 32].copy_from_slice(&val);
+    offset += 32;
 
-    // Default Boot Entry (32 bytes)
-    let mut entry = [0u8; 32];
-    entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // Bootable
-    entry[1] = 0x00; // No Emulation
-    entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
-    entry[4] = BOOT_CATALOG_EFI_PLATFORM_ID; // System Type
-    entry[5] = 0x00; // Unused
-    entry[6..8].copy_from_slice(&boot_img_sectors.to_le_bytes()); // Sector count (u16, in 512-byte sectors)
-    entry[8..12].copy_from_slice(&boot_img_lba.to_le_bytes());
-    catalog[32..64].copy_from_slice(&entry);
+    // Boot Entries
+    for entry_data in entries {
+        let mut entry = [0u8; 32];
+        entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // Bootable
+        entry[1] = 0x00; // No Emulation
+        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
+        entry[4] = entry_data.platform_id; // System Type
+        entry[5] = 0x00; // Unused
+        entry[6..8].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes()); // Sector count (u16, in 512-byte sectors)
+        entry[8..12].copy_from_slice(&entry_data.boot_image_lba.to_le_bytes());
+        catalog[offset..offset + 32].copy_from_slice(&entry);
+        offset += 32;
+    }
 
     iso.write_all(&catalog)
 }

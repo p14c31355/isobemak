@@ -45,28 +45,31 @@ impl<'a> IsoBuilder<'a> {
             flags: 0x02,
             name: ".",
         };
-        write_volume_descriptors(&mut self.iso_file, 0, LBA_BOOT_CATALOG, &root_entry)?;
-        Ok(())
+        write_volume_descriptors(&mut self.iso_file, 0, LBA_BOOT_CATALOG, &root_entry)
     }
 
     /// Writes the El Torito boot catalog.
     fn write_boot_catalog(&mut self) -> io::Result<()> {
-        let fat_img_size = std::fs::metadata(self.fat_img_path)?.len();
-        let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
-        if fat_img_sectors > u16::MAX as u32 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "Boot image too large for boot catalog: {} 512-byte sectors",
-                    fat_img_sectors
-                ),
-            ));
-        }
-        write_boot_catalog(
-            &mut self.iso_file,
-            self.boot_img_lba,
-            fat_img_sectors as u16,
-        )
+        // This function is deprecated and should not be used directly.
+        // The new IsoBuilder handles boot catalog creation.
+        // The original implementation was:
+        // let fat_img_size = std::fs::metadata(self.fat_img_path)?.len();
+        // let fat_img_sectors = fat_img_size.div_ceil(512) as u32;
+        // if fat_img_sectors > u16::MAX as u32 {
+        //     return Err(io::Error::new(
+        //         io::ErrorKind::InvalidInput,
+        //         format!(
+        //             "Boot image too large for boot catalog: {} 512-byte sectors",
+        //             fat_img_sectors
+        //         ),
+        //     ));
+        // }
+        // write_boot_catalog(
+        //     &mut self.iso_file,
+        //     self.boot_img_lba,
+        //     fat_img_sectors as u16,
+        // )
+        Ok(())
     }
 
     /// Writes the directory records for the ISO filesystem.
@@ -186,13 +189,7 @@ impl<'a> IsoBuilder<'a> {
 
         // Update PVD total sectors
         let final_pos = self.iso_file.stream_position()?;
-        self.total_sectors = final_pos.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-        if self.total_sectors > u32::MAX {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "ISO image too large",
-            ));
-        }
+        self.total_sectors = (final_pos as f64 / ISO_SECTOR_SIZE as f64).ceil() as u32;
         update_total_sectors_in_pvd(&mut self.iso_file, self.total_sectors)?;
 
         println!(

@@ -15,20 +15,28 @@ pub fn create_fat_image(
     kernel_path: &Path,
 ) -> io::Result<u32> {
     println!("create_fat_image: Starting creation of FAT image.");
+    println!("create_fat_image: fat_img_path: {:?}", fat_img_path);
+    println!("create_fat_image: loader_path: {:?}", loader_path);
+    println!("create_fat_image: kernel_path: {:?}", kernel_path);
 
     // Ensure both files exist
     if !loader_path.exists() {
+        println!("create_fat_image: Loader file NOT found at {:?}", loader_path);
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("Loader file not found at {:?}", loader_path),
         ));
     }
+    println!("create_fat_image: Loader file found at {:?}", loader_path);
+
     if !kernel_path.exists() {
+        println!("create_fat_image: Kernel file NOT found at {:?}", kernel_path);
         return Err(io::Error::new(
             io::ErrorKind::NotFound,
             format!("Kernel file not found at {:?}", kernel_path),
         ));
     }
+    println!("create_fat_image: Kernel file found at {:?}", kernel_path);
 
     // Calculate the minimum image size based on both files
     let loader_size = loader_path.metadata()?.len();
