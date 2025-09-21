@@ -56,7 +56,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-        entry[0] = BOOT_CATALOG_BOOT_ENTRY_HEADER_ID; // Bootable
+        entry[0] = if entry_data.bootable { BOOT_CATALOG_BOOT_ENTRY_HEADER_ID } else { 0x00 }; // Bootable or not
         entry[1] = 0x00; // No Emulation
         entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load Segment
         entry[4] = entry_data.platform_id; // System Type
