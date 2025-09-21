@@ -4,7 +4,7 @@ use std::{
     io::{self, Write},
 };
 
-use isobemak::builder::create_disk_and_iso;
+use isobemak::iso_builder::create_disk_and_iso;
 use tempfile::tempdir;
 
 #[test]

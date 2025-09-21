@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{self, Read, Seek, Write, copy};
 use std::path::{Path, PathBuf};
 
-use crate::builder::BootInfo;
+use crate::iso_builder::BootInfo;
 use crate::iso::boot_catalog::{
     BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, LBA_BOOT_CATALOG, write_boot_catalog,
 };

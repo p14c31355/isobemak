@@ -7,11 +7,11 @@ pub mod iso;
 pub mod utils;
 // The builder module contains high-level orchestration logic
 // for creating a complete disk and ISO image.
-pub mod builder;
+pub mod iso_builder;
 
 #[cfg(test)]
 mod tests {
-    use super::builder::{
+    use super::iso_builder::{
         BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, create_custom_iso,
     };
     use std::io;
