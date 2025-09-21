@@ -105,7 +105,7 @@ pub fn create_disk_and_iso(
     // 1. Create the FAT image.
     fat::create_fat_image(fat_img_path, loader_path, kernel_path)?;
     println!(
-        "create_disk_and_and_iso: FAT image created at {:?}",
+        "create_disk_and_iso: FAT image created at {:?}",
         fat_img_path
     );
 
