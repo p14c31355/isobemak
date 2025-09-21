@@ -36,9 +36,8 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
 
     // Find the first bootable entry to get its sector count for the default boot header Nsect.
-    // Nsect in the default header is a single byte and can only represent up to 255 sectors.
-    // If the calculated sectors exceed 255, we cap it at 255.
-    // If sectors is 0 (e.g., empty boot image), we set Nsect to 1.
+    // Nsect is a single byte, so the value is capped at 255.
+    // If no bootable entry is found, Nsect defaults to 1.
     let default_nsect = entries
         .iter()
         .find(|e| e.bootable)
