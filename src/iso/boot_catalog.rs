@@ -49,7 +49,8 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
 
     // Set Bootoff (LBA of the boot catalog)
-    val[28..30].copy_from_slice(&LBA_BOOT_CATALOG.to_le_bytes());
+    // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
+    val[28..30].copy_from_slice(&(LBA_BOOT_CATALOG as u16).to_le_bytes());
 
     // Set Signature
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
