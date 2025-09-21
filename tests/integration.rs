@@ -48,7 +48,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
             bios_boot: None, // Not testing BIOS boot in this specific test
             uefi_boot: Some(isobemak::iso::builder::UefiBootInfo {
                 boot_image: bellows_path.clone(),
-                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(), // Standard UEFI path
+                destination_in_iso: "EFI/BOOT/efi.img".to_string(),
             }),
         },
     };
