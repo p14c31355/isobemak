@@ -1,7 +1,7 @@
 // src/iso/builder.rs
 use std::collections::HashMap;
 use std::fs::File;
-use std::io::{self, Read, Seek, Write, copy};
+use std::io::{self, Read, Seek, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -178,7 +178,7 @@ impl IsoBuilder {
 
         self.current_lba = 16;
 
-        self.calculate_lbas(&mut self.root)?;
+        IsoBuilder::calculate_lbas(&mut self.current_lba, &mut self.root)?;
         self.write_descriptors(&mut iso_file)?;
         self.write_boot_catalog(&mut iso_file)?;
         self.write_directories(&mut iso_file, &self.root)?;
@@ -189,9 +189,9 @@ impl IsoBuilder {
     }
 
     /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
-    fn calculate_lbas(&mut self, dir: &mut IsoDirectory) -> io::Result<()> {
-        dir.lba = self.current_lba;
-        self.current_lba += 1;
+    fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
+        dir.lba = *current_lba;
+        *current_lba += 1;
 
         let mut sorted_children: Vec<_> = dir.children.iter_mut().collect();
         sorted_children.sort_by_key(|(name, _)| *name);
@@ -199,12 +199,12 @@ impl IsoBuilder {
         for (_, node) in sorted_children {
             match node {
                 IsoFsNode::File(file) => {
-                    file.lba = self.current_lba;
+                    file.lba = *current_lba;
                     let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-                    self.current_lba += sectors;
+                    *current_lba += sectors;
                 }
                 IsoFsNode::Directory(subdir) => {
-                    self.calculate_lbas(subdir)?;
+                    IsoBuilder::calculate_lbas(current_lba, subdir)?;
                 }
             }
         }
@@ -298,7 +298,7 @@ impl IsoBuilder {
             name: "..",
         });
 
-        for (name, node) in sorted_children {
+        for (name, node) in &sorted_children {
                     let (lba, size, flags) = match node {
             IsoFsNode::File(file) => {
                 let file_size_u32 = u32::try_from(file.size).map_err(|_| {
@@ -455,12 +455,12 @@ pub fn create_custom_iso(iso_path: &Path, image: &IsoImage) -> io::Result<()> {
 
     // Handle UEFI boot image by creating a temporary FAT image.
     let mut uefi_fat_img_path = None;
-    let mut temp_fat_file_holder: Option<NamedTempFile> = None;
+    let mut _temp_fat_file_holder: Option<NamedTempFile> = None;
 
     if let Some(uefi_boot_info) = &image.boot_info.uefi_boot {
         let temp_fat_file = NamedTempFile::new()?;
         let fat_img_path = temp_fat_file.path().to_path_buf();
-        temp_fat_file_holder = Some(temp_fat_file);
+        _temp_fat_file_holder = Some(temp_fat_file);
 
         // create_fat_image expects a kernel path, so we create a dummy file.
         let dummy_kernel_path = iso_path

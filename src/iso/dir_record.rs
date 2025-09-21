@@ -1,5 +1,4 @@
 // isobemak/src/iso/dir_record.rs
-use std::io;
 
 /// ISO9660 directory record structure
 pub struct IsoDirEntry<'a> {
@@ -15,14 +14,14 @@ impl<'a> IsoDirEntry<'a> {
     let file_id_vec_option: Option<Vec<u8>>;
     let (file_id_bytes, file_id_len) = match self.name {
         "." => (b"\x00" as &[u8], 1),
-        ".." => (b"\x01", 1),
+        ".." => (b"\x01" as &[u8], 1),
         _ => {
             if self.flags & 0x02 != 0 {
                 (self.name.as_bytes(), self.name.len())
             } else {
                 let name_with_version = format!("{};1", self.name.to_uppercase());
                 file_id_vec_option = Some(name_with_version.into_bytes());
-                (file_id_vec_option.as_ref().unwrap(), file_id_vec_option.as_ref().unwrap().len())
+                (file_id_vec_option.as_ref().unwrap().as_slice(), file_id_vec_option.as_ref().unwrap().len())
             }
         }
     };
