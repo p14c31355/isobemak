@@ -1,18 +1,17 @@
 // src/iso/mbr.rs
 
 use std::io::{self, Write, Seek, SeekFrom};
-use std::fs::File;
 
 // MBR constants
 const MBR_SIZE: usize = 512;
 const BOOT_CODE_SIZE: usize = 440;
-const PARTITION_TABLE_OFFSET: usize = 446;
-const BOOT_SIGNATURE_OFFSET: usize = 510;
+
 const BOOT_SIGNATURE: [u8; 2] = [0x55, 0xAA]; // Little-endian
 
 // Partition entry structure (16 bytes)
 #[derive(Debug, Clone, Copy)]
 #[repr(C, packed)]
+#[derive(Default)]
 pub struct PartitionEntry {
     /// Status of the partition (e.g., 0x80 for active)
     pub status: u8,
@@ -28,18 +27,6 @@ pub struct PartitionEntry {
     pub sector_count: u32,
 }
 
-impl Default for PartitionEntry {
-    fn default() -> Self {
-        Self {
-            status: 0,
-            start_chs: [0; 3],
-            partition_type: 0,
-            end_chs: [0; 3],
-            start_lba: 0,
-            sector_count: 0,
-        }
-    }
-}
 
 /// Represents the Master Boot Record (MBR).
 #[derive(Debug, Clone)] // Removed Default here as we'll implement it manually

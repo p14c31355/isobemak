@@ -12,7 +12,7 @@ use crate::iso::boot_catalog::{
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
-use crate::iso::mbr::Mbr; // Import Mbr struct
+ // Import Mbr struct
 
 /// Represents a file within the ISO filesystem.
 pub struct IsoFile {
@@ -206,7 +206,7 @@ pub fn build(&mut self, iso_path: &Path, esp_size_sectors: u32) -> io::Result<()
 
     // Write MBR
     iso_file.seek(SeekFrom::Start(0))?;
-    let mbr = crate::gpt::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+    let mbr = crate::iso::gpt::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
     mbr.write_to(&mut iso_file)?;
 
     // Write GPT structures if isohybrid
@@ -214,10 +214,10 @@ pub fn build(&mut self, iso_path: &Path, esp_size_sectors: u32) -> io::Result<()
         let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
         let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
 
-        let esp_guid_str = crate::gpt::EFI_SYSTEM_PARTITION_GUID;
+        let esp_guid_str = crate::iso::gpt::EFI_SYSTEM_PARTITION_GUID;
         let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
         let partitions = vec![
-            crate::gpt::GptPartitionEntry::new(
+            crate::iso::gpt::GptPartitionEntry::new(
                 esp_guid_str,
                 &esp_unique_guid_str,
                 esp_partition_start_lba as u64,
@@ -225,7 +225,7 @@ pub fn build(&mut self, iso_path: &Path, esp_size_sectors: u32) -> io::Result<()
                 "EFI System Partition",
             ),
         ];
-        crate::gpt::write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
+        crate::iso::gpt::write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
     }
 
     Ok(())

@@ -1,7 +1,5 @@
 use std::io::{self, Write, Seek, SeekFrom};
 use std::mem;
-use std::path::Path;
-use std::time::{SystemTime, UNIX_EPOCH};
 use uuid::Uuid;
 use crc32fast::Hasher;
 
@@ -158,7 +156,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
 
     // Write Main GPT Header
-    writer.seek(SeekFrom::Start(1 * 512))?; // LBA 1
+    writer.seek(SeekFrom::Start(512))?; // LBA 1
     header.write_to(writer)?;
 
     // Write Partition Entries
@@ -204,6 +202,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 // MBR related functions (from mbr.rs, adapted for GPT hybrid)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
+#[derive(Default)]
 pub struct MbrPartitionEntry {
     pub bootable: u8,
     pub starting_chs: [u8; 3],
@@ -213,18 +212,6 @@ pub struct MbrPartitionEntry {
     pub size_in_lba: u32,
 }
 
-impl Default for MbrPartitionEntry {
-    fn default() -> Self {
-        MbrPartitionEntry {
-            bootable: 0,
-            starting_chs: [0; 3],
-            partition_type: 0,
-            ending_chs: [0; 3],
-            starting_lba: 0,
-            size_in_lba: 0,
-        }
-    }
-}
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -234,6 +221,12 @@ pub struct Mbr {
     pub reserved: u16,
     pub partition_table: [MbrPartitionEntry; 4],
     pub boot_signature: u16,
+}
+
+impl Default for Mbr {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Mbr {

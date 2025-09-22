@@ -4,7 +4,6 @@
 pub mod fat;
 pub mod iso;
 pub mod utils;
-pub mod gpt;
 
 // Re-export the main function for external use.
 pub use iso::builder::build_iso;
