@@ -84,7 +84,7 @@ mod tests {
         let (iso_image, ..) = setup_iso_creation(temp_dir.path())?;
 
         // Create the ISO
-        build_iso(&iso_output_path, &iso_image)?;
+        build_iso(&iso_output_path, &iso_image, true)?;
 
         // Assert that the ISO file was created and is not empty
         assert!(iso_output_path.exists());
