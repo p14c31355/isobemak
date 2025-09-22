@@ -209,7 +209,7 @@ impl IsoBuilder {
         // Write MBR
         iso_file.seek(SeekFrom::Start(0))?;
         let mbr =
-            crate::iso::gpt::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+            crate::iso::mbr::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
         mbr.write_to(&mut iso_file)?;
 
         // Write GPT structures if isohybrid

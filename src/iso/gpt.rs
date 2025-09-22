@@ -36,7 +36,7 @@ impl GptHeader {
         let disk_guid_uuid = Uuid::new_v4();
         let disk_guid_bytes = disk_guid_uuid.into_bytes();
 
-        let mut header = GptHeader {
+        let header = GptHeader {
             signature: *b"EFI PART",
             revision: 0x00010000, // Version 1.0
             header_size: mem::size_of::<GptHeader>() as u32,
