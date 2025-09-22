@@ -1,6 +1,6 @@
 // src/iso/mbr.rs
 
-use std::io::{self, Write, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom, Write};
 
 // MBR constants
 const MBR_SIZE: usize = 512;
@@ -26,7 +26,6 @@ pub struct PartitionEntry {
     /// Number of sectors in the partition (32-bit)
     pub sector_count: u32,
 }
-
 
 /// Represents the Master Boot Record (MBR).
 #[derive(Debug, Clone)] // Removed Default here as we'll implement it manually
@@ -99,7 +98,10 @@ impl Mbr {
             // If it does, it indicates a problem with the MBR structure or writing logic.
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("MBR write error: expected {} bytes, wrote {}", MBR_SIZE, current_pos),
+                format!(
+                    "MBR write error: expected {} bytes, wrote {}",
+                    MBR_SIZE, current_pos
+                ),
             ));
         }
 

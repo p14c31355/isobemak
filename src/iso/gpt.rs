@@ -1,7 +1,7 @@
-use std::io::{self, Write, Seek, SeekFrom};
+use crc32fast::Hasher;
+use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 use uuid::Uuid;
-use crc32fast::Hasher;
 
 pub const EFI_SYSTEM_PARTITION_GUID: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 
@@ -92,7 +92,8 @@ impl GptPartitionEntry {
         partition_name: &str,
     ) -> Self {
         let partition_type_guid_bytes = Uuid::parse_str(partition_type_guid).unwrap().into_bytes();
-        let unique_partition_guid_bytes = Uuid::parse_str(unique_partition_guid).unwrap().into_bytes();
+        let unique_partition_guid_bytes =
+            Uuid::parse_str(unique_partition_guid).unwrap().into_bytes();
 
         let mut name_bytes = [0u16; 36];
         for (i, c) in partition_name.encode_utf16().take(36).enumerate() {
@@ -138,8 +139,10 @@ pub fn write_gpt_structures<W: Write + Seek>(
         vec![0u8; (num_partition_entries * partition_entry_size) as usize];
     let mut offset = 0;
     for partition in partitions {
-        let bytes: [u8; mem::size_of::<GptPartitionEntry>()] = unsafe { mem::transmute(*partition) };
-        partition_array_bytes[offset..offset + mem::size_of::<GptPartitionEntry>()].copy_from_slice(&bytes);
+        let bytes: [u8; mem::size_of::<GptPartitionEntry>()] =
+            unsafe { mem::transmute(*partition) };
+        partition_array_bytes[offset..offset + mem::size_of::<GptPartitionEntry>()]
+            .copy_from_slice(&bytes);
         offset += mem::size_of::<GptPartitionEntry>();
     }
     let mut hasher = Hasher::new();
@@ -153,7 +156,6 @@ pub fn write_gpt_structures<W: Write + Seek>(
     let mut hasher = Hasher::new();
     hasher.update(&header_bytes);
     header.header_crc32 = hasher.finalize();
-
 
     // Write Main GPT Header
     writer.seek(SeekFrom::Start(512))?; // LBA 1
@@ -176,7 +178,8 @@ pub fn write_gpt_structures<W: Write + Seek>(
     backup_header.partition_entry_lba = total_lbas - num_partition_entries as u64 - 1; // Backup partition array LBA
 
     // Recalculate backup header CRC32
-    let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(backup_header) };
+    let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
+        unsafe { mem::transmute(backup_header) };
     backup_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
     backup_header_bytes[88..92].copy_from_slice(&backup_header.partition_array_crc32.to_le_bytes()); // Update partition_array_crc32
     let mut hasher = Hasher::new();
@@ -187,7 +190,9 @@ pub fn write_gpt_structures<W: Write + Seek>(
     backup_header.write_to(writer)?;
 
     // Backup Partition Entries
-    writer.seek(SeekFrom::Start((total_lbas - num_partition_entries as u64 - 1) * 512))?;
+    writer.seek(SeekFrom::Start(
+        (total_lbas - num_partition_entries as u64 - 1) * 512,
+    ))?;
     for partition in partitions {
         partition.write_to(writer)?;
     }
@@ -201,8 +206,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
 // MBR related functions (from mbr.rs, adapted for GPT hybrid)
 #[repr(C, packed)]
-#[derive(Debug, Clone, Copy)]
-#[derive(Default)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct MbrPartitionEntry {
     pub bootable: u8,
     pub starting_chs: [u8; 3],
@@ -211,7 +215,6 @@ pub struct MbrPartitionEntry {
     pub starting_lba: u32,
     pub size_in_lba: u32,
 }
-
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
