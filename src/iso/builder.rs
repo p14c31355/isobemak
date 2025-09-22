@@ -213,7 +213,7 @@ impl IsoBuilder {
         mbr.write_to(&mut iso_file)?;
 
         // Write GPT structures if isohybrid
-        if self.is_isohybrid {
+        if self.is_isohybrid && esp_size_sectors > 0 {
             let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
             let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
 
