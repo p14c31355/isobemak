@@ -36,7 +36,7 @@ impl GptHeader {
         let disk_guid_uuid = Uuid::new_v4();
         let disk_guid_bytes = disk_guid_uuid.into_bytes();
 
-        let header = GptHeader {
+        GptHeader {
             signature: *b"EFI PART",
             revision: 0x00010000, // Version 1.0
             header_size: mem::size_of::<GptHeader>() as u32,
@@ -52,11 +52,7 @@ impl GptHeader {
             partition_entry_size,
             partition_array_crc32: 0, // Calculated later
             _reserved1: [0; 420],
-        };
-
-        
-
-        header
+        }
     }
 
     pub fn write_to<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
@@ -89,10 +85,9 @@ impl GptPartitionEntry {
         let partition_type_guid_bytes = Uuid::parse_str(partition_type_guid)
             .expect("Failed to parse partition type GUID")
             .into_bytes();
-        let unique_partition_guid_bytes =
-            Uuid::parse_str(unique_partition_guid)
-                .expect("Failed to parse unique partition GUID")
-                .into_bytes();
+        let unique_partition_guid_bytes = Uuid::parse_str(unique_partition_guid)
+            .expect("Failed to parse unique partition GUID")
+            .into_bytes();
 
         let mut name_bytes = [0u16; 36];
         for (i, c) in partition_name.encode_utf16().take(36).enumerate() {
@@ -151,7 +146,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
     // Recalculate header CRC32 with partition array CRC
     let mut header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
     header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
-    
+
     let mut hasher = Hasher::new();
     hasher.update(&header_bytes);
     header.header_crc32 = hasher.finalize();
@@ -180,7 +175,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
     let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
         unsafe { mem::transmute(backup_header) };
     backup_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
-    
+
     let mut hasher = Hasher::new();
     hasher.update(&backup_header_bytes);
     backup_header.header_crc32 = hasher.finalize();
@@ -202,5 +197,3 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
     Ok(())
 }
-
-

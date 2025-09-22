@@ -13,7 +13,6 @@ use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 
-
 /// Represents a file within the ISO filesystem.
 pub struct IsoFile {
     pub path: PathBuf,
