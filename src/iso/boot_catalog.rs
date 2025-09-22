@@ -80,7 +80,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         entry[2..4].copy_from_slice(&0u16.to_le_bytes());
         entry[4] = entry_data.platform_id;
         entry[8..12].copy_from_slice(&entry_data.boot_image_lba.to_le_bytes());
-        entry[12..14].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes());
+        entry[6..8].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes());
         catalog[offset..offset + 32].copy_from_slice(&entry);
         offset += 32;
     }
