@@ -80,6 +80,7 @@ pub struct BiosBootInfo {
 #[derive(Clone)]
 pub struct UefiBootInfo {
     pub boot_image: PathBuf,
+    pub kernel_image: PathBuf,
     pub destination_in_iso: String,
 }
 
@@ -517,29 +518,16 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
         let fat_img_path = temp_fat_file.path().to_path_buf();
         _temp_fat_file_holder = Some(temp_fat_file);
 
-        // create_fat_image expects a kernel path, so we create a dummy file.
-        let dummy_kernel_path = iso_path
-            .parent()
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "ISO path has no parent directory",
-                )
-            })?
-            .join("dummy_kernel_for_fat");
-        std::fs::write(&dummy_kernel_path, b"")?;
-
         fat::create_fat_image(
             &fat_img_path,
             &uefi_boot_info.boot_image,
-            &dummy_kernel_path,
+            &uefi_boot_info.kernel_image,
         )?;
 
-        std::fs::remove_file(dummy_kernel_path)?;
         uefi_fat_img_path = Some(fat_img_path.clone()); // Clone here to use it later
 
         // Calculate ESP size
-        let fat_img_metadata = std::fs::metadata(&fat_img_path)?; // Corrected: use fat_img_path
+        let fat_img_metadata = std::fs::metadata(&fat_img_path)?;
         esp_size_sectors =
             (fat_img_metadata.len() as u32).div_ceil(crate::utils::ISO_SECTOR_SIZE as u32);
     }
