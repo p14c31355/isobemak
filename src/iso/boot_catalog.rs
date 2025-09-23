@@ -64,7 +64,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-                let boot_indicator = if entry_data.bootable {
+        let boot_indicator = if entry_data.bootable {
             BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
         } else {
             0x00u8

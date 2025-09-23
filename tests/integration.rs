@@ -43,7 +43,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
         },
     };
 
-        // Call the main function with correct arguments
+    // Call the main function with correct arguments
     build_iso(&iso_path, &iso_image, false)?;
     // Assert that the ISO file was created
     assert!(iso_path.exists());
