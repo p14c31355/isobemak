@@ -92,6 +92,7 @@ pub struct IsoBuilder {
     current_lba: u32,
     total_sectors: u32,
     is_isohybrid: bool, // New field
+    uefi_catalog_path: Option<String>,
 }
 
 impl Default for IsoBuilder {
@@ -109,6 +110,7 @@ impl IsoBuilder {
             current_lba: 0,
             total_sectors: 0,
             is_isohybrid: false, // Initialize new field
+            uefi_catalog_path: None,
         }
     }
 
@@ -186,14 +188,14 @@ impl IsoBuilder {
         // Placeholder for MBR and GPT structures.
         // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
         let reserved_sectors = if self.is_isohybrid { 34u32 } else { 16u32 };
-        let iso_data_start_lba = reserved_sectors;
+        let data_start_lba = reserved_sectors;
 
-        // Set current_lba to the start of ISO9660 data
-        self.current_lba = iso_data_start_lba;
+        // Set current_lba to the start of filesystem data after VDs and catalog
+        self.current_lba = data_start_lba + 4;
 
         // Seek past the MBR/GPT reserved area to start writing ISO9660 data
         iso_file.seek(SeekFrom::Start(
-            (iso_data_start_lba as u64) * ISO_SECTOR_SIZE as u64,
+            (data_start_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
 
         IsoBuilder::calculate_lbas(&mut self.current_lba, &mut self.root)?;
@@ -206,7 +208,7 @@ impl IsoBuilder {
         if !self.is_isohybrid {
             let reserved_sectors = 16u32;
             iso_file.seek(SeekFrom::Start(0))?;
-            let zero_buffer = vec![0u8; (reserved_sectors as usize * ISO_SECTOR_SIZE)];
+            let zero_buffer = vec![0u8; reserved_sectors as usize * ISO_SECTOR_SIZE];
             iso_file.write_all(&zero_buffer)?;
         }
 
@@ -283,18 +285,9 @@ impl IsoBuilder {
         if let Some(boot_info) = &self.boot_info {
             // Add BIOS boot entry
             if let Some(bios_boot) = &boot_info.bios_boot {
-                let boot_image_size = std::fs::metadata(&bios_boot.boot_image)?.len();
+                let boot_image_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
-                // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let boot_image_sectors_u64 = boot_image_size.div_ceil(512).max(1);
-
-                if boot_image_sectors_u64 > u16::MAX as u64 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "BIOS boot image is too large for the boot catalog",
-                    ));
-                }
-                let boot_image_sectors = boot_image_sectors_u64 as u16;
+                let boot_image_sectors = (boot_image_size.div_ceil(512)) as u32;
                 boot_entries.push(BootCatalogEntry {
                     platform_id: 0x00,
                     boot_image_lba: self.get_lba_for_path(&bios_boot.destination_in_iso)?,
@@ -302,30 +295,21 @@ impl IsoBuilder {
                     bootable: true,
                 });
             }
+        }
 
-            // Add UEFI boot entry
-            if let Some(uefi_boot) = &boot_info.uefi_boot {
-                let uefi_fat_img_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
-                let uefi_fat_img_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
-                // El Torito specification requires sector count in 512-byte sectors.
-                // The calculation is simplified to sectors.div_ceil(512).max(1).
-                let uefi_fat_img_sectors_u64 = uefi_fat_img_size.div_ceil(512).max(1);
+        // Add UEFI boot entry
+        if let Some(path) = &self.uefi_catalog_path {
+            let uefi_boot_lba = self.get_lba_for_path(path)?;
+            let uefi_boot_size = self.get_file_size_in_iso(path)?;
+            // El Torito specification requires sector count in 512-byte sectors.
+            let uefi_boot_sectors = (uefi_boot_size.div_ceil(512)) as u32;
 
-                if uefi_fat_img_sectors_u64 > u16::MAX as u64 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "UEFI boot image is too large for the boot catalog (exceeds u16::MAX sectors)",
-                    ));
-                }
-                let uefi_fat_img_sectors = uefi_fat_img_sectors_u64 as u16;
-
-                boot_entries.push(BootCatalogEntry {
-                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                    boot_image_lba: uefi_fat_img_lba,
-                    boot_image_sectors: uefi_fat_img_sectors,
-                    bootable: true,
-                });
-            }
+            boot_entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: uefi_boot_lba,
+                boot_image_sectors: uefi_boot_sectors,
+                bootable: true,
+            });
         }
 
         if !boot_entries.is_empty() {
@@ -518,45 +502,40 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
     iso_builder.set_isohybrid(is_isohybrid);
 
     // Handle UEFI boot image by creating a temporary FAT image.
-    let mut uefi_fat_img_path = None;
     let mut _temp_fat_file_holder: Option<NamedTempFile> = None;
     let mut esp_size_sectors = 0; // Initialize esp_size_sectors
 
-    if let Some(uefi_boot_info) = &image.boot_info.uefi_boot {
-        let temp_fat_file = NamedTempFile::new()?;
-        let fat_img_path = temp_fat_file.path().to_path_buf();
-        _temp_fat_file_holder = Some(temp_fat_file);
+    if let Some(uefi_boot) = &image.boot_info.uefi_boot {
+        // Add BOOTX64.EFI for El Torito catalog
+        let efi_dest = "EFI/BOOT/BOOTX64.EFI".to_string();
+        iso_builder.add_file(&efi_dest, uefi_boot.boot_image.clone())?;
+        iso_builder.uefi_catalog_path = Some(efi_dest);
 
-        fat::create_fat_image(
-            &fat_img_path,
-            &uefi_boot_info.boot_image,
-            &uefi_boot_info.kernel_image,
-        )?;
+        // For hybrid, create and add FAT image for ESP
+        if is_isohybrid {
+            let temp_fat_file = NamedTempFile::new()?;
+            let fat_img_path = temp_fat_file.path().to_path_buf();
+            _temp_fat_file_holder = Some(temp_fat_file);
 
-        uefi_fat_img_path = Some(fat_img_path.clone()); // Clone here to use it later
+            fat::create_fat_image(
+                &fat_img_path,
+                &uefi_boot.boot_image,
+                &uefi_boot.kernel_image,
+            )?;
 
-        // Calculate ESP size
-        let fat_img_metadata = std::fs::metadata(&fat_img_path)?;
-        esp_size_sectors =
-            (fat_img_metadata.len() as u32).div_ceil(crate::utils::ISO_SECTOR_SIZE as u32);
+            // Calculate ESP size
+            let fat_img_metadata = std::fs::metadata(&fat_img_path)?;
+            esp_size_sectors =
+                (fat_img_metadata.len() as u32).div_ceil(crate::utils::ISO_SECTOR_SIZE as u32);
+
+            let fat_dest = "efi.img".to_string();
+            iso_builder.add_file(&fat_dest, fat_img_path)?;
+        }
     }
 
     // Add all regular files to the ISO builder
     for file in &image.files {
         iso_builder.add_file(&file.destination, file.source.clone())?;
-    }
-
-    // If a UEFI FAT image was created, add it to the ISO builder.
-    if let Some(path) = uefi_fat_img_path {
-        let dest = image
-            .boot_info
-            .uefi_boot
-            .as_ref()
-            .map(|info| info.destination_in_iso.clone())
-            .ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidData, "Missing UEFI boot destination")
-            })?;
-        iso_builder.add_file(&dest, path)?;
     }
 
     // Handle BIOS boot image

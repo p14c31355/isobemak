@@ -17,7 +17,7 @@ pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 pub struct BootCatalogEntry {
     pub platform_id: u8,
     pub boot_image_lba: u32,
-    pub boot_image_sectors: u16,
+    pub boot_image_sectors: u32,
     pub bootable: bool,
 }
 
@@ -35,14 +35,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
         .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
 
-    // Find the first bootable entry to get its sector count for the default boot header Nsect.
-    // Nsect is a single byte, so the value is capped at 255.
-    // If no bootable entry is found, Nsect defaults to 1.
-    let default_nsect = entries
-        .iter()
-        .find(|e| e.bootable)
-        .map_or(1, |e| e.boot_image_sectors.min(255));
-    val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
+    // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
     // Set Bootoff (LBA of the boot catalog)
     // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
@@ -71,16 +64,24 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-        entry[0] = if entry_data.bootable {
-            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID
+        let boot_indicator = if entry_data.bootable {
+            if entry_data.platform_id == BOOT_CATALOG_EFI_PLATFORM_ID {
+                0x88u8
+            } else {
+                0x80u8
+            }
         } else {
-            0x00
+            0x00u8
         };
+        entry[0] = boot_indicator;
         entry[1] = 0x00; // No Emulation
-        entry[2..4].copy_from_slice(&0u16.to_le_bytes());
-        entry[4] = entry_data.platform_id;
-        entry[8..12].copy_from_slice(&entry_data.boot_image_lba.to_le_bytes());
-        entry[6..8].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes());
+        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
+        entry[4] = 0x00; // System type (x86)
+        // Bytes 5-7: unused (0)
+        entry[5..8].copy_from_slice(&[0u8; 3]);
+        entry[8..12].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes()); // Sector count
+        entry[12..16].copy_from_slice(&entry_data.boot_image_lba.to_le_bytes()); // Load RBA (LBA)
+        // Bytes 16-31: unused (0), already zeroed
         catalog[offset..offset + 32].copy_from_slice(&entry);
         offset += 32;
     }
