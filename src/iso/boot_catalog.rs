@@ -64,12 +64,8 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-        let boot_indicator = if entry_data.bootable {
-            if entry_data.platform_id == BOOT_CATALOG_EFI_PLATFORM_ID {
-                0x88u8
-            } else {
-                0x80u8
-            }
+                let boot_indicator = if entry_data.bootable {
+            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
         } else {
             0x00u8
         };
@@ -77,11 +73,17 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         entry[1] = 0x00; // No Emulation
         entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
         entry[4] = 0x00; // System type (x86)
-        // Bytes 5-7: unused (0)
-        entry[5..8].copy_from_slice(&[0u8; 3]);
-        entry[8..12].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes()); // Sector count
-        entry[12..16].copy_from_slice(&(entry_data.boot_image_lba * 4).to_le_bytes()); // Load RBA (LBA in 512-byte sectors)
-        // Bytes 16-31: unused (0), already zeroed
+        // Byte 5 is unused
+
+        // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
+        let sectors = entry_data.boot_image_sectors as u16;
+        entry[6..8].copy_from_slice(&sectors.to_le_bytes());
+
+        // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.
+        let load_rba = entry_data.boot_image_lba * 4;
+        entry[8..12].copy_from_slice(&load_rba.to_le_bytes());
+
+        // Bytes 12-31 are unused and already zeroed
         catalog[offset..offset + 32].copy_from_slice(&entry);
         offset += 32;
     }

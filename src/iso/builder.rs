@@ -288,7 +288,14 @@ impl IsoBuilder {
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let boot_image_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
-                let boot_image_sectors = (boot_image_size.div_ceil(512)) as u32;
+                                let boot_image_sectors_u64 = boot_image_size.div_ceil(512);
+                if boot_image_sectors_u64 > u16::MAX as u64 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "BIOS boot image is too large for the boot catalog",
+                    ));
+                }
+                let boot_image_sectors = boot_image_sectors_u64 as u32;
                 boot_entries.push(BootCatalogEntry {
                     platform_id: 0x00,
                     boot_image_lba: self.get_lba_for_path(&bios_boot.destination_in_iso)?,
