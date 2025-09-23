@@ -217,6 +217,17 @@ impl IsoBuilder {
         let total_lbas = self.total_sectors as u64;
 
         if self.is_isohybrid {
+            // GPT structures require at least 69 LBAs (1 MBR + 1 GPT Header + 32 Partition Entries + 1 Backup GPT Header + 32 Backup Partition Entries + 2 for safety)
+            if total_lbas < 69 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
+                        total_lbas
+                    ),
+                ));
+            }
+
             // Write MBR
             iso_file.seek(SeekFrom::Start(0))?;
             let mbr =

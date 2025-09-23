@@ -23,19 +23,19 @@ mod tests {
     ) -> io::Result<(IsoImage, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
         // Create dummy files
         let isolinux_bin_path = temp_dir.join("isolinux.bin");
-        std::fs::write(&isolinux_bin_path, b"dummy isolinux.bin")?;
+        std::fs::write(&isolinux_bin_path, vec![0u8; 64 * 1024])?; // 64KB
 
         let isolinux_cfg_path = temp_dir.join("isolinux.cfg");
-        std::fs::write(&isolinux_cfg_path, b"dummy isolinux.cfg")?;
+        std::fs::write(&isolinux_cfg_path, vec![0u8; 1 * 1024])?; // 1KB
 
         let bootx64_efi_path = temp_dir.join("BOOTX64.EFI");
-        std::fs::write(&bootx64_efi_path, b"dummy BOOTX64.EFI")?;
+        std::fs::write(&bootx64_efi_path, vec![0u8; 64 * 1024])?; // 64KB
 
         let kernel_path = temp_dir.join("kernel");
-        std::fs::write(&kernel_path, b"dummy kernel")?;
+        std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?; // 16KB
 
         let initrd_img_path = temp_dir.join("initrd.img");
-        std::fs::write(&initrd_img_path, b"dummy initrd.img")?;
+        std::fs::write(&initrd_img_path, vec![0u8; 16 * 1024])?; // 16KB
 
         // Create the IsoImage configuration
         let iso_image = IsoImage {
