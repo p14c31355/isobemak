@@ -1,5 +1,5 @@
 // isobemak/src/iso/boot_catalog.rs
-use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
+use crate::utils::ISO_SECTOR_SIZE;
 use std::fs::File;
 use std::io::{self, Write};
 
