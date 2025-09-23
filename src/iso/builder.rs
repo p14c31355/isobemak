@@ -307,9 +307,16 @@ impl IsoBuilder {
 
         // Add UEFI boot entry
         if let Some(path) = &self.uefi_catalog_path {
-            let uefi_boot_lba = self.get_lba_for_path(path)?;
-            let uefi_boot_sectors = 0u32;
-
+                        let uefi_boot_lba = self.get_lba_for_path(path)?;
+            let uefi_boot_size = self.get_file_size_in_iso(path)?;
+            let uefi_boot_sectors_u64 = uefi_boot_size.div_ceil(512);
+            if uefi_boot_sectors_u64 > u16::MAX as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "UEFI boot image is too large for the boot catalog",
+                ));
+            }
+            let uefi_boot_sectors = uefi_boot_sectors_u64 as u32;
             boot_entries.push(BootCatalogEntry {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: uefi_boot_lba,
