@@ -23,8 +23,6 @@ pub struct BootCatalogEntry {
 
 /// Writes an El Torito boot catalog.
 pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io::Result<()> {
-    pad_to_lba(iso, LBA_BOOT_CATALOG)?;
-
     let mut catalog = [0u8; ISO_SECTOR_SIZE];
     let mut offset = 0;
 
