@@ -299,7 +299,7 @@ impl IsoBuilder {
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let boot_image_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
-                let boot_image_sectors_u64 = boot_image_size.div_ceil(512);
+                let boot_image_sectors_u64 = boot_image_size.div_ceil(512).max(1);
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
