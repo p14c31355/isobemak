@@ -17,7 +17,7 @@ pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 pub struct BootCatalogEntry {
     pub platform_id: u8,
     pub boot_image_lba: u32,
-    pub boot_image_sectors: u32,
+    pub boot_image_sectors: u16,
     pub bootable: bool,
 }
 
