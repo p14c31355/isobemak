@@ -313,7 +313,9 @@ impl IsoBuilder {
 
         if !boot_entries.is_empty() {
             // Seek to the correct LBA before writing the boot catalog
-            iso_file.seek(SeekFrom::Start((boot_catalog_lba as u64) * ISO_SECTOR_SIZE as u64))?;
+            iso_file.seek(SeekFrom::Start(
+                (boot_catalog_lba as u64) * ISO_SECTOR_SIZE as u64,
+            ))?;
             write_boot_catalog(iso_file, boot_entries)?;
         }
 

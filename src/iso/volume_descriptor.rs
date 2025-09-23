@@ -1,5 +1,4 @@
 // isobemak/src/iso/volume_descriptor.rs
-use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
@@ -90,7 +89,11 @@ pub fn write_primary_volume_descriptor(
     Ok(())
 }
 
-pub fn update_total_sectors_in_pvd(iso: &mut File, base_lba: u32, total_sectors: u32) -> io::Result<()> {
+pub fn update_total_sectors_in_pvd(
+    iso: &mut File,
+    base_lba: u32,
+    total_sectors: u32,
+) -> io::Result<()> {
     update_4byte_fields(
         iso,
         base_lba,
@@ -103,7 +106,7 @@ pub fn update_total_sectors_in_pvd(iso: &mut File, base_lba: u32, total_sectors:
 pub fn write_boot_record_volume_descriptor(
     iso: &mut File,
     boot_catalog_lba: u32, // LBA of the boot catalog
-    base_lba: u32, // BRVD's LBA
+    base_lba: u32,         // BRVD's LBA
 ) -> io::Result<()> {
     pad_to_lba(iso, base_lba)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];

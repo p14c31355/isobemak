@@ -43,7 +43,6 @@ fn test_create_disk_and_iso() -> io::Result<()> {
         },
     };
 
-
     let persistent_iso = PathBuf::from("../test.iso");
     // Call the main function with correct arguments
     build_iso(&persistent_iso, &iso_image, false)?;

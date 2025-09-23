@@ -80,7 +80,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         // Bytes 5-7: unused (0)
         entry[5..8].copy_from_slice(&[0u8; 3]);
         entry[8..12].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes()); // Sector count
-        entry[12..16].copy_from_slice(&((entry_data.boot_image_lba * 4) as u32).to_le_bytes()); // Load RBA (LBA in 512-byte sectors)
+        entry[12..16].copy_from_slice(&(entry_data.boot_image_lba * 4).to_le_bytes()); // Load RBA (LBA in 512-byte sectors)
         // Bytes 16-31: unused (0), already zeroed
         catalog[offset..offset + 32].copy_from_slice(&entry);
         offset += 32;
