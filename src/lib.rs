@@ -61,6 +61,7 @@ mod tests {
                 }),
                 uefi_boot: Some(UefiBootInfo {
                     boot_image: bootx64_efi_path.clone(),
+                    kernel_image: kernel_path.clone(),
                     destination_in_iso: "EFI/BOOT/EFI.img".to_string(),
                 }),
             },

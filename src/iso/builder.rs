@@ -185,8 +185,8 @@ impl IsoBuilder {
         })?;
         // Placeholder for MBR and GPT structures.
         // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
-        let mbr_gpt_reserved_sectors = 34; // MBR (1) + GPT Header (1) + GPT Partition Array (32)
-        let iso_data_start_lba = mbr_gpt_reserved_sectors;
+        let reserved_sectors = if self.is_isohybrid { 34u32 } else { 16u32 };
+        let iso_data_start_lba = reserved_sectors;
 
         // Set current_lba to the start of ISO9660 data
         self.current_lba = iso_data_start_lba;
@@ -203,30 +203,39 @@ impl IsoBuilder {
         self.copy_files(&mut iso_file, &self.root)?;
         self.finalize(&mut iso_file)?;
 
-        // Now that total_sectors is known, write MBR and GPT structures
+        if !self.is_isohybrid {
+            let reserved_sectors = 16u32;
+            iso_file.seek(SeekFrom::Start(0))?;
+            let zero_buffer = vec![0u8; (reserved_sectors as usize * ISO_SECTOR_SIZE)];
+            iso_file.write_all(&zero_buffer)?;
+        }
+
+        // Now that total_sectors is known, write MBR and GPT structures if hybrid
         let total_lbas = self.total_sectors as u64;
 
-        // Write MBR
-        iso_file.seek(SeekFrom::Start(0))?;
-        let mbr =
-            crate::iso::mbr::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
-        mbr.write_to(&mut iso_file)?;
+        if self.is_isohybrid {
+            // Write MBR
+            iso_file.seek(SeekFrom::Start(0))?;
+            let mbr =
+                crate::iso::mbr::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+            mbr.write_to(&mut iso_file)?;
 
-        // Write GPT structures if isohybrid
-        if self.is_isohybrid && esp_size_sectors > 0 {
-            let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
-            let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
+            // Write GPT structures if esp_size_sectors > 0
+            if esp_size_sectors > 0 {
+                let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
+                let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
 
-            let esp_guid_str = crate::iso::gpt::EFI_SYSTEM_PARTITION_GUID;
-            let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
-            let partitions = vec![crate::iso::gpt::GptPartitionEntry::new(
-                esp_guid_str,
-                &esp_unique_guid_str,
-                esp_partition_start_lba as u64,
-                esp_partition_end_lba as u64,
-                "EFI System Partition",
-            )];
-            crate::iso::gpt::write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
+                let esp_guid_str = crate::iso::gpt::EFI_SYSTEM_PARTITION_GUID;
+                let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
+                let partitions = vec![crate::iso::gpt::GptPartitionEntry::new(
+                    esp_guid_str,
+                    &esp_unique_guid_str,
+                    esp_partition_start_lba as u64,
+                    esp_partition_end_lba as u64,
+                    "EFI System Partition",
+                )];
+                crate::iso::gpt::write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
+            }
         }
 
         Ok(())
