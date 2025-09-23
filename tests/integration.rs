@@ -27,7 +27,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let temp_dir = tempdir()?;
 
     // Setup files and paths
-    let (bootx64_path, kernel_path, _iso_path) = setup_integration_test_files(temp_dir.path())?;
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(temp_dir.path())?;
 
     let iso_image = isobemak::iso::builder::IsoImage {
         files: vec![
