@@ -296,7 +296,12 @@ impl IsoBuilder {
     }
 
     /// Writes all ISO volume descriptors.
-    fn write_descriptors(&self, iso_file: &mut File, total_sectors: u32, base_lba: u32) -> io::Result<()> {
+    fn write_descriptors(
+        &self,
+        iso_file: &mut File,
+        total_sectors: u32,
+        base_lba: u32,
+    ) -> io::Result<()> {
         let root_entry = IsoDirEntry {
             lba: self.root.lba,
             size: ISO_SECTOR_SIZE as u32,
@@ -365,7 +370,12 @@ impl IsoBuilder {
     }
 
     /// Writes the directory records for the ISO filesystem.
-    fn write_directories(&self, iso_file: &mut File, dir: &IsoDirectory, parent_lba: u32) -> io::Result<()> {
+    fn write_directories(
+        &self,
+        iso_file: &mut File,
+        dir: &IsoDirectory,
+        parent_lba: u32,
+    ) -> io::Result<()> {
         pad_to_lba(iso_file, dir.lba)?;
 
         let mut sorted_children: Vec<_> = dir.children.iter().collect();

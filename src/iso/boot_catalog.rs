@@ -74,7 +74,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         // Byte 5 is unused
 
         // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
-        let sectors = entry_data.boot_image_sectors as u16;
+        let sectors = entry_data.boot_image_sectors;
         entry[6..8].copy_from_slice(&sectors.to_le_bytes());
 
         // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.

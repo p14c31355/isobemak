@@ -169,7 +169,9 @@ pub fn write_gpt_structures<W: Write + Seek>(
     let mut backup_header = header;
     backup_header.current_lba = total_lbas - 1;
     backup_header.backup_lba = 1;
-    backup_header.partition_entry_lba = total_lbas.saturating_sub(num_partition_entries as u64).saturating_sub(1); // Backup partition array LBA
+    backup_header.partition_entry_lba = total_lbas
+        .saturating_sub(num_partition_entries as u64)
+        .saturating_sub(1); // Backup partition array LBA
 
     // Recalculate backup header CRC32
     let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
@@ -185,8 +187,12 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
     // Backup Partition Entries
     writer.seek(SeekFrom::Start(
-        total_lbas.saturating_sub(num_partition_entries as u64).saturating_sub(1) * 512,
-    ))?;    for partition in partitions {
+        total_lbas
+            .saturating_sub(num_partition_entries as u64)
+            .saturating_sub(1)
+            * 512,
+    ))?;
+    for partition in partitions {
         partition.write_to(writer)?;
     }
     // Pad remaining backup partition entries with zeros

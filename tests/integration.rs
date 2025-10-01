@@ -5,7 +5,7 @@ use std::{
     process::Command,
 };
 
-use isobemak::iso::builder::{build_iso, IsoImageFile};
+use isobemak::iso::builder::{IsoImageFile, build_iso};
 use tempfile::tempdir;
 
 fn run_command(command: &str, args: &[&str]) -> io::Result<String> {
@@ -73,25 +73,17 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     assert!(iso_path.exists());
 
     // Verify ISO content using isoinfo
-    let isoinfo_d_output = run_command(
-        "isoinfo",
-        &["-d", "-i", iso_path.to_str().unwrap()],
-    )?;
+    let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output:\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
 
-    let isoinfo_l_output = run_command(
-        "isoinfo",
-        &["-l", "-i", iso_path.to_str().unwrap()],
-    )?;    println!("isoinfo -l output:\n{}", isoinfo_l_output);
+    let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
+    println!("isoinfo -l output:\n{}", isoinfo_l_output);
     assert!(isoinfo_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
     assert!(isoinfo_l_output.contains("kernel.elf"));
 
     // Verify ISO content using 7z
-    let sevenz_l_output = run_command(
-        "7z",
-        &["l", iso_path.to_str().unwrap()],
-    )?;
+    let sevenz_l_output = run_command("7z", &["l", iso_path.to_str().unwrap()])?;
     println!("7z l output:\n{}", sevenz_l_output);
     assert!(sevenz_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
     assert!(sevenz_l_output.contains("kernel.elf"));
@@ -101,16 +93,18 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     std::fs::create_dir(&extract_dir)?;
     run_command(
         "7z",
-        &["x", iso_path.to_str().unwrap(), "-o", extract_dir.to_str().unwrap()],
+        &[
+            "x",
+            iso_path.to_str().unwrap(),
+            "-o",
+            extract_dir.to_str().unwrap(),
+        ],
     )?;
 
     let extracted_bootx64_path = extract_dir.join("EFI/BOOT/BOOTX64.EFI");
     assert!(extracted_bootx64_path.exists());
 
-    let dumpet_output = run_command(
-        "dumpet",
-        &[extracted_bootx64_path.to_str().unwrap()],
-    )?;
+    let dumpet_output = run_command("dumpet", &[extracted_bootx64_path.to_str().unwrap()])?;
     println!("dumpet output:\n{}", dumpet_output);
     assert!(dumpet_output.contains("EFI boot image"));
     Ok(())
