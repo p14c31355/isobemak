@@ -562,9 +562,9 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
 
     if let Some(uefi_boot) = &image.boot_info.uefi_boot {
         // Add BOOTX64.EFI for El Torito catalog
-        let efi_dest = "EFI/BOOT/BOOTX64.EFI".to_string();
-        iso_builder.add_file(&efi_dest, uefi_boot.boot_image.clone())?;
-        iso_builder.uefi_catalog_path = Some(efi_dest);
+        // The file is expected to be added via the `image.files` list.
+        // We just record its path for the boot catalog.
+        iso_builder.uefi_catalog_path = Some(uefi_boot.destination_in_iso.clone());
 
         // For hybrid, create and add FAT image for ESP
         if is_isohybrid {
