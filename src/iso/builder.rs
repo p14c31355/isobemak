@@ -197,9 +197,9 @@ impl IsoBuilder {
         // We need to ensure that the total size calculation in finalize accounts for all written data.
 
         // Seek to the start of the ISO9660 data area.
-        let boot_catalog_lba = data_start_lba + 3;
+        // LBA 16-18 for VDs, 19 for boot catalog. Data starts after.
+        let boot_catalog_lba = 19;
         self.current_lba = boot_catalog_lba + 1;
-
         iso_file.seek(SeekFrom::Start(
             (data_start_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
@@ -209,18 +209,16 @@ impl IsoBuilder {
 
         // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
         // Pass the calculated end of filesystem data as a preliminary total_sectors.
-        // This will be correctly updated by finalize later.
-        self.write_descriptors(&mut iso_file, self.current_lba, data_start_lba)?;
-
+        // This will be correctly updated by finalize later. The VDs are at fixed locations.
+        self.write_descriptors(&mut iso_file, self.current_lba)?;
         self.write_boot_catalog(&mut iso_file, boot_catalog_lba)?;
 
         // Write directory records and copy file contents.
         self.write_directories(&mut iso_file, &self.root, self.root.lba)?;
         self.copy_files(&mut iso_file, &self.root)?;
 
-        // Finalize the ISO by padding and updating the total sector count in the PVD.
-        // This function calculates the final size and writes it to the PVD.
-        self.finalize(&mut iso_file, data_start_lba)?;
+        // Finalize the ISO by padding and updating the total sector count in the PVD
+        self.finalize(&mut iso_file)?;
 
         // If not isohybrid, clear the initial reserved sectors (MBR area).
         if !self.is_isohybrid {
@@ -296,12 +294,7 @@ impl IsoBuilder {
     }
 
     /// Writes all ISO volume descriptors.
-    fn write_descriptors(
-        &self,
-        iso_file: &mut File,
-        total_sectors: u32,
-        base_lba: u32,
-    ) -> io::Result<()> {
+    fn write_descriptors(&self, iso_file: &mut File, total_sectors: u32) -> io::Result<()> {
         let root_entry = IsoDirEntry {
             lba: self.root.lba,
             size: ISO_SECTOR_SIZE as u32,
@@ -309,7 +302,7 @@ impl IsoBuilder {
             name: ".",
         };
         // Pass total_sectors to write_volume_descriptors. This will be updated in finalize if needed.
-        write_volume_descriptors(iso_file, total_sectors, &root_entry, base_lba)
+        write_volume_descriptors(iso_file, total_sectors, &root_entry)
     }
 
     /// Writes the El Torito boot catalog.
@@ -462,7 +455,7 @@ impl IsoBuilder {
     }
 
     /// Finalizes the ISO image by padding and updating the total sector count in the PVD.
-    fn finalize(&mut self, iso_file: &mut File, base_lba: u32) -> io::Result<()> {
+    fn finalize(&mut self, iso_file: &mut File) -> io::Result<()> {
         let current_pos = iso_file.stream_position()?;
         let remainder = current_pos % ISO_SECTOR_SIZE as u64;
         if remainder != 0 {
@@ -474,7 +467,7 @@ impl IsoBuilder {
         let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
         self.total_sectors = u32::try_from(total_sectors_u64)
             .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"))?;
-        update_total_sectors_in_pvd(iso_file, base_lba, self.total_sectors)?;
+        update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
 
         Ok(())
     }

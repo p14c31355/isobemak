@@ -1,4 +1,5 @@
 // isobemak/src/iso/volume_descriptor.rs
+use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
 use std::fs::File;
@@ -41,9 +42,8 @@ pub fn write_primary_volume_descriptor(
     iso: &mut File,
     total_sectors: u32,
     root_entry: &IsoDirEntry,
-    base_lba: u32, // PVD's LBA
 ) -> io::Result<()> {
-    pad_to_lba(iso, base_lba)?;
+    pad_to_lba(iso, 16)?;
     let mut pvd = [0u8; ISO_SECTOR_SIZE];
     pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
     pvd[1..6].copy_from_slice(ISO_ID);
@@ -83,20 +83,13 @@ pub fn write_primary_volume_descriptor(
 
     iso.write_all(&pvd)?;
 
-    // Update total sectors in PVD, passing the PVD's LBA
-    update_total_sectors_in_pvd(iso, base_lba, total_sectors)?;
-
     Ok(())
 }
 
-pub fn update_total_sectors_in_pvd(
-    iso: &mut File,
-    base_lba: u32,
-    total_sectors: u32,
-) -> io::Result<()> {
+pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
     update_4byte_fields(
         iso,
-        base_lba,
+        16,
         PVD_TOTAL_SECTORS_OFFSET,
         PVD_TOTAL_SECTORS_OFFSET + 4,
         total_sectors,
@@ -105,10 +98,9 @@ pub fn update_total_sectors_in_pvd(
 
 pub fn write_boot_record_volume_descriptor(
     iso: &mut File,
-    boot_catalog_lba: u32, // LBA of the boot catalog
-    base_lba: u32,         // BRVD's LBA
+    boot_catalog_lba: u32,
 ) -> io::Result<()> {
-    pad_to_lba(iso, base_lba)?;
+    pad_to_lba(iso, 17)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];
     brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
     brvd[1..6].copy_from_slice(ISO_ID);
@@ -120,8 +112,8 @@ pub fn write_boot_record_volume_descriptor(
     Ok(())
 }
 
-pub fn write_volume_descriptor_terminator(iso: &mut File, base_lba: u32) -> io::Result<()> {
-    pad_to_lba(iso, base_lba)?;
+pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
+    pad_to_lba(iso, 18)?;
     let mut term = [0u8; ISO_SECTOR_SIZE];
     term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
     term[1..6].copy_from_slice(ISO_ID);
@@ -135,17 +127,12 @@ pub fn write_volume_descriptors(
     iso: &mut File,
     total_sectors: u32,
     root_entry: &IsoDirEntry,
-    base_lba: u32, // The starting LBA for VDs
 ) -> io::Result<()> {
-    // PVD at base_lba
-    write_primary_volume_descriptor(iso, total_sectors, root_entry, base_lba)?;
-    // BRVD at base_lba + 1
-    // The boot_catalog_lba needs to be dynamic. For now, let's assume it's base_lba + 1 + 1 = base_lba + 2
-    // But the LBA_BOOT_CATALOG constant is 19. This needs to be fixed.
-    // Let's assume the boot catalog is always after the VDs.
-    let boot_catalog_lba = base_lba + 3; // PVD(1) + BRVD(1) + Terminator(1) = 3 sectors
-    write_boot_record_volume_descriptor(iso, boot_catalog_lba, base_lba + 1)?;
-    // Terminator at base_lba + 2
-    write_volume_descriptor_terminator(iso, base_lba + 2)?;
+    // Primary Volume Descriptor at LBA 16
+    write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
+    // Boot Record Volume Descriptor at LBA 17, pointing to boot catalog at LBA 19
+    write_boot_record_volume_descriptor(iso, LBA_BOOT_CATALOG)?;
+    // Volume Descriptor Terminator at LBA 18
+    write_volume_descriptor_terminator(iso)?;
     Ok(())
 }
