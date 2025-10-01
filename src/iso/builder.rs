@@ -191,21 +191,38 @@ impl IsoBuilder {
         let data_start_lba = reserved_sectors;
 
         // Set current_lba to the start of filesystem data after VDs and catalog
-        self.current_lba = data_start_lba + 4;
+        // The volume descriptors and boot catalog will occupy sectors starting from data_start_lba.
+        // The actual file data will start after these.
+        // The calculate_lbas function will determine the LBA for the root directory and subsequent files/directories.
+        // We need to ensure that the total size calculation in finalize accounts for all written data.
 
-        // Seek past the MBR/GPT reserved area to start writing ISO9660 data
+        // Seek to the start of the ISO9660 data area.
         iso_file.seek(SeekFrom::Start(
             (data_start_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
 
+        // Calculate LBAs for all files and directories. This also updates self.current_lba to the end of the filesystem data.
         IsoBuilder::calculate_lbas(&mut self.current_lba, &mut self.root)?;
-        self.write_descriptors(&mut iso_file, data_start_lba)?;
-        let boot_catalog_lba = data_start_lba + 3; // After PVD, BRVD, Terminator
+
+        // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
+        // Pass the calculated end of filesystem data as a preliminary total_sectors.
+        // This will be correctly updated by finalize later.
+        self.write_descriptors(&mut iso_file, self.current_lba, data_start_lba)?;
+
+        // Determine the LBA for the boot catalog. It's typically after the volume descriptors.
+        // PVD (1 sector) + BRVD (1 sector) + Terminator (1 sector) = 3 sectors.
+        let boot_catalog_lba = data_start_lba + 3;
         self.write_boot_catalog(&mut iso_file, boot_catalog_lba)?;
+
+        // Write directory records and copy file contents.
         self.write_directories(&mut iso_file, &self.root)?;
         self.copy_files(&mut iso_file, &self.root)?;
+
+        // Finalize the ISO by padding and updating the total sector count in the PVD.
+        // This function calculates the final size and writes it to the PVD.
         self.finalize(&mut iso_file, data_start_lba)?;
 
+        // If not isohybrid, clear the initial reserved sectors (MBR area).
         if !self.is_isohybrid {
             let reserved_sectors = 16u32;
             iso_file.seek(SeekFrom::Start(0))?;
@@ -279,15 +296,15 @@ impl IsoBuilder {
     }
 
     /// Writes all ISO volume descriptors.
-    fn write_descriptors(&self, iso_file: &mut File, base_lba: u32) -> io::Result<()> {
+    fn write_descriptors(&self, iso_file: &mut File, total_sectors: u32, base_lba: u32) -> io::Result<()> {
         let root_entry = IsoDirEntry {
             lba: self.root.lba,
             size: ISO_SECTOR_SIZE as u32,
             flags: 0x02,
             name: ".",
         };
-        // Pass 0 for total_sectors as a placeholder, it will be updated in finalize.
-        write_volume_descriptors(iso_file, 0, &root_entry, base_lba)
+        // Pass total_sectors to write_volume_descriptors. This will be updated in finalize if needed.
+        write_volume_descriptors(iso_file, total_sectors, &root_entry, base_lba)
     }
 
     /// Writes the El Torito boot catalog.
@@ -310,7 +327,7 @@ impl IsoBuilder {
                 boot_entries.push(BootCatalogEntry {
                     platform_id: 0x00,
                     boot_image_lba: self.get_lba_for_path(&bios_boot.destination_in_iso)?,
-                    boot_image_sectors,
+                    boot_image_sectors: boot_image_sectors.try_into().unwrap(),
                     bootable: true,
                 });
             }
@@ -331,7 +348,7 @@ impl IsoBuilder {
             boot_entries.push(BootCatalogEntry {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: uefi_boot_lba,
-                boot_image_sectors: uefi_boot_sectors,
+                boot_image_sectors: uefi_boot_sectors.try_into().unwrap(),
                 bootable: true,
             });
         }
