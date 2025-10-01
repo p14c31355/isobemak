@@ -328,11 +328,11 @@ impl IsoBuilder {
                         "BIOS boot image is too large for the boot catalog",
                     ));
                 }
-                let boot_image_sectors = boot_image_sectors_u64 as u32;
+                let boot_image_sectors = boot_image_sectors_u64 as u16;
                 boot_entries.push(BootCatalogEntry {
                     platform_id: 0x00,
                     boot_image_lba: self.get_lba_for_path(&bios_boot.destination_in_iso)?,
-                    boot_image_sectors: boot_image_sectors.try_into().unwrap(),
+                    boot_image_sectors,
                     bootable: true,
                 });
             }
