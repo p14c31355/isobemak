@@ -224,8 +224,8 @@ impl IsoBuilder {
         if !self.is_isohybrid {
             let reserved_sectors = 16u32;
             iso_file.seek(SeekFrom::Start(0))?;
-            let zero_buffer = vec![0u8; reserved_sectors as usize * ISO_SECTOR_SIZE];
-            iso_file.write_all(&zero_buffer)?;
+            let reserved_bytes = reserved_sectors as u64 * ISO_SECTOR_SIZE as u64;
+            io::copy(&mut io::repeat(0).take(reserved_bytes), &mut iso_file)?;
         }
 
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
