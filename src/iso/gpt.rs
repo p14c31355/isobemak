@@ -45,7 +45,7 @@ impl GptHeader {
             current_lba: 1, // LBA 1
             backup_lba: total_lbas - 1,
             first_usable_lba: 34, // MBR (1) + GPT Header (1) + Partition Array (32)
-            last_usable_lba: total_lbas - 34, // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
+            last_usable_lba: total_lbas.saturating_sub(34), // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
             disk_guid: disk_guid_bytes,
             partition_entry_lba,
             num_partition_entries,
@@ -169,7 +169,9 @@ pub fn write_gpt_structures<W: Write + Seek>(
     let mut backup_header = header;
     backup_header.current_lba = total_lbas - 1;
     backup_header.backup_lba = 1;
-    backup_header.partition_entry_lba = total_lbas - num_partition_entries as u64 - 1; // Backup partition array LBA
+    backup_header.partition_entry_lba = total_lbas
+        .saturating_sub(num_partition_entries as u64)
+        .saturating_sub(1); // Backup partition array LBA
 
     // Recalculate backup header CRC32
     let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
@@ -180,12 +182,15 @@ pub fn write_gpt_structures<W: Write + Seek>(
     hasher.update(&backup_header_bytes);
     backup_header.header_crc32 = hasher.finalize();
 
-    writer.seek(SeekFrom::Start((total_lbas - 1) * 512))?; // Last LBA
+    writer.seek(SeekFrom::Start(total_lbas.saturating_sub(1) * 512))?; // Last LBA
     backup_header.write_to(writer)?;
 
     // Backup Partition Entries
     writer.seek(SeekFrom::Start(
-        (total_lbas - num_partition_entries as u64 - 1) * 512,
+        total_lbas
+            .saturating_sub(num_partition_entries as u64)
+            .saturating_sub(1)
+            * 512,
     ))?;
     for partition in partitions {
         partition.write_to(writer)?;

@@ -1,5 +1,5 @@
 // isobemak/src/iso/boot_catalog.rs
-use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
+use crate::utils::ISO_SECTOR_SIZE;
 use std::fs::File;
 use std::io::{self, Write};
 
@@ -23,26 +23,25 @@ pub struct BootCatalogEntry {
 
 /// Writes an El Torito boot catalog.
 pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io::Result<()> {
-    pad_to_lba(iso, LBA_BOOT_CATALOG)?;
-
     let mut catalog = [0u8; ISO_SECTOR_SIZE];
     let mut offset = 0;
 
     // Validation Entry (32 bytes)
     let mut val = [0u8; 32];
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
-    val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
-    val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
-        .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
+    let first_platform = entries.first().map_or(0u8, |e| e.platform_id);
+    val[1] = first_platform;
+    let id_bytes = if first_platform == BOOT_CATALOG_EFI_PLATFORM_ID {
+        [0u8; 24]
+    } else {
+        let mut bytes = [0u8; 24];
+        let spec = b"EL TORITO SPECIFICATION";
+        bytes[0..spec.len()].copy_from_slice(spec);
+        bytes
+    };
+    val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24].copy_from_slice(&id_bytes);
 
-    // Find the first bootable entry to get its sector count for the default boot header Nsect.
-    // Nsect is a single byte, so the value is capped at 255.
-    // If no bootable entry is found, Nsect defaults to 1.
-    let default_nsect = entries
-        .iter()
-        .find(|e| e.bootable)
-        .map_or(1, |e| e.boot_image_sectors.min(255));
-    val[27] = default_nsect as u8; // Nsect is 1 byte at offset 27
+    // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
     // Set Bootoff (LBA of the boot catalog)
     // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
@@ -71,16 +70,26 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-        entry[0] = if entry_data.bootable {
-            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID
+        let boot_indicator = if entry_data.bootable {
+            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
         } else {
-            0x00
+            0x00u8
         };
+        entry[0] = boot_indicator;
         entry[1] = 0x00; // No Emulation
-        entry[2..4].copy_from_slice(&0u16.to_le_bytes());
-        entry[4] = entry_data.platform_id;
-        entry[8..12].copy_from_slice(&entry_data.boot_image_lba.to_le_bytes());
-        entry[6..8].copy_from_slice(&entry_data.boot_image_sectors.to_le_bytes());
+        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
+        entry[4] = 0x00; // System type (x86)
+        // Byte 5 is unused
+
+        // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
+        let sectors = entry_data.boot_image_sectors;
+        entry[6..8].copy_from_slice(&sectors.to_le_bytes());
+
+        // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.
+        let load_rba = entry_data.boot_image_lba;
+        entry[8..12].copy_from_slice(&load_rba.to_le_bytes());
+
+        // Bytes 12-31 are unused and already zeroed
         catalog[offset..offset + 32].copy_from_slice(&entry);
         offset += 32;
     }
