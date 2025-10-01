@@ -10,7 +10,7 @@ pub struct IsoDirEntry<'a> {
 
 impl<'a> IsoDirEntry<'a> {
     /// Creates ISO9660 directory record bytes
-        pub fn to_bytes(&self) -> Vec<u8> {
+    pub fn to_bytes(&self) -> Vec<u8> {
         let (file_id, file_id_len) = match self.name {
             "." => (vec![0x00], 1),
             ".." => (vec![0x01], 1),
