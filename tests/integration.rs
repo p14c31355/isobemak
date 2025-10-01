@@ -29,10 +29,10 @@ fn run_command(command: &str, args: &[&str]) -> io::Result<String> {
 fn setup_integration_test_files(temp_dir: &Path) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
     // Create dummy files needed for the ISO image
     let bootx64_path = temp_dir.join("bootx64.efi");
-    std::fs::write(&bootx64_path, b"dummy bootx64.efi")?;
+    std::fs::write(&bootx64_path, vec![0u8; 64 * 1024])?; // 64KB
 
     let kernel_path = temp_dir.join("kernel.elf");
-    std::fs::write(&kernel_path, b"dummy kernel")?;
+    std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?; // 16KB
 
     let iso_path = temp_dir.join("test.iso");
 
