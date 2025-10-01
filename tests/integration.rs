@@ -1,14 +1,31 @@
 // tests/integration.rs
 use std::{
-    io::{self},
+    io::{self, Error, ErrorKind},
     path::{Path, PathBuf},
+    process::Command,
 };
 
-use isobemak::iso::builder::build_iso;
+use isobemak::iso::builder::{build_iso, IsoImageFile};
 use tempfile::tempdir;
 
-// Helper function to create dummy files for this integration test.
-// This is a simplified version of `setup_iso_creation` from the library's internal tests.
+fn run_command(command: &str, args: &[&str]) -> io::Result<String> {
+    let output = Command::new(command).args(args).output()?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).into_owned())
+    } else {
+        Err(Error::new(
+            ErrorKind::Other,
+            format!(
+                "Command `{}` failed with exit code {:?}\nStdout: {}\nStderr: {}",
+                command,
+                output.status.code(),
+                String::from_utf8_lossy(&output.stdout),
+                String::from_utf8_lossy(&output.stderr)
+            ),
+        ))
+    }
+}
 fn setup_integration_test_files(temp_dir: &Path) -> io::Result<(PathBuf, PathBuf, PathBuf)> {
     // Create dummy files needed for the ISO image
     let bootx64_path = temp_dir.join("bootx64.efi");
@@ -31,7 +48,14 @@ fn test_create_disk_and_iso() -> io::Result<()> {
 
     let iso_image = isobemak::iso::builder::IsoImage {
         files: vec![
-            // Add any other files if needed for the test
+            IsoImageFile {
+                source: bootx64_path.clone(),
+                destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            },
+            IsoImageFile {
+                source: kernel_path.clone(),
+                destination: "kernel.elf".to_string(),
+            },
         ],
         boot_info: isobemak::iso::builder::BootInfo {
             bios_boot: None, // Not testing BIOS boot in this specific test
@@ -48,5 +72,46 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     // Assert that the ISO file was created
     assert!(iso_path.exists());
 
+    // Verify ISO content using isoinfo
+    let isoinfo_d_output = run_command(
+        "isoinfo",
+        &["-d", "-i", iso_path.to_str().unwrap()],
+    )?;
+    println!("isoinfo -d output:\n{}", isoinfo_d_output);
+    assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
+
+    let isoinfo_l_output = run_command(
+        "isoinfo",
+        &["-l", "-i", iso_path.to_str().unwrap()],
+    )?;    println!("isoinfo -l output:\n{}", isoinfo_l_output);
+    assert!(isoinfo_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
+    assert!(isoinfo_l_output.contains("kernel.elf"));
+
+    // Verify ISO content using 7z
+    let sevenz_l_output = run_command(
+        "7z",
+        &["l", iso_path.to_str().unwrap()],
+    )?;
+    println!("7z l output:\n{}", sevenz_l_output);
+    assert!(sevenz_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
+    assert!(sevenz_l_output.contains("kernel.elf"));
+
+    // Extract the UEFI boot image and verify with dumpet
+    let extract_dir = temp_dir.path().join("extracted");
+    std::fs::create_dir(&extract_dir)?;
+    run_command(
+        "7z",
+        &["x", iso_path.to_str().unwrap(), "-o", extract_dir.to_str().unwrap()],
+    )?;
+
+    let extracted_bootx64_path = extract_dir.join("EFI/BOOT/BOOTX64.EFI");
+    assert!(extracted_bootx64_path.exists());
+
+    let dumpet_output = run_command(
+        "dumpet",
+        &[extracted_bootx64_path.to_str().unwrap()],
+    )?;
+    println!("dumpet output:\n{}", dumpet_output);
+    assert!(dumpet_output.contains("EFI boot image"));
     Ok(())
 }
