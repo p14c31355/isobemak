@@ -197,6 +197,9 @@ impl IsoBuilder {
         // We need to ensure that the total size calculation in finalize accounts for all written data.
 
         // Seek to the start of the ISO9660 data area.
+        let boot_catalog_lba = data_start_lba + 3;
+        self.current_lba = boot_catalog_lba + 1;
+
         iso_file.seek(SeekFrom::Start(
             (data_start_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
@@ -209,13 +212,10 @@ impl IsoBuilder {
         // This will be correctly updated by finalize later.
         self.write_descriptors(&mut iso_file, self.current_lba, data_start_lba)?;
 
-        // Determine the LBA for the boot catalog. It's typically after the volume descriptors.
-        // PVD (1 sector) + BRVD (1 sector) + Terminator (1 sector) = 3 sectors.
-        let boot_catalog_lba = data_start_lba + 3;
         self.write_boot_catalog(&mut iso_file, boot_catalog_lba)?;
 
         // Write directory records and copy file contents.
-        self.write_directories(&mut iso_file, &self.root)?;
+        self.write_directories(&mut iso_file, &self.root, self.root.lba)?;
         self.copy_files(&mut iso_file, &self.root)?;
 
         // Finalize the ISO by padding and updating the total sector count in the PVD.
@@ -365,7 +365,7 @@ impl IsoBuilder {
     }
 
     /// Writes the directory records for the ISO filesystem.
-    fn write_directories(&self, iso_file: &mut File, dir: &IsoDirectory) -> io::Result<()> {
+    fn write_directories(&self, iso_file: &mut File, dir: &IsoDirectory, parent_lba: u32) -> io::Result<()> {
         pad_to_lba(iso_file, dir.lba)?;
 
         let mut sorted_children: Vec<_> = dir.children.iter().collect();
@@ -381,7 +381,7 @@ impl IsoBuilder {
         });
         // Parent directory
         dir_entries.push(IsoDirEntry {
-            lba: self.root.lba,
+            lba: parent_lba,
             size: ISO_SECTOR_SIZE as u32,
             flags: 0x02,
             name: "..",
@@ -419,12 +419,11 @@ impl IsoBuilder {
             dir_sector[offset..offset + entry_bytes.len()].copy_from_slice(&entry_bytes);
             offset += entry_bytes.len();
         }
-
         iso_file.write_all(&dir_sector)?;
 
         for (_, node) in sorted_children {
             if let IsoFsNode::Directory(subdir) = node {
-                self.write_directories(iso_file, subdir)?;
+                self.write_directories(iso_file, subdir, dir.lba)?;
             }
         }
 
