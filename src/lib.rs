@@ -52,6 +52,10 @@ mod tests {
                     source: initrd_img_path.clone(),
                     destination: "initrd.img".to_string(),
                 },
+                IsoImageFile {
+                    source: bootx64_efi_path.clone(),
+                    destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                },
             ],
             boot_info: BootInfo {
                 bios_boot: Some(BiosBootInfo {
@@ -62,7 +66,7 @@ mod tests {
                 uefi_boot: Some(UefiBootInfo {
                     boot_image: bootx64_efi_path.clone(),
                     kernel_image: kernel_path.clone(),
-                    destination_in_iso: "EFI/BOOT/EFI.img".to_string(),
+                    destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
                 }),
             },
         };

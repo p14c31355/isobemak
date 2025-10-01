@@ -29,9 +29,17 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Validation Entry (32 bytes)
     let mut val = [0u8; 32];
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
-    val[1] = BOOT_CATALOG_EFI_PLATFORM_ID;
-    val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24]
-        .copy_from_slice(&b"UEFI\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00"[..]);
+    let first_platform = entries.first().map_or(0u8, |e| e.platform_id);
+    val[1] = first_platform;
+    let id_bytes = if first_platform == BOOT_CATALOG_EFI_PLATFORM_ID {
+        [0u8; 24]
+    } else {
+        let mut bytes = [0u8; 24];
+        let spec = b"EL TORITO SPECIFICATION";
+        bytes[0..spec.len()].copy_from_slice(spec);
+        bytes
+    };
+    val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24].copy_from_slice(&id_bytes);
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
@@ -78,7 +86,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         entry[6..8].copy_from_slice(&sectors.to_le_bytes());
 
         // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.
-        let load_rba = entry_data.boot_image_lba * 4;
+        let load_rba = entry_data.boot_image_lba;
         entry[8..12].copy_from_slice(&load_rba.to_le_bytes());
 
         // Bytes 12-31 are unused and already zeroed
