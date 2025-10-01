@@ -30,9 +30,11 @@ impl<'a> IsoDirEntry<'a> {
         if record_len % 2 != 0 {
             record_len += 1;
         }
-
+        assert!(
+            record_len <= u8::MAX as usize,
+            "Directory record length exceeds 255 bytes"
+        );
         let mut record = vec![0u8; record_len];
-
         record[0] = record_len as u8;
         // record[1] is extended attribute record length, 0
         record[2..6].copy_from_slice(&self.lba.to_le_bytes());
