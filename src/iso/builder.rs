@@ -349,11 +349,11 @@ impl IsoBuilder {
                     "UEFI boot image is too large for the boot catalog",
                 ));
             }
-            let uefi_boot_sectors = uefi_boot_sectors_u64 as u32;
+            let uefi_boot_sectors = uefi_boot_sectors_u64 as u16;
             boot_entries.push(BootCatalogEntry {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: uefi_boot_lba,
-                boot_image_sectors: uefi_boot_sectors.try_into().unwrap(),
+                boot_image_sectors: uefi_boot_sectors,
                 bootable: true,
             });
         }
