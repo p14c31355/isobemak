@@ -202,3 +202,105 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Cursor};
+
+    // Helper to read a packed struct safely from a byte slice.
+    fn read_struct<T: Copy>(slice: &[u8], offset: usize) -> T {
+        let size = mem::size_of::<T>();
+        let mut instance_bytes = vec![0u8; size];
+        instance_bytes.copy_from_slice(&slice[offset..offset + size]);
+        unsafe { mem::transmute_copy(&instance_bytes.as_ptr().cast::<T>().read()) }
+    }
+
+    #[test]
+    fn test_gpt_header_new() {
+        let total_lbas = 2048;
+        let header = GptHeader::new(total_lbas, 2, 128, 128);
+
+        assert_eq!(&header.signature, b"EFI PART");
+        let revision = header.revision;
+        assert_eq!(revision, 0x00010000);
+        let current_lba = header.current_lba;
+        assert_eq!(current_lba, 1);
+        let backup_lba = header.backup_lba;
+        assert_eq!(backup_lba, total_lbas - 1);
+        let first_usable = header.first_usable_lba;
+        assert_eq!(first_usable, 34);
+    }
+
+    #[test]
+    fn test_gpt_partition_entry_new() {
+        let p_guid = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
+        let u_guid = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
+        let name = "EFI System Partition";
+        let entry = GptPartitionEntry::new(p_guid, u_guid, 34, 2048, name);
+
+        let starting_lba = entry.starting_lba;
+        assert_eq!(starting_lba, 34);
+        let ending_lba = entry.ending_lba;
+        assert_eq!(ending_lba, 2048);
+
+        let mut expected_name = [0u16; 36];
+        for (i, c) in name.encode_utf16().enumerate() {
+            expected_name[i] = c;
+        }
+        let partition_name = entry.partition_name;
+        assert_eq!(partition_name, expected_name);
+    }
+
+    #[test]
+    fn test_write_gpt_structures() -> io::Result<()> {
+        let total_lbas = 4096;
+        let num_partition_entries = 128;
+        let partition_entry_size = mem::size_of::<GptPartitionEntry>();
+        let mut disk = Cursor::new(vec![0; total_lbas as usize * 512]);
+
+        let partitions = vec![GptPartitionEntry::new(
+            EFI_SYSTEM_PARTITION_GUID,
+            &Uuid::new_v4().to_string(),
+            2048,
+            4095,
+            "Test Partition",
+        )];
+
+        write_gpt_structures(&mut disk, total_lbas, &partitions)?;
+
+        let disk_bytes = disk.into_inner();
+
+        // Verify Primary Header
+        let primary_header: GptHeader = read_struct(&disk_bytes, 512);
+        assert_eq!(&primary_header.signature, b"EFI PART");
+        let mut primary_header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(primary_header) };
+        let stored_crc = u32::from_le_bytes(primary_header_bytes[16..20].try_into().unwrap());
+        primary_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out CRC for calculation
+        let mut hasher = Hasher::new();
+        hasher.update(&primary_header_bytes);
+        let calculated_crc = hasher.finalize();
+        assert_eq!(stored_crc, calculated_crc, "Primary header CRC32 mismatch");
+
+        // Verify Partition Array
+        let partition_array_offset = 2 * 512;
+        let partition_array_size = num_partition_entries * partition_entry_size;
+        let partition_array_bytes = &disk_bytes[partition_array_offset..partition_array_offset + partition_array_size];
+        let mut hasher = Hasher::new();
+        hasher.update(partition_array_bytes);
+        let calculated_array_crc = hasher.finalize();
+        let stored_array_crc = primary_header.partition_array_crc32;
+        assert_eq!(stored_array_crc, calculated_array_crc, "Partition array CRC32 mismatch");
+
+        // Verify Backup Header
+        let backup_header_offset = ((total_lbas - 1) * 512) as usize;
+        let backup_header: GptHeader = read_struct(&disk_bytes, backup_header_offset);
+        assert_eq!(&backup_header.signature, b"EFI PART");
+        let backup_current_lba = backup_header.current_lba;
+        assert_eq!(backup_current_lba, total_lbas - 1);
+        let backup_backup_lba = backup_header.backup_lba;
+        assert_eq!(backup_backup_lba, 1);
+
+        Ok(())
+    }
+}

@@ -76,3 +76,48 @@ pub fn create_fat_image(
 
     Ok(total_size as u32 / utils::ISO_SECTOR_SIZE as u32)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use std::io::Read;
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_create_fat_image() -> io::Result<()> {
+        let dir = tempdir()?;
+        let loader_path = dir.path().join("loader.efi");
+        let kernel_path = dir.path().join("kernel.elf");
+        let fat_img_path = dir.path().join("fat.img");
+
+        let loader_content = b"UEFI loader";
+        let kernel_content = b"ELF kernel";
+        fs::write(&loader_path, loader_content)?;
+        fs::write(&kernel_path, kernel_content)?;
+
+        let result = create_fat_image(&fat_img_path, &loader_path, &kernel_path);
+        assert!(result.is_ok());
+
+        assert!(fat_img_path.exists());
+        let fat_img_size = fat_img_path.metadata()?.len();
+        assert!(fat_img_size > 0);
+
+        // Verify the contents of the FAT image
+        let fat_file = fs::File::open(&fat_img_path)?;
+        let fs = FileSystem::new(fat_file, FsOptions::new())?;
+        let root_dir = fs.root_dir();
+
+        let mut loader_in_fat = root_dir.open_file("EFI/BOOT/BOOTX64.EFI")?;
+        let mut loader_in_fat_content = Vec::new();
+        loader_in_fat.read_to_end(&mut loader_in_fat_content)?;
+        assert_eq!(loader_content, loader_in_fat_content.as_slice());
+
+        let mut kernel_in_fat = root_dir.open_file("EFI/BOOT/KERNEL.EFI")?;
+        let mut kernel_in_fat_content = Vec::new();
+        kernel_in_fat.read_to_end(&mut kernel_in_fat_content)?;
+        assert_eq!(kernel_content, kernel_in_fat_content.as_slice());
+
+        Ok(())
+    }
+}
