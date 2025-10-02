@@ -98,3 +98,80 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::{Read, Seek, SeekFrom};
+    use tempfile::NamedTempFile;
+
+    fn verify_checksum(validation_entry: &[u8; 32]) {
+        let mut sum: u16 = 0;
+        for i in (0..32).step_by(2) {
+            sum = sum.wrapping_add(u16::from_le_bytes([
+                validation_entry[i],
+                validation_entry[i + 1],
+            ]));
+        }
+        assert_eq!(sum, 0, "Boot catalog validation entry checksum is invalid");
+    }
+
+    #[test]
+    fn test_single_efi_boot_entry() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let entries = vec![BootCatalogEntry {
+            platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+            boot_image_lba: 100,
+            boot_image_sectors: 50,
+            bootable: true,
+        }];
+
+        write_boot_catalog(temp_file.as_file_mut(), entries)?;
+
+        let mut buffer = [0u8; ISO_SECTOR_SIZE];
+        temp_file.seek(SeekFrom::Start(0))?;
+        temp_file.read_exact(&mut buffer)?;
+
+        // Verify Validation Entry
+        let val_entry: &[u8; 32] = &buffer[0..32].try_into().unwrap();
+        assert_eq!(val_entry[0], BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID);
+        assert_eq!(val_entry[1], BOOT_CATALOG_EFI_PLATFORM_ID);
+        assert_eq!(
+            &val_entry[30..32],
+            &BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes()
+        );
+        verify_checksum(val_entry);
+
+        // Verify Boot Entry
+        let boot_entry: &[u8; 32] = &buffer[32..64].try_into().unwrap();
+        assert_eq!(boot_entry[0], BOOT_CATALOG_BOOT_ENTRY_HEADER_ID);
+        assert_eq!(boot_entry[1], 0x00); // No Emulation
+        assert_eq!(&boot_entry[6..8], &50u16.to_le_bytes()); // Sector count
+        assert_eq!(&boot_entry[8..12], &100u32.to_le_bytes()); // LBA
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_non_bootable_entry() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let entries = vec![BootCatalogEntry {
+            platform_id: 0, // BIOS
+            boot_image_lba: 200,
+            boot_image_sectors: 20,
+            bootable: false,
+        }];
+
+        write_boot_catalog(temp_file.as_file_mut(), entries)?;
+
+        let mut buffer = [0u8; ISO_SECTOR_SIZE];
+        temp_file.seek(SeekFrom::Start(0))?;
+        temp_file.read_exact(&mut buffer)?;
+
+        // Verify Boot Entry
+        let boot_entry: &[u8; 32] = &buffer[32..64].try_into().unwrap();
+        assert_eq!(boot_entry[0], 0x00); // Not bootable
+
+        Ok(())
+    }
+}

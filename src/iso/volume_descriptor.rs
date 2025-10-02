@@ -136,3 +136,136 @@ pub fn write_volume_descriptors(
     write_volume_descriptor_terminator(iso)?;
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Read;
+    use tempfile::NamedTempFile;
+
+    fn read_sector(file: &mut File, lba: u32) -> io::Result<[u8; ISO_SECTOR_SIZE]> {
+        let mut buffer = [0u8; ISO_SECTOR_SIZE];
+        file.seek(SeekFrom::Start(lba as u64 * ISO_SECTOR_SIZE as u64))?;
+        file.read_exact(&mut buffer)?;
+        Ok(buffer)
+    }
+
+    #[test]
+    fn test_write_pvd() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let root_entry = IsoDirEntry {
+            lba: 20,
+            size: 2048,
+            flags: 2,
+            name: ".",
+        };
+        let total_sectors = 1000;
+
+        write_primary_volume_descriptor(temp_file.as_file_mut(), total_sectors, &root_entry)?;
+
+        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
+        assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
+        assert_eq!(&pvd_sector[1..6], ISO_ID);
+        let mut expected_sectors = [0u8; 8];
+        expected_sectors[0..4].copy_from_slice(&total_sectors.to_le_bytes());
+        expected_sectors[4..8].copy_from_slice(&total_sectors.to_be_bytes());
+        assert_eq!(
+            &pvd_sector[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 8],
+            &expected_sectors
+        );
+        let root_bytes = root_entry.to_bytes();
+        assert_eq!(
+            &pvd_sector[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_bytes.len()],
+            &root_bytes
+        );
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_update_pvd_sectors() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let root_entry = IsoDirEntry {
+            lba: 20,
+            size: 2048,
+            flags: 2,
+            name: ".",
+        };
+        write_primary_volume_descriptor(temp_file.as_file_mut(), 1000, &root_entry)?;
+
+        let new_total_sectors = 2500;
+        update_total_sectors_in_pvd(temp_file.as_file_mut(), new_total_sectors)?;
+
+        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
+        let read_sectors_le = u32::from_le_bytes(
+            pvd_sector[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
+                .try_into()
+                .unwrap(),
+        );
+        let read_sectors_be = u32::from_be_bytes(
+            pvd_sector[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
+                .try_into()
+                .unwrap(),
+        );
+        assert_eq!(read_sectors_le, new_total_sectors);
+        assert_eq!(read_sectors_be, new_total_sectors);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_brvd() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let boot_catalog_lba = 99;
+        write_boot_record_volume_descriptor(temp_file.as_file_mut(), boot_catalog_lba)?;
+
+        let brvd_sector = read_sector(temp_file.as_file_mut(), 17)?;
+        assert_eq!(brvd_sector[0], ISO_VOLUME_DESCRIPTOR_BOOT_RECORD);
+        assert_eq!(&brvd_sector[1..6], ISO_ID);
+        assert_eq!(&brvd_sector[7..30], b"EL TORITO SPECIFICATION");
+        assert_eq!(&brvd_sector[71..75], &boot_catalog_lba.to_le_bytes());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_terminator() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        write_volume_descriptor_terminator(temp_file.as_file_mut())?;
+
+        let term_sector = read_sector(temp_file.as_file_mut(), 18)?;
+        assert_eq!(term_sector[0], ISO_VOLUME_DESCRIPTOR_TERMINATOR);
+        assert_eq!(&term_sector[1..6], ISO_ID);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_write_all_descriptors() -> io::Result<()> {
+        let mut temp_file = NamedTempFile::new()?;
+        let root_entry = IsoDirEntry {
+            lba: 20,
+            size: 2048,
+            flags: 2,
+            name: ".",
+        };
+        let total_sectors = 1234;
+
+        write_volume_descriptors(temp_file.as_file_mut(), total_sectors, &root_entry)?;
+
+        // Verify PVD
+        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
+        assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
+
+        // Verify BRVD
+        let brvd_sector = read_sector(temp_file.as_file_mut(), 17)?;
+        assert_eq!(brvd_sector[0], ISO_VOLUME_DESCRIPTOR_BOOT_RECORD);
+        assert_eq!(&brvd_sector[71..75], &LBA_BOOT_CATALOG.to_le_bytes());
+
+        // Verify Terminator
+        let term_sector = read_sector(temp_file.as_file_mut(), 18)?;
+        assert_eq!(term_sector[0], ISO_VOLUME_DESCRIPTOR_TERMINATOR);
+
+        Ok(())
+    }
+}

@@ -69,3 +69,65 @@ pub fn create_mbr_for_gpt_hybrid(total_lbas: u32, is_isohybrid: bool) -> io::Res
 
     Ok(mbr)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    #[test]
+    fn test_mbr_new() {
+        let mbr = Mbr::new();
+        let boot_sig = mbr.boot_signature;
+        assert_eq!(boot_sig, 0xAA55);
+        assert_eq!(mbr.boot_code, [0; 440]);
+        let disk_sig = mbr.disk_signature;
+        assert_eq!(disk_sig, 0);
+    }
+
+    #[test]
+    fn test_create_mbr_isohybrid() -> io::Result<()> {
+        let total_lbas = 1000;
+        let mbr = create_mbr_for_gpt_hybrid(total_lbas, true)?;
+        let part = mbr.partition_table[0];
+
+        assert_eq!(part.bootable, 0x00);
+        assert_eq!(part.partition_type, 0xEE);
+        let starting_lba = part.starting_lba;
+        assert_eq!(starting_lba, 1);
+        let size_in_lba = part.size_in_lba;
+        assert_eq!(size_in_lba, total_lbas - 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_mbr_no_isohybrid() -> io::Result<()> {
+        let total_lbas = 2000;
+        let mbr = create_mbr_for_gpt_hybrid(total_lbas, false)?;
+        let part = mbr.partition_table[0];
+
+        assert_eq!(part.bootable, 0x80);
+        assert_eq!(part.partition_type, 0xEF);
+        let starting_lba = part.starting_lba;
+        assert_eq!(starting_lba, 1);
+        let size_in_lba = part.size_in_lba;
+        assert_eq!(size_in_lba, total_lbas - 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mbr_write_to() -> io::Result<()> {
+        let mbr = Mbr::new();
+        let mut buffer = Cursor::new(Vec::new());
+        mbr.write_to(&mut buffer)?;
+
+        let bytes = buffer.into_inner();
+        assert_eq!(bytes.len(), mem::size_of::<Mbr>());
+        assert_eq!(bytes.len(), 512);
+
+        // Check the boot signature at the end
+        let signature = u16::from_le_bytes([bytes[510], bytes[511]]);
+        assert_eq!(signature, 0xAA55);
+        Ok(())
+    }
+}

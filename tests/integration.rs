@@ -54,7 +54,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
             },
             IsoImageFile {
                 source: kernel_path.clone(),
-                destination: "kernel.elf".to_string(),
+                destination: "EFI/BOOT/KERNEL.EFI".to_string(),
             },
         ],
         boot_info: isobemak::iso::builder::BootInfo {
@@ -80,7 +80,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -l output:\n{}", isoinfo_l_output);
     assert!(isoinfo_l_output.contains("BOOTX64.EFI;1"));
-    assert!(isoinfo_l_output.contains("KERNEL.ELF;1"));
+    assert!(isoinfo_l_output.contains("KERNEL.EFI;1"));
 
     // Verify ISO content using 7z
     let sevenz_output = Command::new("7z")
@@ -90,7 +90,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let sevenz_l_output = String::from_utf8_lossy(&sevenz_output.stdout).into_owned();
     println!("7z l output:\n{}", sevenz_l_output);
     assert!(sevenz_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
-    assert!(sevenz_l_output.contains("KERNEL.ELF"));
+    assert!(sevenz_l_output.contains("EFI/BOOT/KERNEL.EFI"));
 
     // Extract the UEFI boot image and verify with dumpet
     let extract_dir = temp_dir.path().join("extracted");

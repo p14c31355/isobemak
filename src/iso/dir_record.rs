@@ -54,3 +54,83 @@ impl<'a> IsoDirEntry<'a> {
         record
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_file_record() {
+        let entry = IsoDirEntry {
+            lba: 123,
+            size: 456,
+            flags: 0,
+            name: "file.txt",
+        };
+        let bytes = entry.to_bytes();
+
+        // Length: 33 + "FILE.TXT;1".len() (10) = 43, padded to 44
+        assert_eq!(bytes.len(), 44);
+        assert_eq!(bytes[0], 44); // Record length
+        assert_eq!(bytes[2..6], 123u32.to_le_bytes());
+        assert_eq!(bytes[6..10], 123u32.to_be_bytes());
+        assert_eq!(bytes[10..14], 456u32.to_le_bytes());
+        assert_eq!(bytes[14..18], 456u32.to_be_bytes());
+        assert_eq!(bytes[25], 0); // Flags
+        assert_eq!(bytes[32], 10); // File identifier length
+        assert_eq!(&bytes[33..43], b"FILE.TXT;1");
+        assert_eq!(bytes[43], 0); // Padding
+    }
+
+    #[test]
+    fn test_directory_record() {
+        let entry = IsoDirEntry {
+            lba: 200,
+            size: 2048,
+            flags: 0x02, // Directory flag
+            name: "mydir",
+        };
+        let bytes = entry.to_bytes();
+
+        // Length: 33 + "MYDIR".len() (5) = 38
+        assert_eq!(bytes.len(), 38);
+        assert_eq!(bytes[0], 38);
+        assert_eq!(bytes[25], 0x02);
+        assert_eq!(bytes[32], 5); // File identifier length
+        assert_eq!(&bytes[33..38], b"MYDIR");
+    }
+
+    #[test]
+    fn test_current_dir_record() {
+        let entry = IsoDirEntry {
+            lba: 300,
+            size: 2048,
+            flags: 0x02,
+            name: ".",
+        };
+        let bytes = entry.to_bytes();
+
+        // Length: 33 + 1 = 34
+        assert_eq!(bytes.len(), 34);
+        assert_eq!(bytes[0], 34);
+        assert_eq!(bytes[32], 1);
+        assert_eq!(bytes[33], 0x00);
+    }
+
+    #[test]
+    fn test_parent_dir_record() {
+        let entry = IsoDirEntry {
+            lba: 400,
+            size: 2048,
+            flags: 0x02,
+            name: "..",
+        };
+        let bytes = entry.to_bytes();
+
+        // Length: 33 + 1 = 34
+        assert_eq!(bytes.len(), 34);
+        assert_eq!(bytes[0], 34);
+        assert_eq!(bytes[32], 1);
+        assert_eq!(bytes[33], 0x01);
+    }
+}

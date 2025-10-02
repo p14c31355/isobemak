@@ -42,7 +42,7 @@ impl GptHeader {
             header_size: mem::size_of::<GptHeader>() as u32,
             header_crc32: 0, // Calculated later
             _reserved0: 0,
-            current_lba: 1, // LBA 1
+            current_lba: 1, // LBA
             backup_lba: total_lbas - 1,
             first_usable_lba: 34, // MBR (1) + GPT Header (1) + Partition Array (32)
             last_usable_lba: total_lbas.saturating_sub(34), // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
@@ -55,9 +55,46 @@ impl GptHeader {
         }
     }
 
+    pub fn to_bytes(&self) -> [u8; mem::size_of::<GptHeader>()] {
+        let mut bytes = [0u8; mem::size_of::<GptHeader>()];
+        let mut offset = 0;
+
+        bytes[offset..offset + 8].copy_from_slice(&self.signature);
+        offset += 8;
+        bytes[offset..offset + 4].copy_from_slice(&self.revision.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.header_size.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.header_crc32.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self._reserved0.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 8].copy_from_slice(&self.current_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.backup_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.first_usable_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.last_usable_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 16].copy_from_slice(&self.disk_guid);
+        offset += 16;
+        bytes[offset..offset + 8].copy_from_slice(&self.partition_entry_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 4].copy_from_slice(&self.num_partition_entries.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.partition_entry_size.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 4].copy_from_slice(&self.partition_array_crc32.to_le_bytes());
+        offset += 4;
+        bytes[offset..offset + 420].copy_from_slice(&self._reserved1);
+
+        bytes
+    }
+
     pub fn write_to<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        let bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(*self) };
-        writer.write_all(&bytes)?;
+        let header_bytes = self.to_bytes();
+        writer.write_all(&header_bytes)?;
         Ok(())
     }
 }
@@ -104,9 +141,31 @@ impl GptPartitionEntry {
         }
     }
 
+    pub fn to_bytes(&self) -> [u8; mem::size_of::<GptPartitionEntry>()] {
+        let mut bytes = [0u8; mem::size_of::<GptPartitionEntry>()];
+        let mut offset = 0;
+
+        bytes[offset..offset + 16].copy_from_slice(&self.partition_type_guid);
+        offset += 16;
+        bytes[offset..offset + 16].copy_from_slice(&self.unique_partition_guid);
+        offset += 16;
+        bytes[offset..offset + 8].copy_from_slice(&self.starting_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.ending_lba.to_le_bytes());
+        offset += 8;
+        bytes[offset..offset + 8].copy_from_slice(&self.attributes.to_le_bytes());
+        offset += 8;
+        for i in 0..36 {
+            bytes[offset..offset + 2].copy_from_slice(&self.partition_name[i].to_le_bytes());
+            offset += 2;
+        }
+
+        bytes
+    }
+
     pub fn write_to<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        let bytes: [u8; mem::size_of::<GptPartitionEntry>()] = unsafe { mem::transmute(*self) };
-        writer.write_all(&bytes)?;
+        let partition_bytes = self.to_bytes();
+        writer.write_all(&partition_bytes)?;
         Ok(())
     }
 }
@@ -133,22 +192,22 @@ pub fn write_gpt_structures<W: Write + Seek>(
         vec![0u8; (num_partition_entries * partition_entry_size) as usize];
     let mut offset = 0;
     for partition in partitions {
-        let bytes: [u8; mem::size_of::<GptPartitionEntry>()] =
-            unsafe { mem::transmute(*partition) };
+        let partition_slice = partition.to_bytes();
         partition_array_bytes[offset..offset + mem::size_of::<GptPartitionEntry>()]
-            .copy_from_slice(&bytes);
+            .copy_from_slice(&partition_slice);
         offset += mem::size_of::<GptPartitionEntry>();
     }
     let mut hasher = Hasher::new();
     hasher.update(&partition_array_bytes);
     header.partition_array_crc32 = hasher.finalize();
 
-    // Recalculate header CRC32 with partition array CRC
-    let mut header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
-    header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
-
+    // Recalculate header CRC32. The CRC is calculated over the first 92 bytes of the header.
+    let mut header_copy = header;
+    header_copy.header_crc32 = 0;
+    let header_bytes = header_copy.to_bytes();
+    let header_data_for_crc = &header_bytes[0..92];
     let mut hasher = Hasher::new();
-    hasher.update(&header_bytes);
+    hasher.update(header_data_for_crc);
     header.header_crc32 = hasher.finalize();
 
     // Write Main GPT Header
@@ -157,13 +216,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
     // Write Partition Entries
     writer.seek(SeekFrom::Start(partition_array_lba * 512))?; // LBA 2
-    for partition in partitions {
-        partition.write_to(writer)?;
-    }
-    // Pad remaining partition entries with zeros
-    for _ in partitions.len()..num_partition_entries as usize {
-        writer.write_all(&vec![0u8; partition_entry_size as usize])?;
-    }
+    writer.write_all(&partition_array_bytes)?;
 
     // Backup GPT Header
     let mut backup_header = header;
@@ -173,13 +226,13 @@ pub fn write_gpt_structures<W: Write + Seek>(
         .saturating_sub(num_partition_entries as u64)
         .saturating_sub(1); // Backup partition array LBA
 
-    // Recalculate backup header CRC32
-    let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
-        unsafe { mem::transmute(backup_header) };
-    backup_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
-
+    // Recalculate backup header CRC32. The CRC is calculated over the first 92 bytes of the header.
+    let mut backup_header_copy = backup_header;
+    backup_header_copy.header_crc32 = 0;
+    let backup_header_bytes = backup_header_copy.to_bytes();
+    let header_data_for_crc = &backup_header_bytes[0..92];
     let mut hasher = Hasher::new();
-    hasher.update(&backup_header_bytes);
+    hasher.update(header_data_for_crc);
     backup_header.header_crc32 = hasher.finalize();
 
     writer.seek(SeekFrom::Start(total_lbas.saturating_sub(1) * 512))?; // Last LBA
@@ -193,7 +246,8 @@ pub fn write_gpt_structures<W: Write + Seek>(
             * 512,
     ))?;
     for partition in partitions {
-        partition.write_to(writer)?;
+        let partition_slice = partition.to_bytes();
+        writer.write_all(&partition_slice)?;
     }
     // Pad remaining backup partition entries with zeros
     for _ in partitions.len()..num_partition_entries as usize {
@@ -201,4 +255,116 @@ pub fn write_gpt_structures<W: Write + Seek>(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    // Helper to read a packed struct safely from a byte slice.
+    fn read_struct<T: Copy>(slice: &[u8], offset: usize) -> T {
+        let size = mem::size_of::<T>();
+        let sub_slice = &slice[offset..offset + size];
+        // Using `read_unaligned` is safer and more direct for reading from a byte
+        // slice that may not have the alignment required for type `T`.
+        unsafe { (sub_slice.as_ptr() as *const T).read_unaligned() }
+    }
+
+    #[test]
+    fn test_gpt_header_new() {
+        let total_lbas = 2048;
+        let header = GptHeader::new(total_lbas, 2, 128, 128);
+
+        assert_eq!(&header.signature, b"EFI PART");
+        let revision = header.revision;
+        assert_eq!(revision, 0x00010000);
+        let current_lba = header.current_lba;
+        assert_eq!(current_lba, 1);
+        let backup_lba = header.backup_lba;
+        assert_eq!(backup_lba, total_lbas - 1);
+        let first_usable = header.first_usable_lba;
+        assert_eq!(first_usable, 34);
+    }
+
+    #[test]
+    fn test_gpt_partition_entry_new() {
+        let p_guid = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
+        let u_guid = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
+        let name = "EFI System Partition";
+        let entry = GptPartitionEntry::new(p_guid, u_guid, 34, 2048, name);
+
+        let starting_lba = entry.starting_lba;
+        assert_eq!(starting_lba, 34);
+        let ending_lba = entry.ending_lba;
+        assert_eq!(ending_lba, 2048);
+
+        let mut expected_name = [0u16; 36];
+        for (i, c) in name.encode_utf16().enumerate() {
+            expected_name[i] = c;
+        }
+        let partition_name = entry.partition_name;
+        assert_eq!(partition_name, expected_name);
+    }
+
+    #[test]
+    fn test_write_gpt_structures() -> io::Result<()> {
+        let total_lbas = 4096;
+        let num_partition_entries = 128;
+        let partition_entry_size = mem::size_of::<GptPartitionEntry>();
+        let mut disk = Cursor::new(vec![0; total_lbas as usize * 512]);
+
+        let partitions = vec![GptPartitionEntry::new(
+            EFI_SYSTEM_PARTITION_GUID,
+            &"A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0".to_string(),
+            2048,
+            4095,
+            "Test Partition",
+        )];
+
+        write_gpt_structures(&mut disk, total_lbas, &partitions)?;
+
+        let disk_bytes = disk.into_inner();
+
+        // Verify Primary Header
+        let primary_header: GptHeader = read_struct(&disk_bytes, 512);
+        assert_eq!(&primary_header.signature, b"EFI PART");
+
+        // Get the 92 bytes of the header for CRC calculation
+        let mut header_bytes = primary_header.to_bytes();
+        header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out CRC field for calculation
+        let header_data_for_crc = &header_bytes[0..92];
+
+        let mut hasher = Hasher::new();
+        hasher.update(header_data_for_crc);
+        let calculated_crc = hasher.finalize();
+
+        let stored_crc = primary_header.header_crc32; // Read directly from the struct
+        assert_eq!(stored_crc, calculated_crc, "Primary header CRC32 mismatch");
+
+        // Verify Partition Array
+        let partition_array_offset = 2 * 512;
+        let partition_array_size = num_partition_entries * partition_entry_size;
+        let partition_array_bytes =
+            &disk_bytes[partition_array_offset..partition_array_offset + partition_array_size];
+        let mut hasher = Hasher::new();
+        hasher.update(partition_array_bytes);
+        let calculated_array_crc = hasher.finalize();
+        let stored_array_crc = primary_header.partition_array_crc32;
+        assert_eq!(
+            stored_array_crc, calculated_array_crc,
+            "Partition array CRC32 mismatch"
+        );
+
+        // Verify Backup Header
+        let backup_header_offset = ((total_lbas - 1) * 512) as usize;
+        let backup_header: GptHeader = read_struct(&disk_bytes, backup_header_offset);
+        assert_eq!(&backup_header.signature, b"EFI PART");
+        let backup_current_lba = backup_header.current_lba;
+        assert_eq!(backup_current_lba, total_lbas - 1);
+        let backup_backup_lba = backup_header.backup_lba;
+        assert_eq!(backup_backup_lba, 1);
+
+        Ok(())
+    }
 }

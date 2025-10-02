@@ -610,3 +610,110 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::NamedTempFile;
+
+    #[test]
+    fn test_add_file() -> io::Result<()> {
+        let mut builder = IsoBuilder::new();
+        let temp_file = NamedTempFile::new()?;
+        let temp_path = temp_file.path().to_path_buf();
+
+        // Add a root file
+        builder.add_file("root.txt", temp_path.clone())?;
+        assert!(builder.root.children.contains_key("root.txt"));
+
+        // Add a nested file
+        builder.add_file("dir1/nested.txt", temp_path.clone())?;
+        let dir1 = match builder.root.children.get("dir1") {
+            Some(IsoFsNode::Directory(dir)) => dir,
+            _ => panic!("dir1 was not created as a directory"),
+        };
+        assert!(dir1.children.contains_key("nested.txt"));
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_calculate_lbas() -> io::Result<()> {
+        let mut root = IsoDirectory::new();
+        let mut current_lba = 20; // Start at a known LBA
+
+        // Add a directory and a file
+        let mut subdir = IsoDirectory::new();
+        let file1 = IsoFile {
+            path: PathBuf::new(),
+            size: 1000,
+            lba: 0,
+        }; // Less than 1 sector
+        let file2 = IsoFile {
+            path: PathBuf::new(),
+            size: 3000,
+            lba: 0,
+        }; // 2 sectors
+        subdir
+            .children
+            .insert("file2.txt".to_string(), IsoFsNode::File(file2));
+        root.children
+            .insert("file1.txt".to_string(), IsoFsNode::File(file1));
+        root.children
+            .insert("subdir".to_string(), IsoFsNode::Directory(subdir));
+
+        IsoBuilder::calculate_lbas(&mut current_lba, &mut root)?;
+
+        // Expected LBA assignments:
+        // root: 20
+        // file1.txt: 21 (1 sector)
+        // subdir: 22
+        // file2.txt: 23 (2 sectors)
+        // final lba: 25
+
+        assert_eq!(root.lba, 20);
+        match root.children.get("file1.txt") {
+            Some(IsoFsNode::File(f)) => assert_eq!(f.lba, 21),
+            _ => panic!("file1.txt not found"),
+        }
+        let (subdir_lba, file2_lba) = match root.children.get("subdir") {
+            Some(IsoFsNode::Directory(d)) => {
+                let file2_lba = match d.children.get("file2.txt") {
+                    Some(IsoFsNode::File(f)) => f.lba,
+                    _ => panic!("file2.txt not found"),
+                };
+                (d.lba, file2_lba)
+            }
+            _ => panic!("subdir not found"),
+        };
+        assert_eq!(subdir_lba, 22);
+        assert_eq!(file2_lba, 23);
+        assert_eq!(current_lba, 25);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_get_path_helpers() -> io::Result<()> {
+        let mut builder = IsoBuilder::new();
+        let mut temp_file = NamedTempFile::new()?;
+        temp_file.write_all(b"some data")?;
+        let temp_path = temp_file.path().to_path_buf();
+
+        builder.add_file("A/B/C.txt", temp_path)?;
+        builder.current_lba = 20;
+        IsoBuilder::calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
+
+        let lba = builder.get_lba_for_path("A/B/C.txt")?;
+        let size = builder.get_file_size_in_iso("A/B/C.txt")?;
+
+        // root dir: 20, A: 21, B: 22, C.txt: 23
+        assert_eq!(lba, 23);
+        assert_eq!(size, 9);
+
+        // Test not found
+        assert!(builder.get_lba_for_path("A/D.txt").is_err());
+
+        Ok(())
+    }
+}
