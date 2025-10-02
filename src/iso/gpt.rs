@@ -304,7 +304,7 @@ mod tests {
 
         let partitions = vec![GptPartitionEntry::new(
             EFI_SYSTEM_PARTITION_GUID,
-            &Uuid::new_v4().to_string(),
+            &"A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0".to_string(),
             2048,
             4095,
             "Test Partition",
