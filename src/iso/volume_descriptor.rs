@@ -166,14 +166,12 @@ mod tests {
         let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
         assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
         assert_eq!(&pvd_sector[1..6], ISO_ID);
+        let mut expected_sectors = [0u8; 8];
+        expected_sectors[0..4].copy_from_slice(&total_sectors.to_le_bytes());
+        expected_sectors[4..8].copy_from_slice(&total_sectors.to_be_bytes());
         assert_eq!(
             &pvd_sector[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 8],
-            &total_sectors
-                .to_le_bytes()
-                .iter()
-                .chain(total_sectors.to_be_bytes().iter())
-                .cloned()
-                .collect::<Vec<u8>>()
+            &expected_sectors
         );
         let root_bytes = root_entry.to_bytes();
         assert_eq!(
