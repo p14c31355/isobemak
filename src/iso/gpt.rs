@@ -206,7 +206,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::{Cursor};
+    use std::io::Cursor;
 
     // Helper to read a packed struct safely from a byte slice.
     fn read_struct<T: Copy>(slice: &[u8], offset: usize) -> T {
@@ -274,7 +274,8 @@ mod tests {
         // Verify Primary Header
         let primary_header: GptHeader = read_struct(&disk_bytes, 512);
         assert_eq!(&primary_header.signature, b"EFI PART");
-        let mut primary_header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(primary_header) };
+        let mut primary_header_bytes: [u8; mem::size_of::<GptHeader>()] =
+            unsafe { mem::transmute(primary_header) };
         let stored_crc = u32::from_le_bytes(primary_header_bytes[16..20].try_into().unwrap());
         primary_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out CRC for calculation
         let mut hasher = Hasher::new();
@@ -285,12 +286,16 @@ mod tests {
         // Verify Partition Array
         let partition_array_offset = 2 * 512;
         let partition_array_size = num_partition_entries * partition_entry_size;
-        let partition_array_bytes = &disk_bytes[partition_array_offset..partition_array_offset + partition_array_size];
+        let partition_array_bytes =
+            &disk_bytes[partition_array_offset..partition_array_offset + partition_array_size];
         let mut hasher = Hasher::new();
         hasher.update(partition_array_bytes);
         let calculated_array_crc = hasher.finalize();
         let stored_array_crc = primary_header.partition_array_crc32;
-        assert_eq!(stored_array_crc, calculated_array_crc, "Partition array CRC32 mismatch");
+        assert_eq!(
+            stored_array_crc, calculated_array_crc,
+            "Partition array CRC32 mismatch"
+        );
 
         // Verify Backup Header
         let backup_header_offset = ((total_lbas - 1) * 512) as usize;

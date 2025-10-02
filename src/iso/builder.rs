@@ -314,7 +314,7 @@ impl IsoBuilder {
             if let Some(bios_boot) = &boot_info.bios_boot {
                 let boot_image_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
                 // El Torito specification requires sector count in 512-byte sectors.
-                let boot_image_sectors_u64 = ((boot_image_size + 511) / 512).max(1);
+                let boot_image_sectors_u64 = boot_image_size.div_ceil(512).max(1);
                 if boot_image_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -335,7 +335,7 @@ impl IsoBuilder {
         if let Some(path) = &self.uefi_catalog_path {
             let uefi_boot_lba = self.get_lba_for_path(path)?;
             let uefi_boot_size = self.get_file_size_in_iso(path)?;
-            let uefi_boot_sectors_u64 = ((uefi_boot_size + 511) / 512).max(1);
+            let uefi_boot_sectors_u64 = uefi_boot_size.div_ceil(512).max(1);
             if uefi_boot_sectors_u64 > u16::MAX as u64 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -543,8 +543,6 @@ impl IsoBuilder {
     }
 }
 
-
-
 /// High-level function to create an ISO 9660 image from a structured `IsoImage`.
 pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::Result<()> {
     let mut iso_builder = IsoBuilder::new();
@@ -646,11 +644,23 @@ mod tests {
 
         // Add a directory and a file
         let mut subdir = IsoDirectory::new();
-        let file1 = IsoFile { path: PathBuf::new(), size: 1000, lba: 0 }; // Less than 1 sector
-        let file2 = IsoFile { path: PathBuf::new(), size: 3000, lba: 0 }; // 2 sectors
-        subdir.children.insert("file2.txt".to_string(), IsoFsNode::File(file2));
-        root.children.insert("file1.txt".to_string(), IsoFsNode::File(file1));
-        root.children.insert("subdir".to_string(), IsoFsNode::Directory(subdir));
+        let file1 = IsoFile {
+            path: PathBuf::new(),
+            size: 1000,
+            lba: 0,
+        }; // Less than 1 sector
+        let file2 = IsoFile {
+            path: PathBuf::new(),
+            size: 3000,
+            lba: 0,
+        }; // 2 sectors
+        subdir
+            .children
+            .insert("file2.txt".to_string(), IsoFsNode::File(file2));
+        root.children
+            .insert("file1.txt".to_string(), IsoFsNode::File(file1));
+        root.children
+            .insert("subdir".to_string(), IsoFsNode::Directory(subdir));
 
         IsoBuilder::calculate_lbas(&mut current_lba, &mut root)?;
 

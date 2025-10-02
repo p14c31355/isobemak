@@ -108,7 +108,10 @@ mod tests {
     fn verify_checksum(validation_entry: &[u8; 32]) {
         let mut sum: u16 = 0;
         for i in (0..32).step_by(2) {
-            sum = sum.wrapping_add(u16::from_le_bytes([validation_entry[i], validation_entry[i+1]]));
+            sum = sum.wrapping_add(u16::from_le_bytes([
+                validation_entry[i],
+                validation_entry[i + 1],
+            ]));
         }
         assert_eq!(sum, 0, "Boot catalog validation entry checksum is invalid");
     }
@@ -133,7 +136,10 @@ mod tests {
         let val_entry: &[u8; 32] = &buffer[0..32].try_into().unwrap();
         assert_eq!(val_entry[0], BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID);
         assert_eq!(val_entry[1], BOOT_CATALOG_EFI_PLATFORM_ID);
-        assert_eq!(&val_entry[30..32], &BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
+        assert_eq!(
+            &val_entry[30..32],
+            &BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes()
+        );
         verify_checksum(val_entry);
 
         // Verify Boot Entry
