@@ -96,8 +96,7 @@ mod tests {
         fs::write(&loader_path, loader_content)?;
         fs::write(&kernel_path, kernel_content)?;
 
-        let result = create_fat_image(&fat_img_path, &loader_path, &kernel_path);
-        assert!(result.is_ok());
+        create_fat_image(&fat_img_path, &loader_path, &kernel_path)?;
 
         assert!(fat_img_path.exists());
         let fat_img_size = fat_img_path.metadata()?.len();
