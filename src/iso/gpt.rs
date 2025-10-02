@@ -163,6 +163,19 @@ pub fn write_gpt_structures<W: Write + Seek>(
     header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
     let header_data_for_crc = &header_bytes[0..92]; // Slice to the actual 92-byte header data
     let mut hasher = Hasher::new();
+    hasher.update(&header_bytes);
+    hasher.update(header_data_for_crc);
+    header.header_crc32 = hasher.finalize();
+    let mut header_copy = header;
+    header_copy.header_crc32 = 0;
+    let header_bytes = unsafe {
+        std::slice::from_raw_parts(
+            &header_copy as *const _ as *const u8,
+            mem::size_of::<GptHeader>(),
+        )
+    };
+    let header_data_for_crc = &header_bytes[0..92];
+    let mut hasher = Hasher::new();
     hasher.update(header_data_for_crc);
     header.header_crc32 = hasher.finalize();
 
@@ -187,6 +200,19 @@ pub fn write_gpt_structures<W: Write + Seek>(
         unsafe { mem::transmute(backup_header) };
     backup_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
     let header_data_for_crc = &backup_header_bytes[0..92]; // Slice to the actual 92-byte header data
+    let mut hasher = Hasher::new();
+    hasher.update(&backup_header_bytes);
+    hasher.update(header_data_for_crc);
+    backup_header.header_crc32 = hasher.finalize();
+    let mut backup_header_copy = backup_header;
+    backup_header_copy.header_crc32 = 0;
+    let backup_header_bytes = unsafe {
+        std::slice::from_raw_parts(
+            &backup_header_copy as *const _ as *const u8,
+            mem::size_of::<GptHeader>(),
+        )
+    };
+    let header_data_for_crc = &backup_header_bytes[0..92];
     let mut hasher = Hasher::new();
     hasher.update(header_data_for_crc);
     backup_header.header_crc32 = hasher.finalize();
