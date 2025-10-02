@@ -159,7 +159,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
     header.partition_array_crc32 = hasher.finalize();
 
     // Recalculate header CRC32. The CRC is calculated over the first 92 bytes of the header.
-    let mut header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
+    let header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
     let header_data_for_crc = &header_bytes[0..92]; // Slice to the actual 92-byte header data
     let mut hasher = Hasher::new();
     hasher.update(header_data_for_crc);
@@ -193,7 +193,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
         .saturating_sub(1); // Backup partition array LBA
 
     // Recalculate backup header CRC32. The CRC is calculated over the first 92 bytes of the header.
-    let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
+    let backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
         unsafe { mem::transmute(backup_header) };
     let header_data_for_crc = &backup_header_bytes[0..92]; // Slice to the actual 92-byte header data
     let mut hasher = Hasher::new();
