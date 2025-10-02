@@ -159,7 +159,8 @@ pub fn write_gpt_structures<W: Write + Seek>(
     header.partition_array_crc32 = hasher.finalize();
 
     // Recalculate header CRC32. The CRC is calculated over the first 92 bytes of the header.
-    let header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
+    let mut header_bytes: [u8; mem::size_of::<GptHeader>()] = unsafe { mem::transmute(header) };
+    header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
     let header_data_for_crc = &header_bytes[0..92]; // Slice to the actual 92-byte header data
     let mut hasher = Hasher::new();
     hasher.update(header_data_for_crc);
@@ -171,18 +172,7 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
     // Write Partition Entries
     writer.seek(SeekFrom::Start(partition_array_lba * 512))?; // LBA 2
-    for partition in partitions {
-        // Use slice casting instead of mem::transmute for safety
-        let partition_slice = unsafe {
-            std::slice::from_raw_parts(
-                partition as *const GptPartitionEntry as *const u8,
-                mem::size_of::<GptPartitionEntry>(),
-            )
-        };
-        partition_array_bytes[offset..offset + mem::size_of::<GptPartitionEntry>()]
-            .copy_from_slice(partition_slice);
-        offset += mem::size_of::<GptPartitionEntry>();
-    }
+    writer.write_all(&partition_array_bytes)?;
 
     // Backup GPT Header
     let mut backup_header = header;
@@ -193,8 +183,9 @@ pub fn write_gpt_structures<W: Write + Seek>(
         .saturating_sub(1); // Backup partition array LBA
 
     // Recalculate backup header CRC32. The CRC is calculated over the first 92 bytes of the header.
-    let backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
+    let mut backup_header_bytes: [u8; mem::size_of::<GptHeader>()] =
         unsafe { mem::transmute(backup_header) };
+    backup_header_bytes[16..20].copy_from_slice(&[0; 4]); // Zero out header_crc32 field for calculation
     let header_data_for_crc = &backup_header_bytes[0..92]; // Slice to the actual 92-byte header data
     let mut hasher = Hasher::new();
     hasher.update(header_data_for_crc);
