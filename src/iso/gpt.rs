@@ -211,9 +211,10 @@ mod tests {
     // Helper to read a packed struct safely from a byte slice.
     fn read_struct<T: Copy>(slice: &[u8], offset: usize) -> T {
         let size = mem::size_of::<T>();
-        let mut instance_bytes = vec![0u8; size];
-        instance_bytes.copy_from_slice(&slice[offset..offset + size]);
-        unsafe { mem::transmute_copy(&instance_bytes.as_ptr().cast::<T>().read()) }
+        let sub_slice = &slice[offset..offset + size];
+        // Using `read_unaligned` is safer and more direct for reading from a byte
+        // slice that may not have the alignment required for type `T`.
+        unsafe { (sub_slice.as_ptr() as *const T).read_unaligned() }
     }
 
     #[test]
