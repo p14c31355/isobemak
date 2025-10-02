@@ -54,7 +54,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
             },
             IsoImageFile {
                 source: kernel_path.clone(),
-                destination: "kernel.elf".to_string(),
+                destination: "EFI/BOOT/KERNEL.EFI".to_string(),
             },
         ],
         boot_info: isobemak::iso::builder::BootInfo {
