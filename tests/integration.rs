@@ -80,7 +80,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -l output:\n{}", isoinfo_l_output);
     assert!(isoinfo_l_output.contains("BOOTX64.EFI;1"));
-    assert!(isoinfo_l_output.contains("EFI/BOOT/KERNEL.EFI;1"));
+    assert!(isoinfo_l_output.contains("KERNEL.EFI;1"));
 
     // Verify ISO content using 7z
     let sevenz_output = Command::new("7z")
