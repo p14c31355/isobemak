@@ -1,8 +1,9 @@
 // tests/integration.rs
 use std::{
-    io::{self, Error, ErrorKind},
+    io::{self, Error, ErrorKind, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::Command,
+    fs::File,
 };
 
 use isobemak::iso::builder::{IsoImageFile, build_iso};
@@ -114,6 +115,20 @@ fn test_create_disk_and_iso() -> io::Result<()> {
         assert!(dumpet_output.contains("EFI boot image"));
     } else {
         println!("Extraction failed, but listing succeeded");
+    }
+
+    // Debug: Read and display boot catalog content
+    let mut iso_file = File::open(iso_path)?;
+    iso_file.seek(SeekFrom::Start(19 * 2048))?;
+    let mut boot_catalog = [0u8; 2048];
+    iso_file.read_exact(&mut boot_catalog)?;
+    println!("Boot catalog hex dump:");
+    for i in (0..64).step_by(16) {
+        print!("{:04x}: ", i);
+        for j in 0..16 {
+            print!("{:02x} ", boot_catalog[i + j]);
+        }
+        println!();
     }
     Ok(())
 }
