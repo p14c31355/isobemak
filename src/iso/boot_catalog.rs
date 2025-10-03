@@ -43,24 +43,21 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
+    // Set Signature (must be done before checksum calculation)
+    val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
     // Clear checksum field before calculation (should be treated as 0)
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&0u16.to_le_bytes());
-
-    // Checksum calculation - must be done after all fields are set
+    // Checksum calculation - must be done after all other fields are set
     let mut sum: u16 = 0;
     for i in (0..32).step_by(2) {
         let word = u16::from_le_bytes([val[i], val[i + 1]]);
         sum = sum.wrapping_add(word);
     }
-
     // Calculate the checksum such that the sum of all 16 words is 0
     let checksum = 0u16.wrapping_sub(sum);
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
-
-    // Set Signature (must be done after checksum calculation)
-    val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
     catalog[offset..offset + 32].copy_from_slice(&val);
     offset += 32;
 
