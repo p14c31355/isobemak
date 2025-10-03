@@ -343,7 +343,10 @@ impl IsoBuilder {
                 ));
             }
             let uefi_boot_sectors = uefi_boot_sectors_u64 as u16;
-            println!("DEBUG: UEFI boot entry - LBA: {}, sectors: {}, size: {}", uefi_boot_lba, uefi_boot_sectors, uefi_boot_size);
+            println!(
+                "DEBUG: UEFI boot entry - LBA: {}, sectors: {}, size: {}",
+                uefi_boot_lba, uefi_boot_sectors, uefi_boot_size
+            );
             boot_entries.push(BootCatalogEntry {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: uefi_boot_lba,

@@ -1,9 +1,9 @@
 // tests/integration.rs
 use std::{
+    fs::File,
     io::{self, Error, ErrorKind, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::Command,
-    fs::File,
 };
 
 use isobemak::iso::builder::{IsoImageFile, build_iso};

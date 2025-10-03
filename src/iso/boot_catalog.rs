@@ -44,7 +44,8 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
     // Clear checksum field before calculation (should be treated as 0)
-    val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2].copy_from_slice(&0u16.to_le_bytes());
+    val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
+        .copy_from_slice(&0u16.to_le_bytes());
 
     // Checksum calculation - must be done after all fields are set
     let mut sum: u16 = 0;
