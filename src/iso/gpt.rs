@@ -118,6 +118,7 @@ impl GptPartitionEntry {
         starting_lba: u64,
         ending_lba: u64,
         partition_name: &str,
+        attributes: u64,
     ) -> Self {
         let partition_type_guid_bytes = Uuid::parse_str(partition_type_guid)
             .expect("Failed to parse partition type GUID")
@@ -136,7 +137,7 @@ impl GptPartitionEntry {
             unique_partition_guid: unique_partition_guid_bytes,
             starting_lba,
             ending_lba,
-            attributes: 0,
+            attributes,
             partition_name: name_bytes,
         }
     }
@@ -292,7 +293,7 @@ mod tests {
         let p_guid = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
         let u_guid = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
         let name = "EFI System Partition";
-        let entry = GptPartitionEntry::new(p_guid, u_guid, 34, 2048, name);
+        let entry = GptPartitionEntry::new(p_guid, u_guid, 34, 2048, name, 0);
 
         let starting_lba = entry.starting_lba;
         assert_eq!(starting_lba, 34);
@@ -320,6 +321,7 @@ mod tests {
             2048,
             4095,
             "Test Partition",
+            0,
         )];
 
         write_gpt_structures(&mut disk, total_lbas, &partitions)?;
