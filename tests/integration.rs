@@ -7,6 +7,8 @@ use std::{
 };
 
 use isobemak::iso::builder::{IsoImageFile, build_iso};
+use isobemak::iso::boot_catalog::LBA_BOOT_CATALOG;
+use isobemak::utils::ISO_SECTOR_SIZE; // If utils module is public
 use tempfile::tempdir;
 
 fn run_command(command: &str, args: &[&str]) -> io::Result<String> {

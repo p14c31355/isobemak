@@ -50,8 +50,8 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         .copy_from_slice(&0u16.to_le_bytes());
     // Checksum calculation - must be done after all other fields are set
     let mut sum: u16 = 0;
-    for i in (0..32).step_by(2) {
-        let word = u16::from_le_bytes([val[i], val[i + 1]]);
+    for chunk in val.chunks_exact(2) {
+        let word = u16::from_le_bytes(chunk.try_into().unwrap());
         sum = sum.wrapping_add(word);
     }
     // Calculate the checksum such that the sum of all 16 words is 0
