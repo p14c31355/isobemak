@@ -117,18 +117,17 @@ fn test_create_disk_and_iso() -> io::Result<()> {
         println!("Extraction failed, but listing succeeded");
     }
 
-    // Debug: Read and display boot catalog content
+    // Verify the boot catalog validation entry checksum
     let mut iso_file = File::open(iso_path)?;
     iso_file.seek(SeekFrom::Start(19 * 2048))?;
-    let mut boot_catalog = [0u8; 2048];
+    let mut boot_catalog = [0u8; 32]; // Only need the validation entry
     iso_file.read_exact(&mut boot_catalog)?;
-    println!("Boot catalog hex dump:");
-    for i in (0..64).step_by(16) {
-        print!("{:04x}: ", i);
-        for j in 0..16 {
-            print!("{:02x} ", boot_catalog[i + j]);
-        }
-        println!();
+
+    let mut sum: u16 = 0;
+    for chunk in boot_catalog.chunks_exact(2) {
+        sum = sum.wrapping_add(u16::from_le_bytes(chunk.try_into().unwrap()));
     }
+
+    assert_eq!(sum, 0, "Boot catalog validation entry checksum should be 0");
     Ok(())
 }
