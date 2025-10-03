@@ -6,8 +6,8 @@ use std::{
     process::Command,
 };
 
-use isobemak::iso::builder::{IsoImageFile, build_iso};
 use isobemak::iso::boot_catalog::LBA_BOOT_CATALOG;
+use isobemak::iso::builder::{IsoImageFile, build_iso};
 use isobemak::utils::ISO_SECTOR_SIZE; // If utils module is public
 use tempfile::tempdir;
 
@@ -121,7 +121,9 @@ fn test_create_disk_and_iso() -> io::Result<()> {
 
     // Verify the boot catalog validation entry checksum
     let mut iso_file = File::open(iso_path)?;
-    iso_file.seek(SeekFrom::Start(isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64 * 2048))?;
+    iso_file.seek(SeekFrom::Start(
+        isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64 * 2048,
+    ))?;
     let mut boot_catalog = [0u8; 32]; // Only need the validation entry
     iso_file.read_exact(&mut boot_catalog)?;
 
