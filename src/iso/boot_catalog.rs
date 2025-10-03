@@ -43,23 +43,17 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
-    // Set Bootoff (LBA of the boot catalog)
-    // LBA_BOOT_CATALOG is u32, but Bootoff field is 2 bytes.
-    // This location is immediately overwritten by the checksum calculation later in the function (lines 66-67),
-    // because BOOT_CATALOG_CHECKSUM_OFFSET is also defined as 28.
-    // If you intend to use a vendor-specific field here for Bootoff, you cannot also have a standard El Torito checksum at the same location.
-    // This logic needs to be revisited to either correctly place the Bootoff value or remove this conflicting write.
-    // For now, we remove this write to avoid conflict with the checksum.
-
-    // Set Signature
+    // Set Signature (must be done before checksum calculation)
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
-
-    // Checksum calculation
+    // Clear checksum field before calculation (should be treated as 0)
+    val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
+        .copy_from_slice(&0u16.to_le_bytes());
+    // Checksum calculation - must be done after all other fields are set
     let mut sum: u16 = 0;
-    for i in (0..32).step_by(2) {
-        sum = sum.wrapping_add(u16::from_le_bytes([val[i], val[i + 1]]));
+    for chunk in val.chunks_exact(2) {
+        let word = u16::from_le_bytes(chunk.try_into().unwrap());
+        sum = sum.wrapping_add(word);
     }
-
     // Calculate the checksum such that the sum of all 16 words is 0
     let checksum = 0u16.wrapping_sub(sum);
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]

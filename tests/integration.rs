@@ -1,6 +1,7 @@
 // tests/integration.rs
 use std::{
-    io::{self, Error, ErrorKind},
+    fs::File,
+    io::{self, Error, ErrorKind, Read, Seek, SeekFrom},
     path::{Path, PathBuf},
     process::Command,
 };
@@ -115,5 +116,20 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     } else {
         println!("Extraction failed, but listing succeeded");
     }
+
+    // Verify the boot catalog validation entry checksum
+    let mut iso_file = File::open(iso_path)?;
+    iso_file.seek(SeekFrom::Start(
+        isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64 * 2048,
+    ))?;
+    let mut boot_catalog = [0u8; 32]; // Only need the validation entry
+    iso_file.read_exact(&mut boot_catalog)?;
+
+    let mut sum: u16 = 0;
+    for chunk in boot_catalog.chunks_exact(2) {
+        sum = sum.wrapping_add(u16::from_le_bytes(chunk.try_into().unwrap()));
+    }
+
+    assert_eq!(sum, 0, "Boot catalog validation entry checksum should be 0");
     Ok(())
 }
