@@ -1,11 +1,18 @@
 // isobemak/src/fat.rs
-use crate::utils;
-use fatfs::{FatType, FileSystem, FormatVolumeOptions, FsOptions};
+use fatfs::{Dir, FatType, FileSystem, FormatVolumeOptions, FsOptions};
 use std::{
-    fs::OpenOptions,
+    fs::{self, OpenOptions},
     io::{self, Seek, Write},
     path::Path,
 };
+
+/// Copies a file into a directory within the FAT filesystem.
+fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> io::Result<()> {
+    let mut dest_file = fat_dir.create_file(dest_name)?;
+    let mut source_file = fs::File::open(source_path)?;
+    io::copy(&mut source_file, &mut dest_file)?;
+    Ok(())
+}
 
 /// Creates a FAT image file for UEFI boot and populates it with a loader and kernel.
 /// The image size and format (FAT16 or FAT32) are dynamically calculated.
@@ -70,16 +77,16 @@ pub fn create_fat_image(
     )?;
 
     // Open filesystem and create directories
-    let fs = FileSystem::new(&mut file, FsOptions::new())?;
+    let fs = FileSystem::new(file, FsOptions::new())?;
     let root_dir = fs.root_dir();
     let efi_dir = root_dir.create_dir("EFI")?;
     let boot_dir = efi_dir.create_dir("BOOT")?;
 
     // Copy the bootloader and kernel into the FAT filesystem
-    utils::copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
-    utils::copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
+    copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
+    copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
-    Ok(total_size as u32 / utils::ISO_SECTOR_SIZE as u32)
+    Ok(total_size as u32 / crate::utils::ISO_SECTOR_SIZE as u32)
 }
 
 #[cfg(test)]

@@ -1,87 +1,78 @@
-// isobemak/src/utils.rs
-use fatfs::{self};
-use std::{
-    fs::File,
-    io::{self, Read, Seek, SeekFrom, Write},
-    path::Path,
-};
+use std::fs::File;
+use std::io::{self, Seek, SeekFrom};
 
-/// The standard size of an ISO 9660 sector in bytes.
 pub const ISO_SECTOR_SIZE: usize = 2048;
 
-/// Pads the ISO file with zeros to align to a specific LBA (Logical Block Address).
-pub fn seek_and_pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
+pub fn seek_to_lba(file: &mut File, lba: u32) -> io::Result<u64> {
     let target_pos = lba as u64 * ISO_SECTOR_SIZE as u64;
-    let current_pos = iso.stream_position()?;
-    if current_pos < target_pos {
-        let padding_bytes = target_pos - current_pos;
-        io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
-    }
-    // Always seek to the target position to handle cases where current_pos > target_pos
-    // or to confirm position after padding.
-    iso.seek(SeekFrom::Start(target_pos))?;
-    Ok(())
+    file.seek(SeekFrom::Start(target_pos))
 }
 
-/// Copies a file from the host filesystem into a FAT directory.
-pub fn copy_to_fat<T: Read + Write + Seek>(
-    dir: &fatfs::Dir<T>,
-    src_path: &Path,
-    dest: &str,
-) -> io::Result<()> {
-    let mut src_file = File::open(src_path)?;
-    let mut f = dir.create_file(dest)?;
-    io::copy(&mut src_file, &mut f)?;
-    f.flush()?;
-    Ok(())
+/// Helper macro to create consistent IO errors
+#[macro_export]
+macro_rules! io_error {
+    ($kind:expr, $($arg:tt)*) => {
+        io::Error::new($kind, format!($($arg)*))
+    };
+}
+
+/// Helper macro to validate path components
+#[macro_export]
+macro_rules! ensure_path_component {
+    ($component:expr, $path:expr) => {
+        $component.as_os_str().to_str().ok_or_else(|| {
+            $crate::io_error!(
+                io::ErrorKind::InvalidInput,
+                "Invalid path component in {}: {:?}",
+                $path,
+                $component
+            )
+        })?
+    };
+}
+
+/// Helper macro to validate file sizes for boot catalog entries
+#[macro_export]
+macro_rules! ensure_boot_image_size_valid {
+    ($size:expr, $max_size:expr, $image_type:expr) => {
+        if $size > $max_size {
+            return Err($crate::io_error!(
+                io::ErrorKind::InvalidInput,
+                "{} image is too large for the boot catalog ({} > {})",
+                $image_type,
+                $size,
+                $max_size
+            ));
+        }
+    };
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use std::io::Cursor;
-    use tempfile::NamedTempFile;
+pub mod test_utils {
+    use std::fs;
+    use std::io::{self, Write};
+    use std::path::{Path, PathBuf};
 
-    #[test]
-    fn test_pad_to_lba() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let initial_content = b"hello";
-        temp_file.write_all(initial_content)?;
-
-        let mut file = temp_file.reopen()?;
-        seek_and_pad_to_lba(&mut file, 2)?;
-
-        let file_size = file.metadata()?.len();
-        assert_eq!(file_size, 2 * ISO_SECTOR_SIZE as u64);
-
-        Ok(())
+    /// Creates a dummy file with the specified size in a temporary directory.
+    pub fn create_dummy_file(temp_dir: &Path, name: &str, size_kb: usize) -> io::Result<PathBuf> {
+        let path = temp_dir.join(name);
+        let mut file = fs::File::create(&path)?;
+        file.write_all(&vec![0u8; size_kb * 1024])?;
+        Ok(path)
     }
 
-    #[test]
-    fn test_copy_to_fat() -> io::Result<()> {
-        // Create a dummy source file
-        let mut src_file = NamedTempFile::new()?;
-        let src_content = b"This is a test file.";
-        src_file.write_all(src_content)?;
-
-        // Create an in-memory FAT filesystem
-        let mut fat_image = vec![0; 512 * 1024]; // 512KB
-        let mut cursor = Cursor::new(fat_image.as_mut_slice());
-        fatfs::format_volume(&mut cursor, fatfs::FormatVolumeOptions::new())?;
-        let fs = fatfs::FileSystem::new(&mut cursor, fatfs::FsOptions::new())?;
-        let root_dir = fs.root_dir();
-
-        // Copy the file
-        let dest_filename = "test.txt";
-        copy_to_fat(&root_dir, src_file.path(), dest_filename)?;
-
-        // Verify the file exists and its content is correct
-        let mut dest_file = root_dir.open_file(dest_filename)?;
-        let mut dest_content = Vec::new();
-        dest_file.read_to_end(&mut dest_content)?;
-
-        assert_eq!(src_content, dest_content.as_slice());
-
-        Ok(())
+    /// A macro to simplify the creation of multiple dummy files.
+    #[macro_export]
+    macro_rules! create_dummy_files {
+        ($temp_dir:expr, $($name:expr => $size_kb:expr),*) => {
+            {
+                let mut paths = std::collections::HashMap::new();
+                $(
+                    let path = $crate::utils::test_utils::create_dummy_file($temp_dir, $name, $size_kb).unwrap();
+                    paths.insert($name.to_string(), path);
+                )*
+                paths
+            }
+        };
     }
 }

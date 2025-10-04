@@ -1,7 +1,7 @@
 // isobemak/src/iso/volume_descriptor.rs
 use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
-use crate::utils::{ISO_SECTOR_SIZE, seek_and_pad_to_lba};
+use crate::utils::{ISO_SECTOR_SIZE, seek_to_lba};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 
@@ -43,7 +43,7 @@ pub fn write_primary_volume_descriptor(
     total_sectors: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
-    seek_and_pad_to_lba(iso, 16)?;
+    seek_to_lba(iso, 16)?;
     let mut pvd = [0u8; ISO_SECTOR_SIZE];
     pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
     pvd[1..6].copy_from_slice(ISO_ID);
@@ -100,7 +100,7 @@ pub fn write_boot_record_volume_descriptor(
     iso: &mut File,
     boot_catalog_lba: u32,
 ) -> io::Result<()> {
-    seek_and_pad_to_lba(iso, 17)?;
+    seek_to_lba(iso, 17)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];
     brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
     brvd[1..6].copy_from_slice(ISO_ID);
@@ -113,7 +113,7 @@ pub fn write_boot_record_volume_descriptor(
 }
 
 pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
-    seek_and_pad_to_lba(iso, 18)?;
+    seek_to_lba(iso, 18)?;
     let mut term = [0u8; ISO_SECTOR_SIZE];
     term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
     term[1..6].copy_from_slice(ISO_ID);
