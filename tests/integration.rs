@@ -42,9 +42,8 @@ fn setup_integration_test_files(temp_dir: &Path) -> io::Result<(PathBuf, PathBuf
 
 #[test]
 fn test_create_disk_and_iso() -> io::Result<()> {
-    let temp_dir_path = PathBuf::from("/tmp/isobemak_test");
-    std::fs::create_dir_all(&temp_dir_path)?;
-
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
     println!("Temp dir: {:?}", &temp_dir_path);
 
     // Setup files and paths
