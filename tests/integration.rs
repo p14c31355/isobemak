@@ -80,6 +80,36 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     println!("isoinfo -d output:\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
 
+    // Verify Nsect value in the boot catalog
+    let mut iso_file_for_nsect_check = File::open(&iso_path)?;
+    let boot_catalog_start_pos = isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64
+        * isobemak::utils::ISO_SECTOR_SIZE as u64;
+    iso_file_for_nsect_check.seek(SeekFrom::Start(boot_catalog_start_pos))?;
+
+    let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
+    iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
+
+    // The first boot entry starts after the 32-byte validation entry.
+    // Nsect is at offset 6-7 within the boot entry.
+    let boot_entry_offset = 32; // Validation entry size
+    let nsect_offset_in_entry = 6;
+    let nsect_bytes_start = boot_entry_offset + nsect_offset_in_entry;
+
+    let nsect = u16::from_le_bytes([
+        boot_catalog_sector[nsect_bytes_start],
+        boot_catalog_sector[nsect_bytes_start + 1],
+    ]);
+
+    let efi_size = 64 * 1024; // BOOTX64.EFI size from setup_integration_test_files
+    const EL_TORITO_SECTOR_SIZE: u64 = 512;
+    let expected_sectors = (efi_size as u64).div_ceil(EL_TORITO_SECTOR_SIZE) as u16;
+
+    assert_eq!(
+        nsect, expected_sectors,
+        "Nsect value in boot catalog is incorrect"
+    );
+    println!("Verified Nsect: {} (expected: {})", nsect, expected_sectors);
+
     let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -l output:\n{}", isoinfo_l_output);
     assert!(isoinfo_l_output.contains("BOOTX64.EFI;1"));

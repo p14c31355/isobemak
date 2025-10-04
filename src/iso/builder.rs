@@ -343,7 +343,7 @@ impl IsoBuilder {
         // Add UEFI boot entry
         if self.is_isohybrid {
             if let (Some(esp_lba), Some(esp_size_sectors)) = (self.esp_lba, self.esp_size_sectors) {
-                let uefi_boot_sectors_u64 = esp_size_sectors as u64;
+                let uefi_boot_sectors_u64 = esp_size_sectors as u64; // Already in sectors, no division needed
                 if uefi_boot_sectors_u64 > u16::MAX as u64 {
                     return Err(io::Error::new(
                         io::ErrorKind::InvalidInput,
@@ -358,10 +358,13 @@ impl IsoBuilder {
                     bootable: true,
                 });
             }
-        } else if let Some(path) = &self.uefi_catalog_path {
-            let uefi_boot_lba = self.get_lba_for_path(path)?;
-            let uefi_boot_size = self.get_file_size_in_iso(path)?;
-            let uefi_boot_sectors_u64 = uefi_boot_size.div_ceil(512).max(1);
+        } else if let Some(boot_info) = &self.boot_info
+            && let Some(uefi_boot) = &boot_info.uefi_boot
+        {
+            let uefi_boot_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
+            let efi_loader_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
+            const EL_TORITO_SECTOR_SIZE: u64 = 512;
+            let uefi_boot_sectors_u64 = efi_loader_size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
             if uefi_boot_sectors_u64 > u16::MAX as u64 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
