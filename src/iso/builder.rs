@@ -12,8 +12,8 @@ use crate::utils::ISO_SECTOR_SIZE;
 // Import definitions from new modules
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
-    calculate_lbas, create_bios_boot_entry,
-    create_uefi_boot_entry, create_uefi_esp_boot_entry, get_file_metadata,
+    calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
+    get_file_metadata,
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
@@ -337,8 +337,8 @@ pub fn build_iso(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tempfile::NamedTempFile;
     use std::io::Write;
+    use tempfile::NamedTempFile;
 
     #[test]
     fn test_add_file() -> io::Result<()> {
