@@ -17,25 +17,23 @@ mod tests {
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;
 
+    use crate::create_dummy_files;
     /// Helper function to create dummy files and IsoImage for testing.
-    fn setup_iso_creation(
-        temp_dir: &Path,
-    ) -> io::Result<(IsoImage, PathBuf, PathBuf, PathBuf, PathBuf, PathBuf)> {
-        // Create dummy files
-        let isolinux_bin_path = temp_dir.join("isolinux.bin");
-        std::fs::write(&isolinux_bin_path, vec![0u8; 64 * 1024])?; // 64KB
+    fn setup_iso_creation(temp_dir: &Path) -> io::Result<IsoImage> {
+        let files = create_dummy_files!(
+            temp_dir,
+            "isolinux.bin" => 64,
+            "isolinux.cfg" => 1,
+            "BOOTX64.EFI" => 64,
+            "kernel" => 16,
+            "initrd.img" => 16
+        );
 
-        let isolinux_cfg_path = temp_dir.join("isolinux.cfg");
-        std::fs::write(&isolinux_cfg_path, vec![0u8; 1 * 1024])?; // 1KB
-
-        let bootx64_efi_path = temp_dir.join("BOOTX64.EFI");
-        std::fs::write(&bootx64_efi_path, vec![0u8; 64 * 1024])?; // 64KB
-
-        let kernel_path = temp_dir.join("kernel");
-        std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?; // 16KB
-
-        let initrd_img_path = temp_dir.join("initrd.img");
-        std::fs::write(&initrd_img_path, vec![0u8; 16 * 1024])?; // 16KB
+        let isolinux_bin_path = files.get("isolinux.bin").unwrap().clone();
+        let isolinux_cfg_path = files.get("isolinux.cfg").unwrap().clone();
+        let bootx64_efi_path = files.get("BOOTX64.EFI").unwrap().clone();
+        let kernel_path = files.get("kernel").unwrap().clone();
+        let initrd_img_path = files.get("initrd.img").unwrap().clone();
 
         // Create the IsoImage configuration
         let iso_image = IsoImage {
@@ -71,14 +69,7 @@ mod tests {
             },
         };
 
-        Ok((
-            iso_image,
-            isolinux_bin_path,
-            isolinux_cfg_path,
-            bootx64_efi_path,
-            kernel_path,
-            initrd_img_path,
-        ))
+        Ok(iso_image)
     }
 
     #[test]
@@ -86,7 +77,7 @@ mod tests {
         let temp_dir = tempdir()?;
         let iso_output_path = temp_dir.path().join("custom_boot.iso");
 
-        let (iso_image, ..) = setup_iso_creation(temp_dir.path())?;
+        let iso_image = setup_iso_creation(temp_dir.path())?;
 
         // Create the ISO
         build_iso(&iso_output_path, &iso_image, true)?;

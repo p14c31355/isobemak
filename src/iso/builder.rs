@@ -12,7 +12,7 @@ use crate::iso::boot_catalog::{
 };
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
-use crate::utils::{ISO_SECTOR_SIZE, seek_and_pad_to_lba};
+use crate::utils::{seek_to_lba, ISO_SECTOR_SIZE};
 
 /// Represents a file within the ISO filesystem.
 pub struct IsoFile {
@@ -407,7 +407,7 @@ impl IsoBuilder {
         dir: &IsoDirectory,
         parent_lba: u32,
     ) -> io::Result<()> {
-        seek_and_pad_to_lba(iso_file, dir.lba)?;
+        seek_to_lba(iso_file, dir.lba)?;
 
         let mut sorted_children: Vec<_> = dir.children.iter().collect();
         sorted_children.sort_by_key(|(name, _)| *name);
@@ -479,7 +479,7 @@ impl IsoBuilder {
         for (_, node) in sorted_children {
             match node {
                 IsoFsNode::File(file) => {
-                    seek_and_pad_to_lba(iso_file, file.lba)?;
+                    seek_to_lba(iso_file, file.lba)?;
                     let mut real_file = File::open(&file.path)?;
                     io::copy(&mut real_file, iso_file)?;
                 }
@@ -512,72 +512,59 @@ impl IsoBuilder {
 
     /// Helper to find the LBA for a given path in the ISO filesystem.
     fn get_lba_for_path(&self, path: &str) -> io::Result<u32> {
-        let mut current_dir = &self.root;
-        let components: Vec<_> = Path::new(path).components().collect();
-
-        for component in components.iter().take(components.len() - 1) {
-            let component_name = component.as_os_str().to_str().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
-            })?;
-            match current_dir.children.get(component_name) {
-                Some(IsoFsNode::Directory(dir)) => current_dir = dir,
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("Directory not found: {}", path),
-                    ));
-                }
-            }
-        }
-
-        let file_name = Path::new(path)
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
-            .to_str()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
-
-        match current_dir.children.get(file_name) {
-            Some(IsoFsNode::File(file)) => Ok(file.lba),
-            _ => Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("File not found: {}", path),
+        match self.get_node_for_path(path)? {
+            IsoFsNode::File(file) => Ok(file.lba),
+            IsoFsNode::Directory(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Path is a directory, not a file: {}", path),
             )),
         }
     }
 
     /// Helper to find the size for a given path in the ISO filesystem.
     fn get_file_size_in_iso(&self, path: &str) -> io::Result<u64> {
-        let mut current_dir = &self.root;
+        match self.get_node_for_path(path)? {
+            IsoFsNode::File(file) => Ok(file.size),
+            IsoFsNode::Directory(_) => Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!("Path is a directory, not a file: {}", path),
+            )),
+        }
+    }
+
+    /// Helper to find the IsoFsNode for a given path in the ISO filesystem.
+    fn get_node_for_path(&self, path: &str) -> io::Result<&IsoFsNode> {
+        let mut current_node = &self.root;
         let components: Vec<_> = Path::new(path).components().collect();
 
-        for component in components.iter().take(components.len() - 1) {
+        for (i, component) in components.iter().enumerate() {
             let component_name = component.as_os_str().to_str().ok_or_else(|| {
                 io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
             })?;
-            match current_dir.children.get(component_name) {
-                Some(IsoFsNode::Directory(dir)) => current_dir = dir,
-                _ => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::NotFound,
-                        format!("Directory not found: {}", path),
-                    ));
+
+            if i == components.len() - 1 {
+                // Last component, this is the target node
+                return current_node.children.get(component_name).ok_or_else(|| {
+                    io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path))
+                });
+            } else {
+                // Intermediate component, must be a directory
+                match current_node.children.get(component_name) {
+                    Some(IsoFsNode::Directory(dir)) => current_node = dir,
+                    _ => {
+                        return Err(io::Error::new(
+                            io::ErrorKind::NotFound,
+                            format!("Directory not found in path: {}", path),
+                        ));
+                    }
                 }
             }
         }
-
-        let file_name = Path::new(path)
-            .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
-            .to_str()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?;
-
-        match current_dir.children.get(file_name) {
-            Some(IsoFsNode::File(file)) => Ok(file.size),
-            _ => Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("File not found: {}", path),
-            )),
-        }
+        // This part should be unreachable if components is not empty
+        Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("Path not found: {}", path),
+        ))
     }
 }
 
