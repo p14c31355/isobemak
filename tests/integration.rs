@@ -80,17 +80,30 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     println!("isoinfo -d output:\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
 
-    // Extract Nsect from isoinfo -d output for the EFI boot entry
-    let nsect_regex = regex::Regex::new(r"Nsect (\d+)").unwrap();
-    let nsect_match = nsect_regex.captures(&isoinfo_d_output).expect("Nsect not found in isoinfo -d output");
-    let nsect_value: u16 = nsect_match[1].parse().expect("Failed to parse Nsect value");
+    // Verify Nsect value in the boot catalog
+    let mut iso_file_for_nsect_check = File::open(&iso_path)?;
+    let boot_catalog_start_pos = isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64 * isobemak::utils::ISO_SECTOR_SIZE as u64;
+    iso_file_for_nsect_check.seek(SeekFrom::Start(boot_catalog_start_pos))?;
 
-    // BOOTX64.EFI is 64 * 1024 bytes = 65536 bytes.
-    // El Torito boot catalog Nsect value is in 512-byte sectors.
-    // El Torito boot catalog Nsect value is in 512-byte sectors.
-    // Based on the file size (65536 bytes), the expected Nsect should be 128 (65536 / 512).
-    // However, `isoinfo -d` reports 80. We align the test with `isoinfo`'s output for now.
-    assert_eq!(nsect_value, 80, "Nsect value in boot catalog is incorrect");
+    let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
+    iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
+
+    // The first boot entry starts after the 32-byte validation entry.
+    // Nsect is at offset 6-7 within the boot entry.
+    let boot_entry_offset = 32; // Validation entry size
+    let nsect_offset_in_entry = 6;
+    let nsect_bytes_start = boot_entry_offset + nsect_offset_in_entry;
+
+    let nsect = u16::from_le_bytes([
+        boot_catalog_sector[nsect_bytes_start],
+        boot_catalog_sector[nsect_bytes_start + 1],
+    ]);
+
+    let efi_size = 64 * 1024; // BOOTX64.EFI size from setup_integration_test_files
+    let expected_sectors = ((efi_size as u64 + isobemak::utils::ISO_SECTOR_SIZE as u64 - 1) / isobemak::utils::ISO_SECTOR_SIZE as u64) as u16;
+
+    assert_eq!(nsect, expected_sectors, "Nsect value in boot catalog is incorrect");
+    println!("Verified Nsect: {} (expected: {})", nsect, expected_sectors);
 
     let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -l output:\n{}", isoinfo_l_output);
