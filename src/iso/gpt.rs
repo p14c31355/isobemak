@@ -3,6 +3,8 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 use uuid::Uuid;
 
+use crate::iso::ESP_START_LBA;
+
 pub const EFI_SYSTEM_PARTITION_GUID: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 
 // GPT Header structure
@@ -44,9 +46,9 @@ impl GptHeader {
             _reserved0: 0,
             current_lba: 1, // LBA
             backup_lba: total_lbas - 1,
-            first_usable_lba: 34, // MBR (1) + GPT Header (1) + Partition Array (32)
-            last_usable_lba: total_lbas.saturating_sub(34), // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
-            disk_guid: disk_guid_bytes,
+            first_usable_lba: ESP_START_LBA as u64, // MBR (1) + GPT Header (1) + Partition Array (32)
+            last_usable_lba: total_lbas.saturating_sub(ESP_START_LBA as u64), // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
+            disk_guid: disk_guid_uuid.into_bytes(),
             partition_entry_lba,
             num_partition_entries,
             partition_entry_size,
@@ -285,7 +287,7 @@ mod tests {
         let backup_lba = header.backup_lba;
         assert_eq!(backup_lba, total_lbas - 1);
         let first_usable = header.first_usable_lba;
-        assert_eq!(first_usable, 34);
+        assert_eq!(first_usable, ESP_START_LBA as u64);
     }
 
     #[test]
@@ -293,10 +295,10 @@ mod tests {
         let p_guid = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
         let u_guid = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
         let name = "EFI System Partition";
-        let entry = GptPartitionEntry::new(p_guid, u_guid, 34, 2048, name, 0);
+        let entry = GptPartitionEntry::new(p_guid, u_guid, ESP_START_LBA as u64, 2048, name, 0);
 
         let starting_lba = entry.starting_lba;
-        assert_eq!(starting_lba, 34);
+        assert_eq!(starting_lba, ESP_START_LBA as u64);
         let ending_lba = entry.ending_lba;
         assert_eq!(ending_lba, 2048);
 
