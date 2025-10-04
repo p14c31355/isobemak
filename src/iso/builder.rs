@@ -5,20 +5,19 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
+use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
 use crate::iso::constants::ESP_START_LBA; // Import ESP_START_LBA from constants
-use crate::iso::boot_catalog::{
-    BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, write_boot_catalog,
-};
-use crate::iso::dir_record::IsoDirEntry;
-use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
-use crate::utils::{seek_to_lba, ISO_SECTOR_SIZE};
+use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
-use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::boot_info::BootInfo;
+use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
+use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
+use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
 use crate::iso::iso_image::IsoImage;
 use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
-
+use crate::iso::builder_utils::{calculate_lbas, get_lba_for_path, get_file_size_in_iso};
+use crate::iso::iso_writer::{write_descriptors, write_boot_catalog_to_iso, write_directories, copy_files, finalize_iso};
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
@@ -161,113 +160,20 @@ impl IsoBuilder {
         ))?;
 
         // Calculate LBAs for all files and directories. This also updates self.current_lba to the end of the filesystem data.
-        IsoBuilder::calculate_lbas(&mut self.current_lba, &mut self.root)?;
+        calculate_lbas(&mut self.current_lba, &mut self.root)?;
 
         // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
         // Pass the calculated end of filesystem data as a preliminary total_sectors.
         // This will be correctly updated by finalize later. The VDs are at fixed locations.
-        self.write_descriptors(&mut iso_file, self.current_lba)?;
-        self.write_boot_catalog(&mut iso_file, boot_catalog_lba)?;
-
-        // Write directory records and copy file contents.
-        self.write_directories(&mut iso_file, &self.root, self.root.lba)?;
-        self.copy_files(&mut iso_file, &self.root)?;
-
-        // Finalize the ISO by padding and updating the total sector count in the PVD
-        self.finalize(&mut iso_file)?;
-
-        // If not isohybrid, clear the initial reserved sectors (MBR area).
-
-        // Now that total_sectors is known, write MBR and GPT structures if hybrid
-        let total_lbas = self.total_sectors as u64;
-
-        if self.is_isohybrid {
-            // GPT structures require at least 69 LBAs (1 MBR + 1 GPT Header + 32 Partition Entries + 1 Backup GPT Header + 32 Backup Partition Entries + 2 for safety)
-            if total_lbas < 69 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
-                        total_lbas
-                    ),
-                ));
-            }
-
-            // Write MBR
-            iso_file.seek(SeekFrom::Start(0))?;
-            let mbr =
-                create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
-            mbr.write_to(&mut iso_file)?;
-
-            // Write GPT structures if esp_size_sectors > 0
-            if let Some(esp_size_sectors_val) = esp_size_sectors {
-                if esp_size_sectors_val > 0 {
-                    let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
-                    let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
-
-                    let esp_guid_str = crate::iso::gpt::EFI_SYSTEM_PARTITION_GUID;
-                    let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
-                    let partitions = vec![crate::iso::gpt::GptPartitionEntry::new(
-                        esp_guid_str,
-                        &esp_unique_guid_str,
-                        esp_partition_start_lba as u64,
-                        esp_partition_end_lba as u64,
-                        "EFI System Partition",
-                        0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
-                    )];
-                    crate::iso::gpt::write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
-                }
-            }
-        }
-
-        Ok(())
-    }
-
-    /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
-    fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
-        dir.lba = *current_lba;
-        *current_lba += 1;
-
-        let mut sorted_children: Vec<_> = dir.children.iter_mut().collect();
-        sorted_children.sort_by_key(|(name, _)| *name);
-
-        for (_, node) in sorted_children {
-            match node {
-                IsoFsNode::File(file) => {
-                    file.lba = *current_lba;
-                    let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-                    *current_lba += sectors;
-                }
-                IsoFsNode::Directory(subdir) => {
-                    IsoBuilder::calculate_lbas(current_lba, subdir)?;
-                }
-            }
-        }
-        Ok(())
-    }
-
-    /// Writes all ISO volume descriptors.
-    fn write_descriptors(&self, iso_file: &mut File, total_sectors: u32) -> io::Result<()> {
-        let root_entry = IsoDirEntry {
-            lba: self.root.lba,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        };
-        // Pass total_sectors to write_volume_descriptors. This will be updated in finalize if needed.
-        write_volume_descriptors(iso_file, total_sectors, &root_entry)
-    }
-
-    /// Writes the El Torito boot catalog.
-    fn write_boot_catalog(&self, iso_file: &mut File, boot_catalog_lba: u32) -> io::Result<()> {
+        write_descriptors(&mut iso_file, self.root.lba, self.current_lba)?;
+        
         let mut boot_entries = Vec::new();
-
         // Add BIOS boot entry
         if let Some(boot_info) = &self.boot_info
             && let Some(bios_boot) = &boot_info.bios_boot
         {
-            let bios_boot_lba = self.get_lba_for_path(&bios_boot.destination_in_iso)?;
-            let bios_boot_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
+            let bios_boot_lba = get_lba_for_path(&self.root, &bios_boot.destination_in_iso)?;
+            let bios_boot_size = get_file_size_in_iso(&self.root, &bios_boot.destination_in_iso)?;
             let bios_boot_sectors_u64 = bios_boot_size.div_ceil(512).max(1);
             if bios_boot_sectors_u64 > u16::MAX as u64 {
                 return Err(io::Error::new(
@@ -305,8 +211,8 @@ impl IsoBuilder {
         } else if let Some(boot_info) = &self.boot_info
             && let Some(uefi_boot) = &boot_info.uefi_boot
         {
-            let uefi_boot_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
-            let efi_loader_size = self.get_file_size_in_iso(&uefi_boot.destination_in_iso)?;
+            let uefi_boot_lba = get_lba_for_path(&self.root, &uefi_boot.destination_in_iso)?;
+            let efi_loader_size = get_file_size_in_iso(&self.root, &uefi_boot.destination_in_iso)?;
             const EL_TORITO_SECTOR_SIZE: u64 = 512;
             let uefi_boot_sectors_u64 = efi_loader_size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
             if uefi_boot_sectors_u64 > u16::MAX as u64 {
@@ -323,183 +229,59 @@ impl IsoBuilder {
                 bootable: true,
             });
         }
+        write_boot_catalog_to_iso(&mut iso_file, boot_catalog_lba, boot_entries)?;
 
-        if !boot_entries.is_empty() {
-            // Seek to the correct LBA before writing the boot catalog
-            iso_file.seek(SeekFrom::Start(
-                (boot_catalog_lba as u64) * ISO_SECTOR_SIZE as u64,
-            ))?;
-            write_boot_catalog(iso_file, boot_entries)?;
-        }
+        // Write directory records and copy file contents.
+        write_directories(&mut iso_file, &self.root, self.root.lba)?;
+        copy_files(&mut iso_file, &self.root)?;
 
-        Ok(())
-    }
+        // Finalize the ISO by padding and updating the total sector count in the PVD
+        finalize_iso(&mut iso_file, &mut self.total_sectors)?;
 
-    /// Writes the directory records for the ISO filesystem.
-    fn write_directories(
-        &self,
-        iso_file: &mut File,
-        dir: &IsoDirectory,
-        parent_lba: u32,
-    ) -> io::Result<()> {
-        seek_to_lba(iso_file, dir.lba)?;
+        // If not isohybrid, clear the initial reserved sectors (MBR area).
 
-        let mut sorted_children: Vec<_> = dir.children.iter().collect();
-        sorted_children.sort_by_key(|(name, _)| *name);
+        // Now that total_sectors is known, write MBR and GPT structures if hybrid
+        let total_lbas = self.total_sectors as u64;
 
-        let mut dir_entries = Vec::new();
-        // Self-reference
-        dir_entries.push(IsoDirEntry {
-            lba: dir.lba,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: ".",
-        });
-        // Parent directory
-        dir_entries.push(IsoDirEntry {
-            lba: parent_lba,
-            size: ISO_SECTOR_SIZE as u32,
-            flags: 0x02,
-            name: "..",
-        });
-
-        for (name, node) in &sorted_children {
-            let (lba, size, flags) = match node {
-                IsoFsNode::File(file) => {
-                    let file_size_u32 = u32::try_from(file.size).map_err(|_| {
-                        io::Error::new(
-                            io::ErrorKind::InvalidInput,
-                            format!(
-                                "File '{}' is too large for ISO9660 (exceeds u32::MAX bytes)",
-                                name
-                            ),
-                        )
-                    })?;
-                    (file.lba, file_size_u32, 0x00)
-                }
-                IsoFsNode::Directory(subdir) => (subdir.lba, ISO_SECTOR_SIZE as u32, 0x02),
-            };
-            dir_entries.push(IsoDirEntry {
-                lba,
-                size,
-                flags,
-                name: name.as_str(),
-            });
-        }
-
-        let mut dir_sector = [0u8; ISO_SECTOR_SIZE];
-        let mut offset = 0;
-
-        for entry in &dir_entries {
-            let entry_bytes = entry.to_bytes();
-            dir_sector[offset..offset + entry_bytes.len()].copy_from_slice(&entry_bytes);
-            offset += entry_bytes.len();
-        }
-        iso_file.write_all(&dir_sector)?;
-
-        for (_, node) in sorted_children {
-            if let IsoFsNode::Directory(subdir) = node {
-                self.write_directories(iso_file, subdir, dir.lba)?;
+        if self.is_isohybrid {
+            // GPT structures require at least 69 LBAs (1 MBR + 1 GPT Header + 32 Partition Entries + 1 Backup GPT Header + 32 Backup Partition Entries + 2 for safety)
+            if total_lbas < 69 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
+                        total_lbas
+                    ),
+                ));
             }
-        }
 
-        Ok(())
-    }
+            // Write MBR
+            iso_file.seek(SeekFrom::Start(0))?;
+            let mbr = create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+            mbr.write_to(&mut iso_file)?;
 
-    /// Copies all file contents to the ISO image.
-    fn copy_files(&self, iso_file: &mut File, dir: &IsoDirectory) -> io::Result<()> {
-        let mut sorted_children: Vec<_> = dir.children.iter().collect();
-        sorted_children.sort_by_key(|(name, _)| *name);
+            // Write GPT structures if esp_size_sectors > 0
+            if let Some(esp_size_sectors_val) = esp_size_sectors {
+                if esp_size_sectors_val > 0 {
+                    let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
+                    let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
 
-        for (_, node) in sorted_children {
-            match node {
-                IsoFsNode::File(file) => {
-                    seek_to_lba(iso_file, file.lba)?;
-                    let mut real_file = File::open(&file.path)?;
-                    io::copy(&mut real_file, iso_file)?;
-                }
-                IsoFsNode::Directory(subdir) => {
-                    self.copy_files(iso_file, subdir)?;
+                    let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
+                    let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
+                    let partitions = vec![GptPartitionEntry::new(
+                        esp_guid_str,
+                        &esp_unique_guid_str,
+                        esp_partition_start_lba as u64,
+                        esp_partition_end_lba as u64,
+                        "EFI System Partition",
+                        0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
+                    )];
+                    write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
                 }
             }
         }
 
         Ok(())
-    }
-
-    /// Finalizes the ISO image by padding and updating the total sector count in the PVD.
-    fn finalize(&mut self, iso_file: &mut File) -> io::Result<()> {
-        let current_pos = iso_file.stream_position()?;
-        let remainder = current_pos % ISO_SECTOR_SIZE as u64;
-        if remainder != 0 {
-            let padding_bytes = ISO_SECTOR_SIZE as u64 - remainder;
-            io::copy(&mut io::repeat(0).take(padding_bytes), iso_file)?;
-        }
-
-        let final_pos = iso_file.stream_position()?;
-        let total_sectors_u64 = final_pos.div_ceil(ISO_SECTOR_SIZE as u64);
-        self.total_sectors = u32::try_from(total_sectors_u64)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "ISO image too large"))?;
-        update_total_sectors_in_pvd(iso_file, self.total_sectors)?;
-
-        Ok(())
-    }
-
-    /// Helper to find the LBA for a given path in the ISO filesystem.
-    fn get_lba_for_path(&self, path: &str) -> io::Result<u32> {
-        match self.get_node_for_path(path)? {
-            IsoFsNode::File(file) => Ok(file.lba),
-            IsoFsNode::Directory(_) => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("Path is a directory, not a file: {}", path),
-            )),
-        }
-    }
-
-    /// Helper to find the size for a given path in the ISO filesystem.
-    fn get_file_size_in_iso(&self, path: &str) -> io::Result<u64> {
-        match self.get_node_for_path(path)? {
-            IsoFsNode::File(file) => Ok(file.size),
-            IsoFsNode::Directory(_) => Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!("Path is a directory, not a file: {}", path),
-            )),
-        }
-    }
-
-    /// Helper to find the IsoFsNode for a given path in the ISO filesystem.
-    fn get_node_for_path(&self, path: &str) -> io::Result<&IsoFsNode> {
-        let mut current_node = &self.root;
-        let components: Vec<_> = Path::new(path).components().collect();
-
-        for (i, component) in components.iter().enumerate() {
-            let component_name = component.as_os_str().to_str().ok_or_else(|| {
-                io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
-            })?;
-
-            if i == components.len() - 1 {
-                // Last component, this is the target node
-                return current_node.children.get(component_name).ok_or_else(|| {
-                    io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path))
-                });
-            } else {
-                // Intermediate component, must be a directory
-                match current_node.children.get(component_name) {
-                    Some(IsoFsNode::Directory(dir)) => current_node = dir,
-                    _ => {
-                        return Err(io::Error::new(
-                            io::ErrorKind::NotFound,
-                            format!("Directory not found in path: {}", path),
-                        ));
-                    }
-                }
-            }
-        }
-        // This part should be unreachable if components is not empty
-        Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Path not found: {}", path),
-        ))
     }
 }
 
@@ -567,7 +349,9 @@ pub fn build_iso(
     // Return the path to the FAT image if it was created, and the holder to keep it alive
     if is_isohybrid {
         Ok((
-            temp_fat_file_holder.as_ref().map(|f| f.path().to_path_buf()),
+            temp_fat_file_holder
+                .as_ref()
+                .map(|f| f.path().to_path_buf()),
             temp_fat_file_holder,
         ))
     } else {
@@ -626,7 +410,7 @@ mod tests {
         root.children
             .insert("subdir".to_string(), IsoFsNode::Directory(subdir));
 
-        IsoBuilder::calculate_lbas(&mut current_lba, &mut root)?;
+        calculate_lbas(&mut current_lba, &mut root)?;
 
         // Expected LBA assignments:
         // root: 20
@@ -666,17 +450,17 @@ mod tests {
 
         builder.add_file("A/B/C.txt", temp_path)?;
         builder.current_lba = 20;
-        IsoBuilder::calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
+        calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
 
-        let lba = builder.get_lba_for_path("A/B/C.txt")?;
-        let size = builder.get_file_size_in_iso("A/B/C.txt")?;
+        let lba = get_lba_for_path(&builder.root, "A/B/C.txt")?;
+        let size = get_file_size_in_iso(&builder.root, "A/B/C.txt")?;
 
         // root dir: 20, A: 21, B: 22, C.txt: 23
         assert_eq!(lba, 23);
         assert_eq!(size, 9);
 
         // Test not found
-        assert!(builder.get_lba_for_path("A/D.txt").is_err());
+        assert!(get_lba_for_path(&builder.root, "A/D.txt").is_err());
 
         Ok(())
     }
