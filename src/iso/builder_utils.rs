@@ -1,7 +1,6 @@
 use std::io::{self};
 use std::path::Path;
 
-#[macro_use]
 use crate::io_error;
 use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
