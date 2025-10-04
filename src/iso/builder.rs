@@ -6,12 +6,12 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
+use crate::iso::ESP_START_LBA;
 use crate::iso::boot_catalog::{
     BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, write_boot_catalog,
 };
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
-use crate::iso::ESP_START_LBA;
 use crate::utils::{ISO_SECTOR_SIZE, seek_and_pad_to_lba};
 
 /// Represents a file within the ISO filesystem.
@@ -191,7 +191,11 @@ impl IsoBuilder {
 
         // Placeholder for MBR and GPT structures.
         // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
-        let reserved_sectors = if self.is_isohybrid { ESP_START_LBA } else { 16u32 };
+        let reserved_sectors = if self.is_isohybrid {
+            ESP_START_LBA
+        } else {
+            16u32
+        };
         let data_start_lba = reserved_sectors;
 
         // Set current_lba to the start of filesystem data after VDs and catalog
