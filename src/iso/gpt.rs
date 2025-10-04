@@ -3,7 +3,7 @@ use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 use uuid::Uuid;
 
-use crate::iso::ESP_START_LBA;
+use crate::iso::constants::ESP_START_LBA;
 
 pub const EFI_SYSTEM_PARTITION_GUID: &str = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
 

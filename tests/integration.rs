@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-use isobemak::iso::builder::{IsoImageFile, build_iso};
+use isobemak::{IsoImageFile, IsoImage, BootInfo, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 fn run_command(command: &str, args: &[&str]) -> io::Result<String> {
@@ -49,7 +49,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     // Setup files and paths
     let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(&temp_dir_path)?;
 
-    let iso_image = isobemak::iso::builder::IsoImage {
+    let iso_image = IsoImage {
         files: vec![
             IsoImageFile {
                 source: bootx64_path.clone(),
@@ -60,9 +60,9 @@ fn test_create_disk_and_iso() -> io::Result<()> {
                 destination: "EFI/BOOT/KERNEL.EFI".to_string(),
             },
         ],
-        boot_info: isobemak::iso::builder::BootInfo {
+        boot_info: BootInfo {
             bios_boot: None, // Not testing BIOS boot in this specific test
-            uefi_boot: Some(isobemak::iso::builder::UefiBootInfo {
+            uefi_boot: Some(UefiBootInfo {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
@@ -177,7 +177,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     // Setup files and paths
     let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(&temp_dir_path)?;
 
-    let iso_image = isobemak::iso::builder::IsoImage {
+    let iso_image = IsoImage {
         files: vec![
             IsoImageFile {
                 source: bootx64_path.clone(),
@@ -188,9 +188,9 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
                 destination: "EFI/BOOT/KERNEL.EFI".to_string(),
             },
         ],
-        boot_info: isobemak::iso::builder::BootInfo {
+        boot_info: BootInfo {
             bios_boot: None,
-            uefi_boot: Some(isobemak::iso::builder::UefiBootInfo {
+            uefi_boot: Some(UefiBootInfo {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
@@ -241,7 +241,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     );
     assert_eq!(
         uefi_boot_lba,
-        isobemak::iso::ESP_START_LBA,
+        isobemak::ESP_START_LBA,
         "UEFI boot LBA in boot catalog is incorrect"
     );
 

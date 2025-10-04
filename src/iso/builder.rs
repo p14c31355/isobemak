@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -6,7 +5,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::ESP_START_LBA;
+use crate::iso::constants::ESP_START_LBA; // Import ESP_START_LBA from constants
 use crate::iso::boot_catalog::{
     BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, write_boot_catalog,
 };
@@ -14,76 +13,12 @@ use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
 use crate::utils::{seek_to_lba, ISO_SECTOR_SIZE};
 
-/// Represents a file within the ISO filesystem.
-pub struct IsoFile {
-    pub path: PathBuf,
-    pub size: u64,
-    pub lba: u32,
-}
+// Import definitions from new modules
+use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
+use crate::iso::boot_info::BootInfo;
+use crate::iso::iso_image::IsoImage;
+use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
 
-/// Represents a directory within the ISO filesystem.
-pub struct IsoDirectory {
-    pub children: HashMap<String, IsoFsNode>,
-    pub lba: u32,
-    pub size: u32,
-}
-
-impl Default for IsoDirectory {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl IsoDirectory {
-    pub fn new() -> Self {
-        Self {
-            children: HashMap::new(),
-            lba: 0,
-            size: ISO_SECTOR_SIZE as u32,
-        }
-    }
-}
-
-/// A node in the ISO filesystem tree, either a file or a directory.
-pub enum IsoFsNode {
-    File(IsoFile),
-    Directory(IsoDirectory),
-}
-
-/// Configuration for a file to be added to the ISO.
-pub struct IsoImageFile {
-    pub source: PathBuf,
-    pub destination: String,
-}
-
-/// Configuration for the entire ISO image to be built.
-pub struct IsoImage {
-    pub files: Vec<IsoImageFile>,
-    pub boot_info: BootInfo,
-}
-
-/// High-level boot information for the ISO.
-#[derive(Clone)]
-pub struct BootInfo {
-    pub bios_boot: Option<BiosBootInfo>,
-    pub uefi_boot: Option<UefiBootInfo>,
-}
-
-/// Configuration for BIOS boot (El Torito).
-#[derive(Clone)]
-pub struct BiosBootInfo {
-    pub boot_catalog: PathBuf,
-    pub boot_image: PathBuf,
-    pub destination_in_iso: String,
-}
-
-/// Configuration for UEFI boot.
-#[derive(Clone)]
-pub struct UefiBootInfo {
-    pub boot_image: PathBuf,
-    pub kernel_image: PathBuf,
-    pub destination_in_iso: String,
-}
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
@@ -261,7 +196,7 @@ impl IsoBuilder {
             // Write MBR
             iso_file.seek(SeekFrom::Start(0))?;
             let mbr =
-                crate::iso::mbr::create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+                create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
             mbr.write_to(&mut iso_file)?;
 
             // Write GPT structures if esp_size_sectors > 0
