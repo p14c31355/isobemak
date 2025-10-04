@@ -1,19 +1,19 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self, Seek, SeekFrom}; // Keep Write for NamedTempFile in tests
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::io_error;
+use crate::io_error; // Macro from crate root
 use crate::iso::constants::ESP_START_LBA;
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
-    calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
-    get_file_metadata,
+    calculate_lbas, create_bios_boot_entry,
+    create_uefi_boot_entry, create_uefi_esp_boot_entry, get_file_metadata,
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
@@ -338,6 +338,7 @@ pub fn build_iso(
 mod tests {
     use super::*;
     use tempfile::NamedTempFile;
+    use std::io::Write;
 
     #[test]
     fn test_add_file() -> io::Result<()> {
@@ -427,15 +428,15 @@ mod tests {
         builder.current_lba = 20;
         calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
 
-        let lba = get_lba_for_path(&builder.root, "A/B/C.txt")?;
-        let size = get_file_size_in_iso(&builder.root, "A/B/C.txt")?;
+        let lba = crate::iso::builder_utils::get_lba_for_path(&builder.root, "A/B/C.txt")?;
+        let size = crate::iso::builder_utils::get_file_size_in_iso(&builder.root, "A/B/C.txt")?;
 
         // root dir: 20, A: 21, B: 22, C.txt: 23
         assert_eq!(lba, 23);
         assert_eq!(size, 9);
 
         // Test not found
-        assert!(get_lba_for_path(&builder.root, "A/D.txt").is_err());
+        assert!(crate::iso::builder_utils::get_lba_for_path(&builder.root, "A/D.txt").is_err());
 
         Ok(())
     }

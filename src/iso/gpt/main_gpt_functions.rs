@@ -141,6 +141,8 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
 #[cfg(test)]
 mod tests {
+    use crate::{ESP_START_LBA, iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID};
+
     use super::*;
     use std::io::Cursor;
 

@@ -40,14 +40,6 @@ pub enum IsoFsNode {
 }
 
 impl IsoFsNode {
-    /// Returns the name of the node.
-    pub fn name(&self) -> String {
-        match self {
-            IsoFsNode::File(file) => file.path.file_name().unwrap().to_str().unwrap().to_string(),
-            IsoFsNode::Directory(dir) => dir.children.get(".").unwrap().name(), // This is a bit of a hack, assuming "." is always present and is the directory name
-        }
-    }
-
     /// Returns the LBA of the node.
     pub fn lba(&self) -> u32 {
         match self {
