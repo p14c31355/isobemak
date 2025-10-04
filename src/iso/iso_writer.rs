@@ -5,7 +5,7 @@ use crate::iso::boot_catalog::{BootCatalogEntry, write_boot_catalog};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
-use crate::utils::{seek_to_lba, ISO_SECTOR_SIZE};
+use crate::utils::{ISO_SECTOR_SIZE, seek_to_lba};
 
 /// Writes all ISO volume descriptors.
 pub fn write_descriptors(iso_file: &mut File, root_lba: u32, total_sectors: u32) -> io::Result<()> {

@@ -1,25 +1,28 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::{io_error};
-use crate::utils::ISO_SECTOR_SIZE;
+use crate::io_error;
 use crate::iso::constants::ESP_START_LBA;
+use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
 use crate::iso::boot_info::BootInfo;
+use crate::iso::builder_utils::{
+    calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
+    get_file_metadata,
+};
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
 use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
 use crate::iso::iso_image::IsoImage;
-use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
-use crate::iso::builder_utils::{
-    calculate_lbas, get_lba_for_path, get_file_size_in_iso, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry, get_file_metadata
+use crate::iso::iso_writer::{
+    copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
-use crate::iso::iso_writer::{write_descriptors, write_boot_catalog_to_iso, write_directories, copy_files, finalize_iso};
+use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
@@ -175,14 +178,17 @@ impl IsoBuilder {
         // Pass the calculated end of filesystem data as a preliminary total_sectors.
         // This will be correctly updated by finalize later. The VDs are at fixed locations.
         write_descriptors(&mut iso_file, self.root.lba, self.current_lba)?;
-        
+
         let mut boot_entries = Vec::new();
-        
+
         // Add BIOS boot entry
         if let Some(boot_info) = &self.boot_info
             && let Some(bios_boot) = &boot_info.bios_boot
         {
-            boot_entries.push(create_bios_boot_entry(&self.root, &bios_boot.destination_in_iso)?);
+            boot_entries.push(create_bios_boot_entry(
+                &self.root,
+                &bios_boot.destination_in_iso,
+            )?);
         }
 
         // Add UEFI boot entry
@@ -193,7 +199,10 @@ impl IsoBuilder {
         } else if let Some(boot_info) = &self.boot_info
             && let Some(uefi_boot) = &boot_info.uefi_boot
         {
-            boot_entries.push(create_uefi_boot_entry(&self.root, &uefi_boot.destination_in_iso)?);
+            boot_entries.push(create_uefi_boot_entry(
+                &self.root,
+                &uefi_boot.destination_in_iso,
+            )?);
         }
         write_boot_catalog_to_iso(&mut iso_file, boot_catalog_lba, boot_entries)?;
 
@@ -227,23 +236,23 @@ impl IsoBuilder {
             mbr.write_to(&mut iso_file)?;
 
             // Write GPT structures if esp_size_sectors > 0
-            if let Some(esp_size_sectors_val) = esp_size_sectors {
-                if esp_size_sectors_val > 0 {
-                    let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
-                    let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
+            if let Some(esp_size_sectors_val) = esp_size_sectors
+                && esp_size_sectors_val > 0
+            {
+                let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
+                let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
 
-                    let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
-                    let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
-                    let partitions = vec![GptPartitionEntry::new(
-                        esp_guid_str,
-                        &esp_unique_guid_str,
-                        esp_partition_start_lba as u64,
-                        esp_partition_end_lba as u64,
-                        "EFI System Partition",
-                        0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
-                    )];
-                    write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
-                }
+                let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
+                let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
+                let partitions = vec![GptPartitionEntry::new(
+                    esp_guid_str,
+                    &esp_unique_guid_str,
+                    esp_partition_start_lba as u64,
+                    esp_partition_end_lba as u64,
+                    "EFI System Partition",
+                    0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
+                )];
+                write_gpt_structures(&mut iso_file, total_lbas, &partitions)?;
             }
         }
 

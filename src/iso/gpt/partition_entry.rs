@@ -1,4 +1,4 @@
-use std::io::{self, Write, Seek};
+use std::io::{self, Seek, Write};
 use std::mem;
 use uuid::Uuid;
 

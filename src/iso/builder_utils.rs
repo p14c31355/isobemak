@@ -1,11 +1,11 @@
-use std::io::{self, Seek, SeekFrom};
+use std::io::{self};
 use std::path::Path;
 
 #[macro_use]
 use crate::io_error;
+use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
+use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
-use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
-use crate::iso::boot_catalog::{BootCatalogEntry, BOOT_CATALOG_EFI_PLATFORM_ID};
 
 /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
 pub fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
@@ -58,15 +58,17 @@ fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a I
     let components: Vec<_> = Path::new(path).components().collect();
 
     for (i, component) in components.iter().enumerate() {
-        let component_name = component.as_os_str().to_str().ok_or_else(|| {
-            io_error!(io::ErrorKind::InvalidInput, "Invalid path component")
-        })?;
+        let component_name = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
 
         if i == components.len() - 1 {
             // Last component, this is the target node
-            return current_node.children.get(component_name).ok_or_else(|| {
-                io_error!(io::ErrorKind::NotFound, "Path not found: {}", path)
-            });
+            return current_node
+                .children
+                .get(component_name)
+                .ok_or_else(|| io_error!(io::ErrorKind::NotFound, "Path not found: {}", path));
         } else {
             // Intermediate component, must be a directory
             match current_node.children.get(component_name) {
@@ -82,7 +84,11 @@ fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a I
         }
     }
     // This part should be unreachable if components is not empty
-    Err(io_error!(io::ErrorKind::NotFound, "Path not found: {}", path))
+    Err(io_error!(
+        io::ErrorKind::NotFound,
+        "Path not found: {}",
+        path
+    ))
 }
 
 /// Calculate the number of sectors needed for a given file size
@@ -113,9 +119,9 @@ pub fn create_bios_boot_entry(
     let size = get_file_size_in_iso(root, destination_path)?;
     const EL_TORITO_SECTOR_SIZE: u64 = 512;
     let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-    
+
     validate_boot_image_size(sectors, u16::MAX as u64, "BIOS boot")?;
-    
+
     Ok(BootCatalogEntry {
         platform_id: 0x00, // 0x00 for x86 BIOS
         boot_image_lba: lba,
@@ -133,9 +139,9 @@ pub fn create_uefi_boot_entry(
     let size = get_file_size_in_iso(root, destination_path)?;
     const EL_TORITO_SECTOR_SIZE: u64 = 512;
     let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-    
+
     validate_boot_image_size(sectors, u16::MAX as u64, "UEFI boot")?;
-    
+
     Ok(BootCatalogEntry {
         platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
         boot_image_lba: lba,
@@ -150,7 +156,7 @@ pub fn create_uefi_esp_boot_entry(
     esp_size_sectors: u32,
 ) -> io::Result<BootCatalogEntry> {
     validate_boot_image_size(esp_size_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
-    
+
     Ok(BootCatalogEntry {
         platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
         boot_image_lba: esp_lba,

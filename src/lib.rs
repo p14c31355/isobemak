@@ -6,18 +6,16 @@ pub mod iso;
 pub mod utils;
 
 // Re-export the main function for external use.
-pub use iso::builder::build_iso;
-pub use iso::builder::IsoBuilder;
-pub use iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 pub use iso::boot_info::{BiosBootInfo, BootInfo, UefiBootInfo};
-pub use iso::iso_image::{IsoImage, IsoImageFile};
-pub use iso::constants::ESP_START_LBA; // Re-export ESP_START_LBA
+pub use iso::builder::IsoBuilder;
+pub use iso::builder::build_iso;
+pub use iso::constants::ESP_START_LBA;
+pub use iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
+pub use iso::iso_image::{IsoImage, IsoImageFile}; // Re-export ESP_START_LBA
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso,
-    };
+    use super::{BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
     use std::io;
     use std::path::{Path, PathBuf};
     use tempfile::tempdir;

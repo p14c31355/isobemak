@@ -6,7 +6,7 @@ use std::{
     process::Command,
 };
 
-use isobemak::{IsoImageFile, IsoImage, BootInfo, UefiBootInfo, build_iso};
+use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 fn run_command(command: &str, args: &[&str]) -> io::Result<String> {

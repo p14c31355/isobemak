@@ -1,7 +1,7 @@
 // isobemak/src/iso/volume_descriptor.rs
 use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
-use crate::utils::{seek_to_lba, ISO_SECTOR_SIZE};
+use crate::utils::{ISO_SECTOR_SIZE, seek_to_lba};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 

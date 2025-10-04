@@ -7,11 +7,7 @@ use std::{
 };
 
 /// Copies a file into a directory within the FAT filesystem.
-fn copy_to_fat(
-    fat_dir: &Dir<fs::File>,
-    source_path: &Path,
-    dest_name: &str,
-) -> io::Result<()> {
+fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> io::Result<()> {
     let mut dest_file = fat_dir.create_file(dest_name)?;
     let mut source_file = fs::File::open(source_path)?;
     io::copy(&mut source_file, &mut dest_file)?;

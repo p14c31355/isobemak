@@ -1,6 +1,5 @@
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
-use std::path::{Path, PathBuf};
 
 pub const ISO_SECTOR_SIZE: usize = 2048;
 
@@ -23,8 +22,10 @@ macro_rules! ensure_path_component {
     ($component:expr, $path:expr) => {
         $component.as_os_str().to_str().ok_or_else(|| {
             $crate::io_error!(
-                io::ErrorKind::InvalidInput, 
-                "Invalid path component in {}: {:?}", $path, $component
+                io::ErrorKind::InvalidInput,
+                "Invalid path component in {}: {:?}",
+                $path,
+                $component
             )
         })?
     };
@@ -53,11 +54,7 @@ pub mod test_utils {
     use std::path::{Path, PathBuf};
 
     /// Creates a dummy file with the specified size in a temporary directory.
-    pub fn create_dummy_file(
-        temp_dir: &Path,
-        name: &str,
-        size_kb: usize,
-    ) -> io::Result<PathBuf> {
+    pub fn create_dummy_file(temp_dir: &Path, name: &str, size_kb: usize) -> io::Result<PathBuf> {
         let path = temp_dir.join(name);
         let mut file = fs::File::create(&path)?;
         file.write_all(&vec![0u8; size_kb * 1024])?;

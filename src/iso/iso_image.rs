@@ -1,5 +1,5 @@
-use std::path::PathBuf;
-use crate::iso::boot_info::BootInfo; // Import BootInfo
+use crate::iso::boot_info::BootInfo;
+use std::path::PathBuf; // Import BootInfo
 
 /// Configuration for a file to be added to the ISO.
 #[derive(Clone, Debug)]

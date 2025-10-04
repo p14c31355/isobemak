@@ -2,9 +2,8 @@ use crc32fast::Hasher;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::mem;
 
-use crate::iso::constants::ESP_START_LBA;
 use crate::iso::gpt::header::GptHeader;
-use crate::iso::gpt::partition_entry::{GptPartitionEntry, EFI_SYSTEM_PARTITION_GUID};
+use crate::iso::gpt::partition_entry::GptPartitionEntry;
 
 /// Calculates the CRC32 for a GPT header.
 fn calculate_header_crc32(header: &mut GptHeader) -> u32 {

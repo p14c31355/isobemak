@@ -1,6 +1,6 @@
+use crate::utils::ISO_SECTOR_SIZE;
 use std::collections::HashMap;
 use std::path::PathBuf;
-use crate::utils::ISO_SECTOR_SIZE;
 
 /// Represents a file within the ISO filesystem.
 #[derive(Clone, Debug)]
