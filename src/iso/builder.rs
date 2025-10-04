@@ -315,25 +315,25 @@ impl IsoBuilder {
         let mut boot_entries = Vec::new();
 
         // Add BIOS boot entry
-        if let Some(boot_info) = &self.boot_info {
-            if let Some(bios_boot) = &boot_info.bios_boot {
-                let bios_boot_lba = self.get_lba_for_path(&bios_boot.destination_in_iso)?;
-                let bios_boot_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
-                let bios_boot_sectors_u64 = bios_boot_size.div_ceil(512).max(1);
-                if bios_boot_sectors_u64 > u16::MAX as u64 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "BIOS boot image is too large for the boot catalog",
-                    ));
-                }
-                let bios_boot_sectors = bios_boot_sectors_u64 as u16;
-                boot_entries.push(BootCatalogEntry {
-                    platform_id: 0x00, // 0x00 for x86 BIOS
-                    boot_image_lba: bios_boot_lba,
-                    boot_image_sectors: bios_boot_sectors,
-                    bootable: true,
-                });
+        if let Some(boot_info) = &self.boot_info
+            && let Some(bios_boot) = &boot_info.bios_boot
+        {
+            let bios_boot_lba = self.get_lba_for_path(&bios_boot.destination_in_iso)?;
+            let bios_boot_size = self.get_file_size_in_iso(&bios_boot.destination_in_iso)?;
+            let bios_boot_sectors_u64 = bios_boot_size.div_ceil(512).max(1);
+            if bios_boot_sectors_u64 > u16::MAX as u64 {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "BIOS boot image is too large for the boot catalog",
+                ));
             }
+            let bios_boot_sectors = bios_boot_sectors_u64 as u16;
+            boot_entries.push(BootCatalogEntry {
+                platform_id: 0x00, // 0x00 for x86 BIOS
+                boot_image_lba: bios_boot_lba,
+                boot_image_sectors: bios_boot_sectors,
+                bootable: true,
+            });
         }
 
         // Add UEFI boot entry
