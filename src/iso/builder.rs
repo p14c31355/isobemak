@@ -93,7 +93,7 @@ pub struct IsoBuilder {
     total_sectors: u32,
     is_isohybrid: bool, // New field
     uefi_catalog_path: Option<String>,
-    esp_lba: Option<u32>, // LBA of the EFI System Partition image
+    esp_lba: Option<u32>,          // LBA of the EFI System Partition image
     esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in sectors
 }
 
@@ -232,7 +232,6 @@ impl IsoBuilder {
 
         // If not isohybrid, clear the initial reserved sectors (MBR area).
 
-
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
         let total_lbas = self.total_sectors as u64;
 
@@ -314,7 +313,6 @@ impl IsoBuilder {
     /// Writes the El Torito boot catalog.
     fn write_boot_catalog(&self, iso_file: &mut File, boot_catalog_lba: u32) -> io::Result<()> {
         let mut boot_entries = Vec::new();
-
 
         // Add UEFI boot entry
         if self.is_isohybrid {

@@ -180,8 +180,7 @@ fn verify_iso_binary_structures(iso_file: &mut File) -> io::Result<()> {
         sum = sum.wrapping_add(u16::from_le_bytes(chunk.try_into().unwrap()));
     }
     assert_eq!(
-        sum,
-        0,
+        sum, 0,
         "Boot catalog validation entry checksum should be 0 (re-verification)"
     );
 
