@@ -1,7 +1,7 @@
 // tests/integration.rs
 use std::{
     fs::File,
-    io::{self, Error, ErrorKind, Read, Seek, SeekFrom},
+    io::{self, Error, ErrorKind, Read, Seek, SeekFrom, Write}, // Added Write
     path::{Path, PathBuf},
     process::Command,
 };
@@ -79,6 +79,16 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output:\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
+
+    // Extract Nsect from isoinfo -d output for the EFI boot entry
+    let nsect_regex = regex::Regex::new(r"Nsect (\d+)").unwrap();
+    let nsect_match = nsect_regex.captures(&isoinfo_d_output).expect("Nsect not found in isoinfo -d output");
+    let nsect_value: u16 = nsect_match[1].parse().expect("Failed to parse Nsect value");
+
+    // BOOTX64.EFI is 64 * 1024 bytes = 65536 bytes.
+    // ISO_SECTOR_SIZE is 2048 bytes.
+    // Expected sectors = 65536 / 2048 = 32.
+    assert_eq!(nsect_value, 32, "Nsect value in boot catalog is incorrect");
 
     let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -l output:\n{}", isoinfo_l_output);
