@@ -6,6 +6,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
+use crate::iso::ESP_START_LBA;
 use crate::iso::boot_catalog::{
     BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, write_boot_catalog,
 };
@@ -182,16 +183,19 @@ impl IsoBuilder {
 
     /// Builds the ISO file based on the configured files and boot information.
     pub fn build(&mut self, iso_path: &Path, esp_size_sectors: u32) -> io::Result<()> {
-        self.iso_file = Some(File::create(iso_path)?);
-        let mut iso_file = self.iso_file.take().ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::AlreadyExists,
-                "build() has already been called",
-            )
-        })?;
+        let mut iso_file = if let Some(file) = self.iso_file.take() {
+            file
+        } else {
+            File::create(iso_path)?
+        };
+
         // Placeholder for MBR and GPT structures.
         // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
-        let reserved_sectors = if self.is_isohybrid { 34u32 } else { 16u32 };
+        let reserved_sectors = if self.is_isohybrid {
+            ESP_START_LBA
+        } else {
+            16u32
+        };
         let data_start_lba = reserved_sectors;
 
         // Set current_lba to the start of filesystem data after VDs and catalog
@@ -255,7 +259,7 @@ impl IsoBuilder {
 
             // Write GPT structures if esp_size_sectors > 0
             if esp_size_sectors > 0 {
-                let esp_partition_start_lba = 34; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
+                let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
                 let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors - 1;
 
                 let esp_guid_str = crate::iso::gpt::EFI_SYSTEM_PARTITION_GUID;
@@ -570,18 +574,15 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
     let mut iso_builder = IsoBuilder::new();
     iso_builder.set_isohybrid(is_isohybrid);
 
-    // Handle UEFI boot image by creating a temporary FAT image.
     let mut _temp_fat_file_holder: Option<NamedTempFile> = None;
-    let mut esp_size_sectors = 0; // Initialize esp_size_sectors
-    let mut fat_img_path: Option<PathBuf> = None;
+    let mut esp_size_sectors = 0;
+
+    // Open the ISO file for writing early to allow writing ESP before ISO9660 content
+    let mut iso_file = File::create(iso_path)?;
 
     if let Some(uefi_boot) = &image.boot_info.uefi_boot {
-        // Add BOOTX64.EFI for El Torito catalog
-        // The file is expected to be added via the `image.files` list.
-        // We just record its path for the boot catalog.
         iso_builder.uefi_catalog_path = Some(uefi_boot.destination_in_iso.clone());
 
-        // For hybrid, create and add FAT image for ESP
         if is_isohybrid {
             let temp_fat_file = NamedTempFile::new()?;
             let path = temp_fat_file.path().to_path_buf();
@@ -589,17 +590,20 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
 
             fat::create_fat_image(&path, &uefi_boot.boot_image, &uefi_boot.kernel_image)?;
 
-            // Calculate ESP size
             let fat_img_metadata = std::fs::metadata(&path)?;
             esp_size_sectors =
                 (fat_img_metadata.len() as u32).div_ceil(crate::utils::ISO_SECTOR_SIZE as u32);
 
             // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(34); // ESP starts at LBA 34 for hybrid ISOs
+            iso_builder.esp_lba = Some(ESP_START_LBA); // ESP starts at LBA 34 for hybrid ISOs
             iso_builder.esp_size_sectors = Some(esp_size_sectors);
 
-            // Do not add efi.img to ISO filesystem for hybrid, it will be overlaid
-            fat_img_path = Some(path);
+            // Copy the FAT image to the ISO file at the designated ESP LBA (34)
+            iso_file.seek(SeekFrom::Start(
+                ESP_START_LBA as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
+            ))?;
+            let mut temp_fat = std::fs::File::open(&path)?;
+            io::copy(&mut temp_fat, &mut iso_file)?;
         }
     }
 
@@ -619,20 +623,9 @@ pub fn build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::R
     // Set boot information for the ISO builder
     iso_builder.set_boot_info(image.boot_info.clone());
 
-    // Build the ISO
+    // Pass the opened iso_file to the builder
+    iso_builder.iso_file = Some(iso_file);
     iso_builder.build(iso_path, esp_size_sectors)?;
-
-    if let Some(path) = fat_img_path {
-        let mut iso_file = std::fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(iso_path)?;
-        iso_file.seek(SeekFrom::Start(
-            34u64 * crate::utils::ISO_SECTOR_SIZE as u64,
-        ))?;
-        let mut temp_fat = std::fs::File::open(path)?;
-        io::copy(&mut temp_fat, &mut iso_file)?;
-    }
 
     Ok(())
 }
