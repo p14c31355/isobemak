@@ -2,7 +2,7 @@
 use fatfs::{self};
 use std::{
     fs::File,
-    io::{self, Read, Seek, Write},
+    io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
 
@@ -10,13 +10,16 @@ use std::{
 pub const ISO_SECTOR_SIZE: usize = 2048;
 
 /// Pads the ISO file with zeros to align to a specific LBA (Logical Block Address).
-pub fn pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
+pub fn seek_and_pad_to_lba(iso: &mut File, lba: u32) -> io::Result<()> {
     let target_pos = lba as u64 * ISO_SECTOR_SIZE as u64;
     let current_pos = iso.stream_position()?;
     if current_pos < target_pos {
         let padding_bytes = target_pos - current_pos;
         io::copy(&mut io::repeat(0).take(padding_bytes), iso)?;
     }
+    // Always seek to the target position to handle cases where current_pos > target_pos
+    // or to confirm position after padding.
+    iso.seek(SeekFrom::Start(target_pos))?;
     Ok(())
 }
 
@@ -46,7 +49,7 @@ mod tests {
         temp_file.write_all(initial_content)?;
 
         let mut file = temp_file.reopen()?;
-        pad_to_lba(&mut file, 2)?;
+        seek_and_pad_to_lba(&mut file, 2)?;
 
         let file_size = file.metadata()?.len();
         assert_eq!(file_size, 2 * ISO_SECTOR_SIZE as u64);

@@ -43,21 +43,28 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
 
-    // Set Signature (must be done before checksum calculation)
+    // Set Signature
     val[30..32].copy_from_slice(&BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes());
-    // Clear checksum field before calculation (should be treated as 0)
-    val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
-        .copy_from_slice(&0u16.to_le_bytes());
-    // Checksum calculation - must be done after all other fields are set
+
+    // Checksum calculation
+    // The sum of all 16-bit words in the 32-byte entry must be zero.
+    // First, calculate the sum of all words *except* the checksum word.
     let mut sum: u16 = 0;
-    for chunk in val.chunks_exact(2) {
-        let word = u16::from_le_bytes(chunk.try_into().unwrap());
+    for i in (0..32).step_by(2) {
+        // Skip the checksum field itself
+        if i == BOOT_CATALOG_CHECKSUM_OFFSET {
+            continue;
+        }
+        let word = u16::from_le_bytes(val[i..i + 2].try_into().unwrap());
         sum = sum.wrapping_add(word);
     }
-    // Calculate the checksum such that the sum of all 16 words is 0
+
+    // The checksum is the value that, when added to the sum, results in zero.
+    // This is equivalent to the two's complement of the sum.
     let checksum = 0u16.wrapping_sub(sum);
     val[BOOT_CATALOG_CHECKSUM_OFFSET..BOOT_CATALOG_CHECKSUM_OFFSET + 2]
         .copy_from_slice(&checksum.to_le_bytes());
+
     catalog[offset..offset + 32].copy_from_slice(&val);
     offset += 32;
 
@@ -73,7 +80,6 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         entry[1] = 0x00; // No Emulation
         entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
         entry[4] = 0x00; // System type (x86)
-        // Byte 5 is unused
 
         // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
         let sectors = entry_data.boot_image_sectors;

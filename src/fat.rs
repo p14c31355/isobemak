@@ -62,7 +62,12 @@ pub fn create_fat_image(
     file.seek(io::SeekFrom::Start(0))?;
 
     // Format the FAT image
-    fatfs::format_volume(&mut file, FormatVolumeOptions::new().fat_type(fat_type))?;
+    fatfs::format_volume(
+        &mut file,
+        FormatVolumeOptions::new()
+            .fat_type(fat_type)
+            .bytes_per_sector(512), // UEFI typically expects 512-byte sectors for FAT
+    )?;
 
     // Open filesystem and create directories
     let fs = FileSystem::new(&mut file, FsOptions::new())?;
