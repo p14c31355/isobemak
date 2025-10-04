@@ -1,13 +1,13 @@
 use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom, Write};
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
-use crate::iso::constants::ESP_START_LBA; // Import ESP_START_LBA from constants
+use crate::{io_error};
 use crate::utils::ISO_SECTOR_SIZE;
+use crate::iso::constants::ESP_START_LBA;
 
 // Import definitions from new modules
 use crate::iso::boot_info::BootInfo;
@@ -16,7 +16,9 @@ use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
 use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
 use crate::iso::iso_image::IsoImage;
 use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
-use crate::iso::builder_utils::{calculate_lbas, get_lba_for_path, get_file_size_in_iso};
+use crate::iso::builder_utils::{
+    calculate_lbas, get_lba_for_path, get_file_size_in_iso, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry, get_file_metadata
+};
 use crate::iso::iso_writer::{write_descriptors, write_boot_catalog_to_iso, write_directories, copy_files, finalize_iso};
 
 /// The main builder for creating an ISO 9660 image.
@@ -65,7 +67,12 @@ impl IsoBuilder {
                     .as_os_str()
                     .to_str()
                     .ok_or_else(|| {
-                        io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
+                        io_error!(
+                            io::ErrorKind::InvalidInput,
+                            "Invalid path component in {}: {:?}",
+                            path_in_iso,
+                            component
+                        )
                     })?
                     .to_string();
                 current_dir = match current_dir
@@ -75,9 +82,10 @@ impl IsoBuilder {
                 {
                     IsoFsNode::Directory(dir) => dir,
                     _ => {
-                        return Err(io::Error::new(
+                        return Err(io_error!(
                             io::ErrorKind::AlreadyExists,
-                            format!("{} is not a directory", path_in_iso),
+                            "{} is not a directory",
+                            path_in_iso
                         ));
                     }
                 };
@@ -86,11 +94,12 @@ impl IsoBuilder {
 
         let file_name = path
             .file_name()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid file name"))?
             .to_str()
-            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid file name"))?
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid file name"))?
             .to_string();
-        let file_size = std::fs::metadata(&real_path)?.len();
+        let file_metadata = get_file_metadata(&real_path)?;
+        let file_size = file_metadata.len();
 
         let file = IsoFile {
             path: real_path,
@@ -168,66 +177,23 @@ impl IsoBuilder {
         write_descriptors(&mut iso_file, self.root.lba, self.current_lba)?;
         
         let mut boot_entries = Vec::new();
+        
         // Add BIOS boot entry
         if let Some(boot_info) = &self.boot_info
             && let Some(bios_boot) = &boot_info.bios_boot
         {
-            let bios_boot_lba = get_lba_for_path(&self.root, &bios_boot.destination_in_iso)?;
-            let bios_boot_size = get_file_size_in_iso(&self.root, &bios_boot.destination_in_iso)?;
-            let bios_boot_sectors_u64 = bios_boot_size.div_ceil(512).max(1);
-            if bios_boot_sectors_u64 > u16::MAX as u64 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "BIOS boot image is too large for the boot catalog",
-                ));
-            }
-            let bios_boot_sectors = bios_boot_sectors_u64 as u16;
-            boot_entries.push(BootCatalogEntry {
-                platform_id: 0x00, // 0x00 for x86 BIOS
-                boot_image_lba: bios_boot_lba,
-                boot_image_sectors: bios_boot_sectors,
-                bootable: true,
-            });
+            boot_entries.push(create_bios_boot_entry(&self.root, &bios_boot.destination_in_iso)?);
         }
 
         // Add UEFI boot entry
         if self.is_isohybrid {
             if let (Some(esp_lba), Some(esp_size_sectors)) = (self.esp_lba, self.esp_size_sectors) {
-                let uefi_boot_sectors_u64 = esp_size_sectors as u64; // Already in sectors, no division needed
-                if uefi_boot_sectors_u64 > u16::MAX as u64 {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "UEFI ESP image is too large for the boot catalog",
-                    ));
-                }
-                let uefi_boot_sectors = uefi_boot_sectors_u64 as u16;
-                boot_entries.push(BootCatalogEntry {
-                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                    boot_image_lba: esp_lba,
-                    boot_image_sectors: uefi_boot_sectors,
-                    bootable: true,
-                });
+                boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
             }
         } else if let Some(boot_info) = &self.boot_info
             && let Some(uefi_boot) = &boot_info.uefi_boot
         {
-            let uefi_boot_lba = get_lba_for_path(&self.root, &uefi_boot.destination_in_iso)?;
-            let efi_loader_size = get_file_size_in_iso(&self.root, &uefi_boot.destination_in_iso)?;
-            const EL_TORITO_SECTOR_SIZE: u64 = 512;
-            let uefi_boot_sectors_u64 = efi_loader_size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-            if uefi_boot_sectors_u64 > u16::MAX as u64 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "UEFI boot image is too large for the boot catalog",
-                ));
-            }
-            let uefi_boot_sectors = uefi_boot_sectors_u64 as u16;
-            boot_entries.push(BootCatalogEntry {
-                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                boot_image_lba: uefi_boot_lba,
-                boot_image_sectors: uefi_boot_sectors,
-                bootable: true,
-            });
+            boot_entries.push(create_uefi_boot_entry(&self.root, &uefi_boot.destination_in_iso)?);
         }
         write_boot_catalog_to_iso(&mut iso_file, boot_catalog_lba, boot_entries)?;
 

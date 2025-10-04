@@ -1,8 +1,11 @@
 use std::io::{self, Seek, SeekFrom};
 use std::path::Path;
 
+#[macro_use]
+use crate::io_error;
 use crate::utils::ISO_SECTOR_SIZE;
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
+use crate::iso::boot_catalog::{BootCatalogEntry, BOOT_CATALOG_EFI_PLATFORM_ID};
 
 /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
 pub fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
@@ -56,30 +59,128 @@ fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a I
 
     for (i, component) in components.iter().enumerate() {
         let component_name = component.as_os_str().to_str().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component")
+            io_error!(io::ErrorKind::InvalidInput, "Invalid path component")
         })?;
 
         if i == components.len() - 1 {
             // Last component, this is the target node
             return current_node.children.get(component_name).ok_or_else(|| {
-                io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {}", path))
+                io_error!(io::ErrorKind::NotFound, "Path not found: {}", path)
             });
         } else {
             // Intermediate component, must be a directory
             match current_node.children.get(component_name) {
                 Some(IsoFsNode::Directory(dir)) => current_node = dir,
                 _ => {
-                    return Err(io::Error::new(
+                    return Err(io_error!(
                         io::ErrorKind::NotFound,
-                        format!("Directory not found in path: {}", path),
+                        "Directory not found in path: {}",
+                        path
                     ));
                 }
             }
         }
     }
     // This part should be unreachable if components is not empty
-    Err(io::Error::new(
-        io::ErrorKind::NotFound,
-        format!("Path not found: {}", path),
-    ))
+    Err(io_error!(io::ErrorKind::NotFound, "Path not found: {}", path))
+}
+
+/// Calculate the number of sectors needed for a given file size
+pub fn calculate_sectors_from_size(file_size: u64) -> u32 {
+    file_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32
+}
+
+/// Validate that a boot image size is suitable for the boot catalog
+pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> io::Result<()> {
+    if size > max_size {
+        return Err(io_error!(
+            io::ErrorKind::InvalidInput,
+            "{} image is too large for the boot catalog ({} > {})",
+            image_type,
+            size,
+            max_size
+        ));
+    }
+    Ok(())
+}
+
+/// Create a boot catalog entry for BIOS boot
+pub fn create_bios_boot_entry(
+    root: &IsoDirectory,
+    destination_path: &str,
+) -> io::Result<BootCatalogEntry> {
+    let lba = get_lba_for_path(root, destination_path)?;
+    let size = get_file_size_in_iso(root, destination_path)?;
+    const EL_TORITO_SECTOR_SIZE: u64 = 512;
+    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+    
+    validate_boot_image_size(sectors, u16::MAX as u64, "BIOS boot")?;
+    
+    Ok(BootCatalogEntry {
+        platform_id: 0x00, // 0x00 for x86 BIOS
+        boot_image_lba: lba,
+        boot_image_sectors: sectors as u16,
+        bootable: true,
+    })
+}
+
+/// Create a boot catalog entry for UEFI boot
+pub fn create_uefi_boot_entry(
+    root: &IsoDirectory,
+    destination_path: &str,
+) -> io::Result<BootCatalogEntry> {
+    let lba = get_lba_for_path(root, destination_path)?;
+    let size = get_file_size_in_iso(root, destination_path)?;
+    const EL_TORITO_SECTOR_SIZE: u64 = 512;
+    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+    
+    validate_boot_image_size(sectors, u16::MAX as u64, "UEFI boot")?;
+    
+    Ok(BootCatalogEntry {
+        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+        boot_image_lba: lba,
+        boot_image_sectors: sectors as u16,
+        bootable: true,
+    })
+}
+
+/// Create a boot catalog entry for UEFI ESP partition
+pub fn create_uefi_esp_boot_entry(
+    esp_lba: u32,
+    esp_size_sectors: u32,
+) -> io::Result<BootCatalogEntry> {
+    validate_boot_image_size(esp_size_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
+    
+    Ok(BootCatalogEntry {
+        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+        boot_image_lba: esp_lba,
+        boot_image_sectors: esp_size_sectors as u16,
+        bootable: true,
+    })
+}
+
+/// Get file metadata with consistent error handling
+pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
+    std::fs::metadata(path).map_err(|e| {
+        io_error!(
+            io::ErrorKind::NotFound,
+            "Failed to get file metadata for {}: {}",
+            path.display(),
+            e
+        )
+    })
+}
+
+/// Validate path components with consistent error handling
+pub fn validate_path_components(path: &Path) -> io::Result<()> {
+    for component in path.components() {
+        component.as_os_str().to_str().ok_or_else(|| {
+            io_error!(
+                io::ErrorKind::InvalidInput,
+                "Invalid path component: {:?}",
+                component
+            )
+        })?;
+    }
+    Ok(())
 }
