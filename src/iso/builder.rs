@@ -364,7 +364,7 @@ impl IsoBuilder {
             let uefi_boot_lba = self.get_lba_for_path(&uefi_boot.destination_in_iso)?;
             let efi_loader_size = std::fs::metadata(&uefi_boot.boot_image)?.len();
             let sector_size = crate::utils::ISO_SECTOR_SIZE as u64;
-            let uefi_boot_sectors_u64 = ((efi_loader_size + sector_size - 1) / sector_size).max(1); // ceil division
+            let uefi_boot_sectors_u64 = efi_loader_size.div_ceil(sector_size).max(1); // ceil division
             if uefi_boot_sectors_u64 > u16::MAX as u64 {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
