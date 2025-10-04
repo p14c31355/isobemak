@@ -47,7 +47,7 @@ impl GptHeader {
             current_lba: 1, // LBA
             backup_lba: total_lbas - 1,
             first_usable_lba: ESP_START_LBA as u64, // MBR (1) + GPT Header (1) + Partition Array (32)
-            last_usable_lba: total_lbas.saturating_sub(ESP_START_LBA as u64), // total_lbas - 1 (backup header) - 32 (backup partition array) - 1 (current header)
+            last_usable_lba: total_lbas.saturating_sub(ESP_START_LBA as u64), // Last usable LBA before the backup GPT structures (33 sectors)
             disk_guid: disk_guid_bytes,
             partition_entry_lba,
             num_partition_entries,
