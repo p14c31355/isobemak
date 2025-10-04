@@ -11,7 +11,7 @@ use crate::iso::boot_catalog::{
 };
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_descriptors};
-use crate::utils::{ISO_SECTOR_SIZE, pad_to_lba};
+use crate::utils::{ISO_SECTOR_SIZE, seek_and_pad_to_lba};
 
 /// Represents a file within the ISO filesystem.
 pub struct IsoFile {
@@ -231,12 +231,7 @@ impl IsoBuilder {
         self.finalize(&mut iso_file)?;
 
         // If not isohybrid, clear the initial reserved sectors (MBR area).
-        if !self.is_isohybrid {
-            let reserved_sectors = 16u32;
-            iso_file.seek(SeekFrom::Start(0))?;
-            let reserved_bytes = reserved_sectors as u64 * ISO_SECTOR_SIZE as u64;
-            io::copy(&mut io::repeat(0).take(reserved_bytes), &mut iso_file)?;
-        }
+
 
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
         let total_lbas = self.total_sectors as u64;
@@ -376,7 +371,7 @@ impl IsoBuilder {
         dir: &IsoDirectory,
         parent_lba: u32,
     ) -> io::Result<()> {
-        pad_to_lba(iso_file, dir.lba)?;
+        seek_and_pad_to_lba(iso_file, dir.lba)?;
 
         let mut sorted_children: Vec<_> = dir.children.iter().collect();
         sorted_children.sort_by_key(|(name, _)| *name);
@@ -448,7 +443,7 @@ impl IsoBuilder {
         for (_, node) in sorted_children {
             match node {
                 IsoFsNode::File(file) => {
-                    pad_to_lba(iso_file, file.lba)?;
+                    seek_and_pad_to_lba(iso_file, file.lba)?;
                     let mut real_file = File::open(&file.path)?;
                     io::copy(&mut real_file, iso_file)?;
                 }
