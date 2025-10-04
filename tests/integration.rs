@@ -101,8 +101,8 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     ]);
 
     let efi_size = 64 * 1024; // BOOTX64.EFI size from setup_integration_test_files
-    let expected_sectors = ((efi_size as u64 + isobemak::utils::ISO_SECTOR_SIZE as u64 - 1)
-        / isobemak::utils::ISO_SECTOR_SIZE as u64) as u16;
+    const EL_TORITO_SECTOR_SIZE: u64 = 512;
+    let expected_sectors = (efi_size as u64).div_ceil(EL_TORITO_SECTOR_SIZE) as u16;
 
     assert_eq!(
         nsect, expected_sectors,
