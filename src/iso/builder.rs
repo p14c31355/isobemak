@@ -375,7 +375,7 @@ impl IsoBuilder {
             boot_entries.push(BootCatalogEntry {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: uefi_boot_lba,
-                boot_image_sectors: uefi_boot_sectors, // ← ここをファイルサイズベースに修正
+                boot_image_sectors: uefi_boot_sectors,
                 bootable: true,
             });
         }
