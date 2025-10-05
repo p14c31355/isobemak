@@ -5,7 +5,6 @@ use std::{
 };
 
 use isobemak::build_iso;
-use isobemak::{BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::run_command;
@@ -118,6 +117,51 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // 3. Verify UEFI boot entry
     // The `test_create_isohybrid_uefi_iso` already performs detailed UEFI boot entry verification.
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
+
+    // 4. Enhanced Binary Dump Inspection: Check GPT Header
+    // Read the ISO file content
+    let mut iso_file = File::open(&iso_path)?;
+    let mut iso_bytes = Vec::new();
+    iso_file.read_to_end(&mut iso_bytes)?;
+
+    // GPT Header is typically at LBA 1 (sector 1), which is 512 bytes from the start of the file.
+    // A sector is 512 bytes.
+    let gpt_header_offset = 512;
+    let gpt_header_size = 92; // Minimum GPT header size
+
+    if iso_bytes.len() > gpt_header_offset + gpt_header_size {
+        let gpt_header_slice = &iso_bytes[gpt_header_offset..(gpt_header_offset + gpt_header_size)];
+
+        // Check GPT Signature ("EFI PART")
+        let signature = &gpt_header_slice[0..8];
+        assert_eq!(signature, b"EFI PART", "GPT header signature mismatch");
+        println!("Verified GPT header signature: {:?}", String::from_utf8_lossy(signature));
+
+        // Check GPT Revision (should be 0x00010000 for version 1.0)
+        let revision = u32::from_le_bytes([
+            gpt_header_slice[8],
+            gpt_header_slice[9],
+            gpt_header_slice[10],
+            gpt_header_slice[11],
+        ]);
+        assert_eq!(revision, 0x00010000, "GPT header revision mismatch");
+        println!("Verified GPT header revision: 0x{:x}", revision);
+
+        // Further checks could include:
+        // - Header Size (offset 12, u32)
+        // - CRC32 of header (offset 16, u32)
+        // - Current LBA (offset 24, u64)
+        // - Backup LBA (offset 32, u64)
+        // - First Usable LBA (offset 40, u64)
+        // - Last Usable LBA (offset 48, u64)
+        // - Disk GUID (offset 56, 16 bytes)
+        // - Partition Entry LBA (offset 72, u64)
+        // - Number of Partition Entries (offset 80, u32)
+        // - Size of Partition Entry (offset 84, u32)
+        // - CRC32 of Partition Entry Array (offset 88, u32)
+    } else {
+        println!("Warning: ISO file too small to contain a GPT header at expected offset.");
+    }
 
     Ok(())
 }
