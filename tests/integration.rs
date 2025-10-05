@@ -293,7 +293,9 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
 
     // Setup files and paths for an ISO with both BIOS and UEFI boot
     let bios_boot_image_path = temp_dir_path.join("isolinux.bin");
-    std::fs::write(&bios_boot_image_path, vec![0u8; 512])?; // A dummy 512-byte boot image
+    let mut bios_boot_image = vec![0u8; 512];
+    bios_boot_image[510..512].copy_from_slice(&0xAA55u16.to_le_bytes());
+    std::fs::write(&bios_boot_image_path, bios_boot_image)?; // A dummy 512-byte boot image with signature
     let bios_cfg_path = temp_dir_path.join("isolinux.cfg");
     std::fs::write(&bios_cfg_path, b"default menu.c32")?;
 
