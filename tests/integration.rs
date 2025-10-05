@@ -383,7 +383,9 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         );
         println!("Verified BIOS boot image signature (0xAA55)");
     } else {
-        println!("Warning: isolinux/isolinux.bin not extracted or found for BIOS boot signature check.");
+        println!(
+            "Warning: isolinux/isolinux.bin not extracted or found for BIOS boot signature check."
+        );
     }
 
     // 3. Verify UEFI boot entry
