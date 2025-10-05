@@ -159,7 +159,7 @@ pub fn create_uefi_esp_boot_entry(
     Ok(BootCatalogEntry {
         platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
         boot_image_lba: esp_lba,
-        boot_image_sectors: esp_size_sectors as u16,
+        boot_image_sectors: (esp_size_sectors * 4) as u16,
         bootable: true,
     })
 }

@@ -93,7 +93,7 @@ pub fn create_fat_image(
     copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
     copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
-    Ok(logical_size as u32 / crate::utils::ISO_SECTOR_SIZE as u32)
+    Ok((logical_size / SECTOR_SIZE) as u32)
 }
 
 #[cfg(test)]
