@@ -135,7 +135,10 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         // Check GPT Signature ("EFI PART")
         let signature = &gpt_header_slice[0..8];
         assert_eq!(signature, b"EFI PART", "GPT header signature mismatch");
-        println!("Verified GPT header signature: {:?}", String::from_utf8_lossy(signature));
+        println!(
+            "Verified GPT header signature: {:?}",
+            String::from_utf8_lossy(signature)
+        );
 
         // Check GPT Revision (should be 0x00010000 for version 1.0)
         let revision = u32::from_le_bytes([
