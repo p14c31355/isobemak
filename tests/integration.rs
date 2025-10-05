@@ -362,15 +362,16 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // A more robust solution would parse the boot catalog directly.
     let extract_dir = temp_dir_path.join("extracted_bios_boot");
     std::fs::create_dir_all(&extract_dir)?;
-    let _extract_output = Command::new("7z")
-        .args(&[
+    run_command(
+        "7z",
+        &[
             "x",
             iso_path.to_str().unwrap(),
             "-o",
             extract_dir.to_str().unwrap(),
             "isolinux/isolinux.bin", // Assuming this is the BIOS boot image
-        ])
-        .output()?;
+        ],
+    )?;
 
     let extracted_bios_boot_path = extract_dir.join("isolinux/isolinux.bin");
     if extracted_bios_boot_path.exists() {
