@@ -199,10 +199,10 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     };
 
     // Call the main function with is_isohybrid set to true
-    let (fat_image_path_option, _temp_fat_file_holder) = build_iso(&iso_path, &iso_image, true)?;
+    let (fat_image_path, _temp_fat_file_holder, _iso_file) = build_iso(&iso_path, &iso_image, true)?;
     assert!(iso_path.exists());
-    assert!(fat_image_path_option.is_some());
-    let fat_image_path = fat_image_path_option.unwrap();
+    assert!(fat_image_path.exists());
+    // _iso_file is kept in scope to ensure the ISO file remains open for verification
     // _temp_fat_file_holder is kept in scope to prevent the temporary file from being deleted
 
     // Verify ISO content using isoinfo -d
