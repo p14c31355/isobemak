@@ -6,7 +6,9 @@ use std::{
 use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
-use crate::integration_tests::common::{run_command, setup_integration_test_files, verify_iso_binary_structures};
+use crate::integration_tests::common::{
+    run_command, setup_integration_test_files, verify_iso_binary_structures,
+};
 
 #[test]
 fn test_create_isohybrid_uefi_iso() -> io::Result<()> {

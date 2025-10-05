@@ -263,7 +263,8 @@ pub fn build_iso(
     iso_path: &Path,
     image: &IsoImage,
     is_isohybrid: bool,
-) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)> { // Added Option<u32> for logical_fat_size_512_sectors
+) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)> {
+    // Added Option<u32> for logical_fat_size_512_sectors
     let mut iso_builder = IsoBuilder::new();
     iso_builder.set_isohybrid(is_isohybrid);
 
@@ -286,8 +287,7 @@ pub fn build_iso(
             logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
-            let calculated_esp_size_iso_sectors =
-                size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
+            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
 
             // Store ESP LBA and size for the boot catalog
             iso_builder.esp_lba = Some(ESP_START_LBA); // ESP starts at LBA 34 for hybrid ISOs

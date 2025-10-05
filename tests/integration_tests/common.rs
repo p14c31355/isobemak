@@ -5,7 +5,6 @@ use std::{
     process::Command,
 };
 
-
 pub fn run_command(command: &str, args: &[&str]) -> io::Result<String> {
     let output = Command::new(command).args(args).output()?;
 
