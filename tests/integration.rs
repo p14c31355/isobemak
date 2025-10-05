@@ -367,8 +367,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         &[
             "x",
             iso_path.to_str().unwrap(),
-            "-o",
-            extract_dir.to_str().unwrap(),
+            &format!("-o{}", extract_dir.to_str().unwrap()),
             "isolinux/isolinux.bin", // Assuming this is the BIOS boot image
         ],
     )?;
