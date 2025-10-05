@@ -88,10 +88,12 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "UEFI boot LBA in boot catalog is incorrect"
     );
 
-    let expected_esp_sectors = logical_fat_size_512_sectors.unwrap() as u16;
+    // The expected number of sectors in the boot catalog is the logical FAT size in 512-byte sectors,
+    // rounded up to the nearest multiple of 4 (to match the ISO sector alignment of the ESP).
+    let expected_esp_sectors = logical_fat_size_512_sectors.unwrap().div_ceil(4) * 4;
 
     assert_eq!(
-        uefi_boot_sectors, expected_esp_sectors,
+        uefi_boot_sectors, expected_esp_sectors as u16,
         "UEFI boot sectors in boot catalog is incorrect"
     );
     println!(
