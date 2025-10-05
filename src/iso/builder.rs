@@ -129,7 +129,7 @@ impl IsoBuilder {
     pub fn build(
         &mut self,
         iso_file: &mut File, // Accept File handle directly
-        _iso_path: &Path, // Renamed to _iso_path to silence unused variable warning
+        _iso_path: &Path,    // Renamed to _iso_path to silence unused variable warning
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
