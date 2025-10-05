@@ -44,13 +44,20 @@ pub fn create_fat_image(
     // Add overhead and enforce a minimum size.
     const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensures FAT16 formatting.
     const FAT_OVERHEAD: u64 = 2 * 1024 * 1024; // 2MB. Overhead for filesystem structures.
-    let mut total_size = std::cmp::max(content_size + FAT_OVERHEAD, MIN_FAT_SIZE);
-
-    // Round up to the nearest sector size
     const SECTOR_SIZE: u64 = 512;
-    total_size = total_size.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
 
-    // Determine FAT type based on size
+    // Calculate the logical size based on content + overhead, rounded up to sector size.
+    // This is the size we want to report as Nsect.
+    let mut logical_size = (content_size + FAT_OVERHEAD).div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
+    // Ensure logical_size is at least one sector
+    if logical_size == 0 {
+        logical_size = SECTOR_SIZE;
+    }
+
+    // The actual total size of the FAT image file, ensuring it meets minimum requirements for FAT16.
+    let total_size = std::cmp::max(logical_size, MIN_FAT_SIZE);
+
+    // Determine FAT type based on total_size
     let fat_type = if total_size <= 268_435_456 {
         FatType::Fat16
     } else {
@@ -86,7 +93,7 @@ pub fn create_fat_image(
     copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
     copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
 
-    Ok(total_size as u32 / crate::utils::ISO_SECTOR_SIZE as u32)
+    Ok((logical_size / SECTOR_SIZE) as u32)
 }
 
 #[cfg(test)]

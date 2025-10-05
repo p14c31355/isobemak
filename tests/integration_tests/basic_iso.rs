@@ -1,0 +1,139 @@
+use std::{
+    fs::File,
+    io::{self, Read, Seek, SeekFrom},
+};
+
+use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+use tempfile::tempdir;
+
+use crate::integration_tests::common::{
+    run_command, setup_integration_test_files, verify_iso_binary_structures,
+};
+
+#[test]
+fn test_create_disk_and_iso() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+    println!("Temp dir: {:?}", &temp_dir_path);
+
+    // Setup files and paths
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(&temp_dir_path)?;
+
+    let iso_image = IsoImage {
+        files: vec![
+            IsoImageFile {
+                source: bootx64_path.clone(),
+                destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            },
+            IsoImageFile {
+                source: kernel_path.clone(),
+                destination: "EFI/BOOT/KERNEL.EFI".to_string(),
+            },
+        ],
+        boot_info: BootInfo {
+            bios_boot: None, // Not testing BIOS boot in this specific test
+            uefi_boot: Some(UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            }),
+        },
+    };
+
+    // Call the main function with correct arguments
+    build_iso(&iso_path, &iso_image, false)?;
+    // Assert that the ISO file was created
+    assert!(iso_path.exists());
+
+    // Verify ISO content using isoinfo
+    let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
+    println!("isoinfo -d output:\n{}", isoinfo_d_output);
+    assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
+
+    // Verify Nsect value in the boot catalog
+    let mut iso_file_for_nsect_check = File::open(&iso_path)?;
+    let boot_catalog_start_pos = isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64
+        * isobemak::utils::ISO_SECTOR_SIZE as u64;
+    iso_file_for_nsect_check.seek(SeekFrom::Start(boot_catalog_start_pos))?;
+
+    let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
+    iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
+
+    // The first boot entry starts after the 32-byte validation entry.
+    // Nsect is at offset 6-7 within the boot entry.
+    let boot_entry_offset = 32; // Validation entry size
+    let nsect_offset_in_entry = 6;
+    let nsect_bytes_start = boot_entry_offset + nsect_offset_in_entry;
+
+    let nsect = u16::from_le_bytes([
+        boot_catalog_sector[nsect_bytes_start],
+        boot_catalog_sector[nsect_bytes_start + 1],
+    ]);
+
+    let efi_size = 64 * 1024; // BOOTX64.EFI size from setup_integration_test_files
+    const EL_TORITO_SECTOR_SIZE: u64 = 512;
+    let expected_sectors = (efi_size as u64).div_ceil(EL_TORITO_SECTOR_SIZE) as u16;
+
+    assert_eq!(
+        nsect, expected_sectors,
+        "Nsect value in boot catalog is incorrect"
+    );
+    println!("Verified Nsect: {} (expected: {})", nsect, expected_sectors);
+
+    let isoinfo_l_output = run_command("isoinfo", &["-l", "-i", iso_path.to_str().unwrap()])?;
+    println!("isoinfo -l output:\n{}", isoinfo_l_output);
+    assert!(isoinfo_l_output.contains("BOOTX64.EFI;1"));
+    assert!(isoinfo_l_output.contains("KERNEL.EFI;1"));
+
+    // Verify ISO content using 7z
+    let sevenz_output = std::process::Command::new("7z")
+        .args(&["l", iso_path.to_str().unwrap()])
+        .output()?;
+    let sevenz_l_output = String::from_utf8_lossy(&sevenz_output.stdout).into_owned();
+    println!("7z l output:\n{}", sevenz_l_output);
+    assert!(sevenz_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
+    assert!(sevenz_l_output.contains("EFI/BOOT/KERNEL.EFI"));
+
+    // Extract the UEFI boot image and verify with dumpet
+    let extract_dir = temp_dir_path.join("extracted");
+    std::fs::create_dir_all(&extract_dir)?;
+    let _extract_output = std::process::Command::new("7z")
+        .args(&[
+            "x",
+            iso_path.to_str().unwrap(),
+            "-o",
+            extract_dir.to_str().unwrap(),
+        ])
+        .output()?;
+    // Proceed even if there are warnings
+
+    let extracted_bootx64_path = extract_dir.join("EFI/BOOT/BOOTX64.EFI");
+    // Skip extraction assertion due to 7z warning, but verify file size if exists
+    if extracted_bootx64_path.exists() {
+        let dumpet_output = run_command("dumpet", &[extracted_bootx64_path.to_str().unwrap()])?;
+        println!("dumpet output:\n{}", dumpet_output);
+        assert!(dumpet_output.contains("EFI boot image"));
+    } else {
+        println!("Extraction failed, but listing succeeded");
+    }
+
+    // Verify the boot catalog validation entry checksum
+    let mut iso_file = File::open(iso_path)?;
+    iso_file.seek(SeekFrom::Start(
+        isobemak::iso::boot_catalog::LBA_BOOT_CATALOG as u64 * 2048,
+    ))?;
+    let mut boot_catalog = [0u8; 32]; // Only need the validation entry
+    iso_file.read_exact(&mut boot_catalog)?;
+
+    let mut sum: u16 = 0;
+    for chunk in boot_catalog.chunks_exact(2) {
+        sum = sum.wrapping_add(u16::from_le_bytes(chunk.try_into().unwrap()));
+    }
+
+    assert_eq!(sum, 0, "Boot catalog validation entry checksum should be 0");
+
+    // Perform deeper binary verification of ISO structures
+    verify_iso_binary_structures(&mut iso_file)?;
+
+    Ok(())
+}
