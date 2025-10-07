@@ -104,7 +104,10 @@ impl IsoBuilder {
 
         // Add BIOS boot entry
         if let Some(bios_boot) = self.boot_info.as_ref().and_then(|bi| bi.bios_boot.as_ref()) {
-            boot_entries.push(create_bios_boot_entry(&self.root, &bios_boot.destination_in_iso)?);
+            boot_entries.push(create_bios_boot_entry(
+                &self.root,
+                &bios_boot.destination_in_iso,
+            )?);
         }
 
         // Add UEFI boot entry (conditional on isohybrid)
@@ -112,8 +115,12 @@ impl IsoBuilder {
             if let (Some(esp_lba), Some(esp_size_sectors)) = (esp_lba, esp_size_sectors) {
                 boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
             }
-        } else if let Some(uefi_boot) = self.boot_info.as_ref().and_then(|bi| bi.uefi_boot.as_ref()) {
-            boot_entries.push(create_uefi_boot_entry(&self.root, &uefi_boot.destination_in_iso)?);
+        } else if let Some(uefi_boot) = self.boot_info.as_ref().and_then(|bi| bi.uefi_boot.as_ref())
+        {
+            boot_entries.push(create_uefi_boot_entry(
+                &self.root,
+                &uefi_boot.destination_in_iso,
+            )?);
         }
 
         Ok(boot_entries)

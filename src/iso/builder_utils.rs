@@ -165,18 +165,29 @@ pub fn create_boot_entry_generic(
         boot_image_lba: match boot_type {
             BootType::Bios | BootType::Uefi => {
                 let path = destination_path.ok_or_else(|| {
-                    io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "Path required for {} boot",
+                        boot_type.description()
+                    )
                 })?;
                 get_lba_for_path(root, path)?
             }
             BootType::UefiEsp => esp_lba.ok_or_else(|| {
-                io_error!(io::ErrorKind::InvalidInput, "ESP LBA required for UEFI ESP boot")
+                io_error!(
+                    io::ErrorKind::InvalidInput,
+                    "ESP LBA required for UEFI ESP boot"
+                )
             })?,
         },
         boot_image_sectors: match boot_type {
             BootType::Bios | BootType::Uefi => {
                 let path = destination_path.ok_or_else(|| {
-                    io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "Path required for {} boot",
+                        boot_type.description()
+                    )
                 })?;
                 let size = get_file_size_in_iso(root, path)?;
                 let sectors = size.div_ceil(512).max(1);
@@ -185,12 +196,22 @@ pub fn create_boot_entry_generic(
             }
             BootType::UefiEsp => {
                 let sectors = esp_size_sectors.ok_or_else(|| {
-                    io_error!(io::ErrorKind::InvalidInput, "ESP size required for UEFI ESP boot")
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "ESP size required for UEFI ESP boot"
+                    )
                 })?;
                 let boot_image_512_sectors = sectors.checked_mul(4).ok_or_else(|| {
-                    io_error!(io::ErrorKind::InvalidInput, "UEFI ESP boot image size calculation overflowed")
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "UEFI ESP boot image size calculation overflowed"
+                    )
                 })?;
-                validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, boot_type.description())?;
+                validate_boot_image_size(
+                    boot_image_512_sectors as u64,
+                    u16::MAX as u64,
+                    boot_type.description(),
+                )?;
                 boot_image_512_sectors as u16
             }
         },
@@ -219,7 +240,13 @@ pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
 ) -> io::Result<BootCatalogEntry> {
-    create_boot_entry_generic(BootType::UefiEsp, &IsoDirectory::new(), None, Some(esp_lba), Some(esp_size_sectors))
+    create_boot_entry_generic(
+        BootType::UefiEsp,
+        &IsoDirectory::new(),
+        None,
+        Some(esp_lba),
+        Some(esp_size_sectors),
+    )
 }
 
 /// Get file metadata with consistent error handling

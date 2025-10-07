@@ -18,8 +18,6 @@ pub const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
 pub const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 pub const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
 
-
-
 /// A helper function to update two 4-byte fields at different offsets
 /// within a single ISO sector (2048 bytes).
 fn update_4byte_fields(
