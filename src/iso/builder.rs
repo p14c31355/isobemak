@@ -164,7 +164,7 @@ impl IsoBuilder {
                 esp_partition_start_lba as u64,
                 esp_partition_end_lba as u64,
                 "EFI System Partition",
-                0x0000000000000002,
+                0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
             )];
             write_gpt_structures(iso_file, total_lbas, &partitions)?;
             iso_file.sync_data()?;
