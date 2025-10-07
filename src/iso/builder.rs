@@ -10,10 +10,11 @@ use crate::iso::constants::ESP_START_LBA;
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
+use crate::iso::boot_catalog::BootCatalogEntry;
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
     calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
-    get_file_metadata,
+    ensure_directory_path, get_file_metadata,
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
@@ -58,47 +59,15 @@ impl IsoBuilder {
 
     /// Adds a file to the ISO filesystem tree.
     pub fn add_file(&mut self, path_in_iso: &str, real_path: PathBuf) -> io::Result<()> {
-        let path = Path::new(path_in_iso);
-        let mut current_dir = &mut self.root;
-
-        let components: Vec<_> = path.components().collect();
-        if components.len() > 1 {
-            for component in components.iter().take(components.len() - 1) {
-                let component_name = component
-                    .as_os_str()
-                    .to_str()
-                    .ok_or_else(|| {
-                        io_error!(
-                            io::ErrorKind::InvalidInput,
-                            "Invalid path component in {}: {:?}",
-                            path_in_iso,
-                            component
-                        )
-                    })?
-                    .to_string();
-                current_dir = match current_dir
-                    .children
-                    .entry(component_name)
-                    .or_insert_with(|| IsoFsNode::Directory(IsoDirectory::new()))
-                {
-                    IsoFsNode::Directory(dir) => dir,
-                    _ => {
-                        return Err(io_error!(
-                            io::ErrorKind::AlreadyExists,
-                            "{} is not a directory",
-                            path_in_iso
-                        ));
-                    }
-                };
-            }
-        }
-
-        let file_name = path
+        let file_name = Path::new(path_in_iso)
             .file_name()
             .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid file name"))?
             .to_str()
             .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid file name"))?
             .to_string();
+
+        let current_dir = ensure_directory_path(&mut self.root, path_in_iso)?;
+
         let file_metadata = get_file_metadata(&real_path)?;
         let file_size = file_metadata.len();
 
@@ -125,11 +94,84 @@ impl IsoBuilder {
         self.is_isohybrid = is_isohybrid;
     }
 
+    /// Prepares the list of boot catalog entries based on boot configuration.
+    fn prepare_boot_entries(&self, esp_lba: Option<u32>, esp_size_sectors: Option<u32>) -> io::Result<Vec<BootCatalogEntry>> {
+        let mut boot_entries = Vec::new();
+
+        // Add BIOS boot entry
+        if let Some(boot_info) = &self.boot_info
+            && let Some(bios_boot) = &boot_info.bios_boot
+        {
+            boot_entries.push(create_bios_boot_entry(
+                &self.root,
+                &bios_boot.destination_in_iso,
+            )?);
+        }
+
+        // Add UEFI boot entry
+        if self.is_isohybrid {
+            if let (Some(esp_lba), Some(esp_size_sectors)) = (esp_lba, esp_size_sectors) {
+                boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
+            }
+        } else if let Some(boot_info) = &self.boot_info
+            && let Some(uefi_boot) = &boot_info.uefi_boot
+        {
+            boot_entries.push(create_uefi_boot_entry(
+                &self.root,
+                &uefi_boot.destination_in_iso,
+            )?);
+        }
+
+        Ok(boot_entries)
+    }
+
+    /// Writes MBR and GPT structures for hybrid ISOs.
+    fn write_hybrid_structures(&self, iso_file: &mut File, total_lbas: u64, esp_size_sectors: Option<u32>) -> io::Result<()> {
+        // GPT structures require at least 69 LBAs
+        if total_lbas < 69 {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
+                    total_lbas
+                ),
+            ));
+        }
+
+        // Write MBR
+        iso_file.seek(SeekFrom::Start(0))?;
+        let mbr = create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+        mbr.write_to(iso_file)?;
+
+        // Write GPT structures if esp_size_sectors > 0
+        if let Some(esp_size_sectors_val) = esp_size_sectors
+            && esp_size_sectors_val > 0
+        {
+            let esp_partition_start_lba = ESP_START_LBA;
+            let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
+
+            let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
+            let esp_unique_guid_str = Uuid::new_v4().to_string();
+            let partitions = vec![GptPartitionEntry::new(
+                esp_guid_str,
+                &esp_unique_guid_str,
+                esp_partition_start_lba as u64,
+                esp_partition_end_lba as u64,
+                "EFI System Partition",
+                0x0000000000000002,
+            )];
+            write_gpt_structures(iso_file, total_lbas, &partitions)?;
+            iso_file.sync_data()?;
+        }
+
+        Ok(())
+    }
+
     /// Builds the ISO file based on the configured files and boot information.
     pub fn build(
         &mut self,
-        iso_file: &mut File, // Accept File handle directly
-        _iso_path: &Path,    // Renamed to _iso_path to silence unused variable warning
+        iso_file: &mut File,
+        _iso_path: &Path,
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
@@ -174,31 +216,7 @@ impl IsoBuilder {
         // This will be correctly updated by finalize later. The VDs are at fixed locations.
         write_descriptors(iso_file, self.root.lba, self.current_lba)?;
 
-        let mut boot_entries = Vec::new();
-
-        // Add BIOS boot entry
-        if let Some(boot_info) = &self.boot_info
-            && let Some(bios_boot) = &boot_info.bios_boot
-        {
-            boot_entries.push(create_bios_boot_entry(
-                &self.root,
-                &bios_boot.destination_in_iso,
-            )?);
-        }
-
-        // Add UEFI boot entry
-        if self.is_isohybrid {
-            if let (Some(esp_lba), Some(esp_size_sectors)) = (self.esp_lba, self.esp_size_sectors) {
-                boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
-            }
-        } else if let Some(boot_info) = &self.boot_info
-            && let Some(uefi_boot) = &boot_info.uefi_boot
-        {
-            boot_entries.push(create_uefi_boot_entry(
-                &self.root,
-                &uefi_boot.destination_in_iso,
-            )?);
-        }
+        let boot_entries = self.prepare_boot_entries(esp_lba, esp_size_sectors)?;
         write_boot_catalog_to_iso(iso_file, boot_catalog_lba, boot_entries)?;
 
         // Write directory records and copy file contents.
@@ -211,45 +229,8 @@ impl IsoBuilder {
         // If not isohybrid, clear the initial reserved sectors (MBR area).
 
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
-        let total_lbas = self.total_sectors as u64;
-
         if self.is_isohybrid {
-            // GPT structures require at least 69 LBAs (1 MBR + 1 GPT Header + 32 Partition Entries + 1 Backup GPT Header + 32 Backup Partition Entries + 2 for safety)
-            if total_lbas < 69 {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
-                        total_lbas
-                    ),
-                ));
-            }
-
-            // Write MBR
-            iso_file.seek(SeekFrom::Start(0))?;
-            let mbr = create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
-            mbr.write_to(iso_file)?;
-
-            // Write GPT structures if esp_size_sectors > 0
-            if let Some(esp_size_sectors_val) = esp_size_sectors
-                && esp_size_sectors_val > 0
-            {
-                let esp_partition_start_lba = ESP_START_LBA; // After MBR (1) + GPT Header (1) + GPT Partition Array (32)
-                let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
-
-                let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
-                let esp_unique_guid_str = Uuid::new_v4().to_string(); // Generate a new unique GUID
-                let partitions = vec![GptPartitionEntry::new(
-                    esp_guid_str,
-                    &esp_unique_guid_str,
-                    esp_partition_start_lba as u64,
-                    esp_partition_end_lba as u64,
-                    "EFI System Partition",
-                    0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
-                )];
-                write_gpt_structures(iso_file, total_lbas, &partitions)?;
-                iso_file.sync_data()?; // Explicitly sync data to disk after writing MBR/GPT
-            }
+            self.write_hybrid_structures(iso_file, self.total_sectors as u64, esp_size_sectors)?;
         }
 
         Ok(())

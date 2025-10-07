@@ -109,24 +109,34 @@ pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> i
     Ok(())
 }
 
-/// Create a boot catalog entry for BIOS boot
-pub fn create_bios_boot_entry(
+/// Create a boot catalog entry for boot images (BIOS or UEFI)
+fn create_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
+    platform_id: u8,
+    image_type: &str,
 ) -> io::Result<BootCatalogEntry> {
     let lba = get_lba_for_path(root, destination_path)?;
     let size = get_file_size_in_iso(root, destination_path)?;
     const EL_TORITO_SECTOR_SIZE: u64 = 512;
     let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
 
-    validate_boot_image_size(sectors, u16::MAX as u64, "BIOS boot")?;
+    validate_boot_image_size(sectors, u16::MAX as u64, image_type)?;
 
     Ok(BootCatalogEntry {
-        platform_id: 0x00, // 0x00 for x86 BIOS
+        platform_id,
         boot_image_lba: lba,
         boot_image_sectors: sectors as u16,
         bootable: true,
     })
+}
+
+/// Create a boot catalog entry for BIOS boot
+pub fn create_bios_boot_entry(
+    root: &IsoDirectory,
+    destination_path: &str,
+) -> io::Result<BootCatalogEntry> {
+    create_boot_entry(root, destination_path, 0x00, "BIOS boot")
 }
 
 /// Create a boot catalog entry for UEFI boot
@@ -134,19 +144,7 @@ pub fn create_uefi_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    let lba = get_lba_for_path(root, destination_path)?;
-    let size = get_file_size_in_iso(root, destination_path)?;
-    const EL_TORITO_SECTOR_SIZE: u64 = 512;
-    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-
-    validate_boot_image_size(sectors, u16::MAX as u64, "UEFI boot")?;
-
-    Ok(BootCatalogEntry {
-        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-        boot_image_lba: lba,
-        boot_image_sectors: sectors as u16,
-        bootable: true,
-    })
+    create_boot_entry(root, destination_path, BOOT_CATALOG_EFI_PLATFORM_ID, "UEFI boot")
 }
 
 /// Create a boot catalog entry for UEFI ESP partition
@@ -181,6 +179,70 @@ pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
             e
         )
     })
+}
+
+/// Navigate to a directory by path, creating intermediate directories if they don't exist.
+pub fn ensure_directory_path<'a>(
+    root: &'a mut IsoDirectory,
+    path: &str,
+) -> io::Result<&'a mut IsoDirectory> {
+    let components: Vec<_> = Path::new(path).components().collect();
+    let mut current_dir = root;
+
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let component_name = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+        current_dir = match current_dir
+            .children
+            .entry(component_name.to_string())
+            .or_insert_with(|| IsoFsNode::Directory(IsoDirectory::new()))
+        {
+            IsoFsNode::Directory(dir) => dir,
+            IsoFsNode::File(_) => {
+                return Err(io_error!(
+                    io::ErrorKind::AlreadyExists,
+                    "Path component '{}' is a file, expected directory",
+                    component_name
+                ));
+            }
+        };
+    }
+
+    Ok(current_dir)
+}
+
+/// Navigate to a directory by path, finding existing directories.
+fn navigate_directory_path<'a>(
+    root: &'a IsoDirectory,
+    components: &[std::path::Component],
+) -> io::Result<&'a IsoDirectory> {
+    let mut current_dir = root;
+
+    for (i, component) in components.iter().enumerate().take(components.len().saturating_sub(1)) {
+        let component_name = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+        match current_dir.children.get(component_name) {
+            Some(IsoFsNode::Directory(dir)) => current_dir = dir,
+            _ => {
+                return Err(io_error!(
+                    io::ErrorKind::NotFound,
+                    "Directory not found in path: {}",
+                    components
+                        .iter()
+                        .take(i + 1)
+                        .map(|c| c.as_os_str().to_str().unwrap_or("??"))
+                        .collect::<Vec<_>>()
+                        .join("/")
+                ));
+            }
+        };
+    }
+
+    Ok(current_dir)
 }
 
 /// Validate path components with consistent error handling
