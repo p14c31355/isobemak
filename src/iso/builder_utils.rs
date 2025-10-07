@@ -5,7 +5,7 @@ use crate::io_error;
 use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
-
+const EL_TORITO_SECTOR_SIZE: u64 = 512;
 /// Enum representing different boot types for cleaner boot entry creation
 #[derive(Clone, Copy)]
 pub enum BootType {
