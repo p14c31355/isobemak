@@ -38,6 +38,21 @@ fn update_4byte_fields(
     Ok(())
 }
 
+/// Helper to write a value in both little-endian and big-endian to a buffer at given offset and length.
+fn write_dual_endian(buf: &mut [u8], offset: usize, value: u32, byte_len: usize) {
+    match byte_len {
+        2 => {
+            buf[offset..offset + 2].copy_from_slice(&(value as u16).to_le_bytes());
+            buf[offset + 2..offset + 4].copy_from_slice(&(value as u16).to_be_bytes());
+        }
+        4 => {
+            buf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+            buf[offset + 4..offset + 8].copy_from_slice(&value.to_be_bytes());
+        }
+        _ => panic!("Unsupported byte length for dual endian write"),
+    }
+}
+
 pub fn write_primary_volume_descriptor(
     iso: &mut File,
     total_sectors: u32,
@@ -54,28 +69,16 @@ pub fn write_primary_volume_descriptor(
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
 
-    pvd[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
-        .copy_from_slice(&total_sectors.to_le_bytes());
-    pvd[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
-        .copy_from_slice(&total_sectors.to_be_bytes());
-
-    pvd[PVD_VOL_SET_SIZE_OFFSET..PVD_VOL_SET_SIZE_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
-    pvd[PVD_VOL_SET_SIZE_OFFSET + 2..PVD_VOL_SET_SIZE_OFFSET + 4]
-        .copy_from_slice(&1u16.to_be_bytes());
-
-    pvd[PVD_VOL_SEQ_NUM_OFFSET..PVD_VOL_SEQ_NUM_OFFSET + 2].copy_from_slice(&1u16.to_le_bytes());
-    pvd[PVD_VOL_SEQ_NUM_OFFSET + 2..PVD_VOL_SEQ_NUM_OFFSET + 4]
-        .copy_from_slice(&1u16.to_be_bytes());
-
-    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2]
-        .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_le_bytes());
-    pvd[PVD_LOGICAL_BLOCK_SIZE_OFFSET + 2..PVD_LOGICAL_BLOCK_SIZE_OFFSET + 4]
-        .copy_from_slice(&(ISO_SECTOR_SIZE as u16).to_be_bytes());
-
-    pvd[PVD_PATH_TABLE_SIZE_OFFSET..PVD_PATH_TABLE_SIZE_OFFSET + 4]
-        .copy_from_slice(&0u32.to_le_bytes());
-    pvd[PVD_PATH_TABLE_SIZE_OFFSET + 4..PVD_PATH_TABLE_SIZE_OFFSET + 8]
-        .copy_from_slice(&0u32.to_be_bytes());
+    write_dual_endian(&mut pvd, PVD_TOTAL_SECTORS_OFFSET, total_sectors, 4);
+    write_dual_endian(&mut pvd, PVD_VOL_SET_SIZE_OFFSET, 1, 2);
+    write_dual_endian(&mut pvd, PVD_VOL_SEQ_NUM_OFFSET, 1, 2);
+    write_dual_endian(
+        &mut pvd,
+        PVD_LOGICAL_BLOCK_SIZE_OFFSET,
+        ISO_SECTOR_SIZE as u32,
+        2,
+    );
+    write_dual_endian(&mut pvd, PVD_PATH_TABLE_SIZE_OFFSET, 0, 4);
 
     let root_entry_bytes = root_entry.to_bytes();
     pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_entry_bytes.len()]

@@ -79,7 +79,7 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         entry[0] = boot_indicator;
         entry[1] = 0x00; // No Emulation
         entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
-        entry[4] = 0x00; // System type (x86)
+        entry[4] = entry_data.platform_id; // System type (0xEF for UEFI)
 
         // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
         let sectors = entry_data.boot_image_sectors;

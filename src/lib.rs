@@ -1,9 +1,10 @@
 //! A library for creating bootable ISO 9660 images with UEFI support.
 
 // Public modules for interacting with the library's core functionalities.
+#[macro_use]
+pub mod utils;
 pub mod fat;
 pub mod iso;
-pub mod utils;
 
 // Re-export the main function for external use.
 pub use iso::boot_info::{BiosBootInfo, BootInfo, UefiBootInfo};

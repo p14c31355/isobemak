@@ -5,6 +5,31 @@ use crate::io_error;
 use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
+const EL_TORITO_SECTOR_SIZE: u64 = 512;
+/// Enum representing different boot types for cleaner boot entry creation
+#[derive(Clone, Copy)]
+pub enum BootType {
+    Bios,
+    Uefi,
+    UefiEsp,
+}
+
+impl BootType {
+    fn platform_id(self) -> u8 {
+        match self {
+            BootType::Bios => 0x00,
+            BootType::Uefi | BootType::UefiEsp => BOOT_CATALOG_EFI_PLATFORM_ID,
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            BootType::Bios => "BIOS boot",
+            BootType::Uefi => "UEFI boot",
+            BootType::UefiEsp => "UEFI ESP",
+        }
+    }
+}
 
 /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
 pub fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
@@ -51,18 +76,36 @@ pub fn get_file_size_in_iso(root: &IsoDirectory, path: &str) -> io::Result<u64> 
     }
 }
 
+/// Context for path operations, avoiding repeated parsing
+struct PathContext<'a> {
+    components: Vec<std::path::Component<'a>>,
+    path_str: &'a str,
+}
+
+impl<'a> PathContext<'a> {
+    fn new(path: &'a str) -> Self {
+        Self {
+            components: Path::new(path).components().collect(),
+            path_str: path,
+        }
+    }
+
+    fn validate_all(&self) -> io::Result<()> {
+        validate_path_components(Path::new(self.path_str))
+    }
+}
+
 /// Helper to find the IsoFsNode for a given path in the ISO filesystem.
 fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a IsoFsNode> {
+    let path_ctx = PathContext::new(path);
+    path_ctx.validate_all()?;
+
     let mut current_node = root;
-    let components: Vec<_> = Path::new(path).components().collect();
 
-    for (i, component) in components.iter().enumerate() {
-        let component_name = component
-            .as_os_str()
-            .to_str()
-            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+    for (i, component) in path_ctx.components.iter().enumerate() {
+        let component_name = ensure_path_component!(component, path_ctx.path_str);
 
-        if i == components.len() - 1 {
+        if i == path_ctx.components.len() - 1 {
             // Last component, this is the target node
             return current_node
                 .children
@@ -109,24 +152,79 @@ pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> i
     Ok(())
 }
 
+/// Generic function to create any boot entry type (returns result directly)
+pub fn create_boot_entry_generic(
+    boot_type: BootType,
+    root: &IsoDirectory,
+    destination_path: Option<&str>,
+    esp_lba: Option<u32>,
+    esp_size_sectors: Option<u32>,
+) -> io::Result<BootCatalogEntry> {
+    Ok(BootCatalogEntry {
+        platform_id: boot_type.platform_id(),
+        boot_image_lba: match boot_type {
+            BootType::Bios | BootType::Uefi => {
+                let path = destination_path.ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "Path required for {} boot",
+                        boot_type.description()
+                    )
+                })?;
+                get_lba_for_path(root, path)?
+            }
+            BootType::UefiEsp => esp_lba.ok_or_else(|| {
+                io_error!(
+                    io::ErrorKind::InvalidInput,
+                    "ESP LBA required for UEFI ESP boot"
+                )
+            })?,
+        },
+        boot_image_sectors: match boot_type {
+            BootType::Bios | BootType::Uefi => {
+                let path = destination_path.ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "Path required for {} boot",
+                        boot_type.description()
+                    )
+                })?;
+                let size = get_file_size_in_iso(root, path)?;
+                let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+                validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
+                sectors as u16
+            }
+            BootType::UefiEsp => {
+                let sectors = esp_size_sectors.ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "ESP size required for UEFI ESP boot"
+                    )
+                })?;
+                let boot_image_512_sectors = sectors.checked_mul(4).ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "UEFI ESP boot image size calculation overflowed"
+                    )
+                })?;
+                validate_boot_image_size(
+                    boot_image_512_sectors as u64,
+                    u16::MAX as u64,
+                    boot_type.description(),
+                )?;
+                boot_image_512_sectors as u16
+            }
+        },
+        bootable: true,
+    })
+}
+
 /// Create a boot catalog entry for BIOS boot
 pub fn create_bios_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    let lba = get_lba_for_path(root, destination_path)?;
-    let size = get_file_size_in_iso(root, destination_path)?;
-    const EL_TORITO_SECTOR_SIZE: u64 = 512;
-    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-
-    validate_boot_image_size(sectors, u16::MAX as u64, "BIOS boot")?;
-
-    Ok(BootCatalogEntry {
-        platform_id: 0x00, // 0x00 for x86 BIOS
-        boot_image_lba: lba,
-        boot_image_sectors: sectors as u16,
-        bootable: true,
-    })
+    create_boot_entry_generic(BootType::Bios, root, Some(destination_path), None, None)
 }
 
 /// Create a boot catalog entry for UEFI boot
@@ -134,19 +232,7 @@ pub fn create_uefi_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    let lba = get_lba_for_path(root, destination_path)?;
-    let size = get_file_size_in_iso(root, destination_path)?;
-    const EL_TORITO_SECTOR_SIZE: u64 = 512;
-    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-
-    validate_boot_image_size(sectors, u16::MAX as u64, "UEFI boot")?;
-
-    Ok(BootCatalogEntry {
-        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-        boot_image_lba: lba,
-        boot_image_sectors: sectors as u16,
-        bootable: true,
-    })
+    create_boot_entry_generic(BootType::Uefi, root, Some(destination_path), None, None)
 }
 
 /// Create a boot catalog entry for UEFI ESP partition
@@ -154,14 +240,13 @@ pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
 ) -> io::Result<BootCatalogEntry> {
-    validate_boot_image_size(esp_size_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
-
-    Ok(BootCatalogEntry {
-        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-        boot_image_lba: esp_lba,
-        boot_image_sectors: (esp_size_sectors * 4) as u16,
-        bootable: true,
-    })
+    create_boot_entry_generic(
+        BootType::UefiEsp,
+        &IsoDirectory::new(),
+        None,
+        Some(esp_lba),
+        Some(esp_size_sectors),
+    )
 }
 
 /// Get file metadata with consistent error handling
@@ -174,6 +259,38 @@ pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
             e
         )
     })
+}
+
+/// Navigate to a directory by path, creating intermediate directories if they don't exist.
+pub fn ensure_directory_path<'a>(
+    root: &'a mut IsoDirectory,
+    path: &str,
+) -> io::Result<&'a mut IsoDirectory> {
+    let components: Vec<_> = Path::new(path).components().collect();
+    let mut current_dir = root;
+
+    for component in components.iter().take(components.len().saturating_sub(1)) {
+        let component_name = component
+            .as_os_str()
+            .to_str()
+            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+        current_dir = match current_dir
+            .children
+            .entry(component_name.to_string())
+            .or_insert_with(|| IsoFsNode::Directory(IsoDirectory::new()))
+        {
+            IsoFsNode::Directory(dir) => dir,
+            IsoFsNode::File(_) => {
+                return Err(io_error!(
+                    io::ErrorKind::AlreadyExists,
+                    "Path component '{}' is a file, expected directory",
+                    component_name
+                ));
+            }
+        };
+    }
+
+    Ok(current_dir)
 }
 
 /// Validate path components with consistent error handling
