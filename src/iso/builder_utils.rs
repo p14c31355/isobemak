@@ -51,18 +51,36 @@ pub fn get_file_size_in_iso(root: &IsoDirectory, path: &str) -> io::Result<u64> 
     }
 }
 
+/// Context for path operations, avoiding repeated parsing
+struct PathContext<'a> {
+    components: Vec<std::path::Component<'a>>,
+    path_str: &'a str,
+}
+
+impl<'a> PathContext<'a> {
+    fn new(path: &'a str) -> Self {
+        Self {
+            components: Path::new(path).components().collect(),
+            path_str: path,
+        }
+    }
+
+    fn validate_all(&self) -> io::Result<()> {
+        validate_path_components(Path::new(self.path_str))
+    }
+}
+
 /// Helper to find the IsoFsNode for a given path in the ISO filesystem.
 fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a IsoFsNode> {
+    let path_ctx = PathContext::new(path);
+    path_ctx.validate_all()?;
+
     let mut current_node = root;
-    let components: Vec<_> = Path::new(path).components().collect();
 
-    for (i, component) in components.iter().enumerate() {
-        let component_name = component
-            .as_os_str()
-            .to_str()
-            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+    for (i, component) in path_ctx.components.iter().enumerate() {
+        let component_name = ensure_path_component!(component, path_ctx.path_str);
 
-        if i == components.len() - 1 {
+        if i == path_ctx.components.len() - 1 {
             // Last component, this is the target node
             return current_node
                 .children
@@ -210,42 +228,6 @@ pub fn ensure_directory_path<'a>(
                     io::ErrorKind::AlreadyExists,
                     "Path component '{}' is a file, expected directory",
                     component_name
-                ));
-            }
-        };
-    }
-
-    Ok(current_dir)
-}
-
-/// Navigate to a directory by path, finding existing directories.
-fn navigate_directory_path<'a>(
-    root: &'a IsoDirectory,
-    components: &[std::path::Component],
-) -> io::Result<&'a IsoDirectory> {
-    let mut current_dir = root;
-
-    for (i, component) in components
-        .iter()
-        .enumerate()
-        .take(components.len().saturating_sub(1))
-    {
-        let component_name = component
-            .as_os_str()
-            .to_str()
-            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
-        match current_dir.children.get(component_name) {
-            Some(IsoFsNode::Directory(dir)) => current_dir = dir,
-            _ => {
-                return Err(io_error!(
-                    io::ErrorKind::NotFound,
-                    "Directory not found in path: {}",
-                    components
-                        .iter()
-                        .take(i + 1)
-                        .map(|c| c.as_os_str().to_str().unwrap_or("??"))
-                        .collect::<Vec<_>>()
-                        .join("/")
                 ));
             }
         };
