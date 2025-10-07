@@ -161,11 +161,7 @@ pub fn create_uefi_esp_boot_entry(
         )
     })?;
 
-    validate_boot_image_size(
-        boot_image_512_sectors as u64,
-        u16::MAX as u64,
-        "UEFI ESP",
-    )?;
+    validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
 
     Ok(BootCatalogEntry {
         platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
