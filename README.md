@@ -130,7 +130,7 @@ For more control, you can use the `IsoBuilder`:
 ```rust
 use isobemak::{IsoBuilder, BootInfo, BiosBootInfo, UefiBootInfo};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 let mut builder = IsoBuilder::new();
 builder.set_isohybrid(true);
