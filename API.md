@@ -216,7 +216,7 @@ let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &
 ```rust
 use isobemak::{IsoBuilder, BootInfo, BiosBootInfo, UefiBootInfo};
 use std::fs::File;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 let mut builder = IsoBuilder::new();
 builder.set_isohybrid(true);
