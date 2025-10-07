@@ -190,7 +190,7 @@ pub fn create_boot_entry_generic(
                     )
                 })?;
                 let size = get_file_size_in_iso(root, path)?;
-                let sectors = size.div_ceil(512).max(1);
+                let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
                 validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
                 sectors as u16
             }
