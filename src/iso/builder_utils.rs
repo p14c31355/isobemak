@@ -152,7 +152,7 @@ pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> i
     Ok(())
 }
 
-/// Generic function to create any boot entry type
+/// Generic function to create any boot entry type (returns result directly)
 pub fn create_boot_entry_generic(
     boot_type: BootType,
     root: &IsoDirectory,
@@ -160,50 +160,42 @@ pub fn create_boot_entry_generic(
     esp_lba: Option<u32>,
     esp_size_sectors: Option<u32>,
 ) -> io::Result<BootCatalogEntry> {
-    match boot_type {
-        BootType::Bios | BootType::Uefi => {
-            let path = destination_path.ok_or_else(|| {
-                io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
-            })?;
-            let lba = get_lba_for_path(root, path)?;
-            let size = get_file_size_in_iso(root, path)?;
-            const EL_TORITO_SECTOR_SIZE: u64 = 512;
-            let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-
-            validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
-
-            Ok(BootCatalogEntry {
-                platform_id: boot_type.platform_id(),
-                boot_image_lba: lba,
-                boot_image_sectors: sectors as u16,
-                bootable: true,
-            })
-        }
-        BootType::UefiEsp => {
-            let esp_lba = esp_lba.ok_or_else(|| {
+    Ok(BootCatalogEntry {
+        platform_id: boot_type.platform_id(),
+        boot_image_lba: match boot_type {
+            BootType::Bios | BootType::Uefi => {
+                let path = destination_path.ok_or_else(|| {
+                    io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
+                })?;
+                get_lba_for_path(root, path)?
+            }
+            BootType::UefiEsp => esp_lba.ok_or_else(|| {
                 io_error!(io::ErrorKind::InvalidInput, "ESP LBA required for UEFI ESP boot")
-            })?;
-            let esp_size_sectors = esp_size_sectors.ok_or_else(|| {
-                io_error!(io::ErrorKind::InvalidInput, "ESP size required for UEFI ESP boot")
-            })?;
-
-            let boot_image_512_sectors = esp_size_sectors.checked_mul(4).ok_or_else(|| {
-                io_error!(
-                    io::ErrorKind::InvalidInput,
-                    "UEFI ESP boot image size calculation overflowed"
-                )
-            })?;
-
-            validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, boot_type.description())?;
-
-            Ok(BootCatalogEntry {
-                platform_id: boot_type.platform_id(),
-                boot_image_lba: esp_lba,
-                boot_image_sectors: boot_image_512_sectors as u16,
-                bootable: true,
-            })
-        }
-    }
+            })?,
+        },
+        boot_image_sectors: match boot_type {
+            BootType::Bios | BootType::Uefi => {
+                let path = destination_path.ok_or_else(|| {
+                    io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
+                })?;
+                let size = get_file_size_in_iso(root, path)?;
+                let sectors = size.div_ceil(512).max(1);
+                validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
+                sectors as u16
+            }
+            BootType::UefiEsp => {
+                let sectors = esp_size_sectors.ok_or_else(|| {
+                    io_error!(io::ErrorKind::InvalidInput, "ESP size required for UEFI ESP boot")
+                })?;
+                let boot_image_512_sectors = sectors.checked_mul(4).ok_or_else(|| {
+                    io_error!(io::ErrorKind::InvalidInput, "UEFI ESP boot image size calculation overflowed")
+                })?;
+                validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, boot_type.description())?;
+                boot_image_512_sectors as u16
+            }
+        },
+        bootable: true,
+    })
 }
 
 /// Create a boot catalog entry for BIOS boot

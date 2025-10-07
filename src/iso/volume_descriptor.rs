@@ -18,26 +18,7 @@ pub const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
 pub const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
 pub const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
 
-/// Trait for types that can write dual endian fields to ISO sectors
-trait DualEndianWrite {
-    fn write_dual_endian(&mut self, offset: usize, value: u32, byte_len: usize);
-}
 
-impl DualEndianWrite for [u8] {
-    fn write_dual_endian(&mut self, offset: usize, value: u32, byte_len: usize) {
-        match byte_len {
-            2 => {
-                self[offset..offset + 2].copy_from_slice(&(value as u16).to_le_bytes());
-                self[offset + 2..offset + 4].copy_from_slice(&(value as u16).to_be_bytes());
-            }
-            4 => {
-                self[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-                self[offset + 4..offset + 8].copy_from_slice(&value.to_be_bytes());
-            }
-            _ => panic!("Unsupported byte length for dual endian write"),
-        }
-    }
-}
 
 /// A helper function to update two 4-byte fields at different offsets
 /// within a single ISO sector (2048 bytes).

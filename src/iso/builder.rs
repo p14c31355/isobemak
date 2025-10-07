@@ -102,39 +102,18 @@ impl IsoBuilder {
     ) -> io::Result<Vec<BootCatalogEntry>> {
         let mut boot_entries = Vec::new();
 
-        // Helper generic function for conditional boot entry creation
-        fn add_boot_entry_if_some<T, F>(
-            boot_entries: &mut Vec<BootCatalogEntry>,
-            option: Option<&T>,
-            create_fn: F,
-        ) -> io::Result<()>
-        where
-            F: FnOnce(&T) -> io::Result<BootCatalogEntry>,
-        {
-            if let Some(value) = option {
-                boot_entries.push(create_fn(value)?);
-            }
-            Ok(())
-        }
-
         // Add BIOS boot entry
-        add_boot_entry_if_some(
-            &mut boot_entries,
-            self.boot_info.as_ref().and_then(|bi| bi.bios_boot.as_ref()),
-            |bios_boot| create_bios_boot_entry(&self.root, &bios_boot.destination_in_iso),
-        )?;
+        if let Some(bios_boot) = self.boot_info.as_ref().and_then(|bi| bi.bios_boot.as_ref()) {
+            boot_entries.push(create_bios_boot_entry(&self.root, &bios_boot.destination_in_iso)?);
+        }
 
         // Add UEFI boot entry (conditional on isohybrid)
         if self.is_isohybrid {
             if let (Some(esp_lba), Some(esp_size_sectors)) = (esp_lba, esp_size_sectors) {
                 boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
             }
-        } else {
-            add_boot_entry_if_some(
-                &mut boot_entries,
-                self.boot_info.as_ref().and_then(|bi| bi.uefi_boot.as_ref()),
-                |uefi_boot| create_uefi_boot_entry(&self.root, &uefi_boot.destination_in_iso),
-            )?;
+        } else if let Some(uefi_boot) = self.boot_info.as_ref().and_then(|bi| bi.uefi_boot.as_ref()) {
+            boot_entries.push(create_uefi_boot_entry(&self.root, &uefi_boot.destination_in_iso)?);
         }
 
         Ok(boot_entries)
