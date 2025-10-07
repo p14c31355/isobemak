@@ -95,7 +95,11 @@ impl IsoBuilder {
     }
 
     /// Prepares the list of boot catalog entries based on boot configuration.
-    fn prepare_boot_entries(&self, esp_lba: Option<u32>, esp_size_sectors: Option<u32>) -> io::Result<Vec<BootCatalogEntry>> {
+    fn prepare_boot_entries(
+        &self,
+        esp_lba: Option<u32>,
+        esp_size_sectors: Option<u32>,
+    ) -> io::Result<Vec<BootCatalogEntry>> {
         let mut boot_entries = Vec::new();
 
         // Add BIOS boot entry
@@ -126,7 +130,12 @@ impl IsoBuilder {
     }
 
     /// Writes MBR and GPT structures for hybrid ISOs.
-    fn write_hybrid_structures(&self, iso_file: &mut File, total_lbas: u64, esp_size_sectors: Option<u32>) -> io::Result<()> {
+    fn write_hybrid_structures(
+        &self,
+        iso_file: &mut File,
+        total_lbas: u64,
+        esp_size_sectors: Option<u32>,
+    ) -> io::Result<()> {
         // GPT structures require at least 69 LBAs
         if total_lbas < 69 {
             return Err(io::Error::new(

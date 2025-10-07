@@ -72,7 +72,12 @@ pub fn write_primary_volume_descriptor(
     write_dual_endian(&mut pvd, PVD_TOTAL_SECTORS_OFFSET, total_sectors, 4);
     write_dual_endian(&mut pvd, PVD_VOL_SET_SIZE_OFFSET, 1, 2);
     write_dual_endian(&mut pvd, PVD_VOL_SEQ_NUM_OFFSET, 1, 2);
-    write_dual_endian(&mut pvd, PVD_LOGICAL_BLOCK_SIZE_OFFSET, ISO_SECTOR_SIZE as u32, 2);
+    write_dual_endian(
+        &mut pvd,
+        PVD_LOGICAL_BLOCK_SIZE_OFFSET,
+        ISO_SECTOR_SIZE as u32,
+        2,
+    );
     write_dual_endian(&mut pvd, PVD_PATH_TABLE_SIZE_OFFSET, 0, 4);
 
     let root_entry_bytes = root_entry.to_bytes();

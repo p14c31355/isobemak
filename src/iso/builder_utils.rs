@@ -144,7 +144,12 @@ pub fn create_uefi_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    create_boot_entry(root, destination_path, BOOT_CATALOG_EFI_PLATFORM_ID, "UEFI boot")
+    create_boot_entry(
+        root,
+        destination_path,
+        BOOT_CATALOG_EFI_PLATFORM_ID,
+        "UEFI boot",
+    )
 }
 
 /// Create a boot catalog entry for UEFI ESP partition
@@ -220,7 +225,11 @@ fn navigate_directory_path<'a>(
 ) -> io::Result<&'a IsoDirectory> {
     let mut current_dir = root;
 
-    for (i, component) in components.iter().enumerate().take(components.len().saturating_sub(1)) {
+    for (i, component) in components
+        .iter()
+        .enumerate()
+        .take(components.len().saturating_sub(1))
+    {
         let component_name = component
             .as_os_str()
             .to_str()
