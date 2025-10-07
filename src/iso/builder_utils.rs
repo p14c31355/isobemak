@@ -154,12 +154,23 @@ pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
 ) -> io::Result<BootCatalogEntry> {
-    validate_boot_image_size(esp_size_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
+    let boot_image_512_sectors = esp_size_sectors.checked_mul(4).ok_or_else(|| {
+        io_error!(
+            io::ErrorKind::InvalidInput,
+            "UEFI ESP boot image size calculation overflowed"
+        )
+    })?;
+
+    validate_boot_image_size(
+        boot_image_512_sectors as u64,
+        u16::MAX as u64,
+        "UEFI ESP",
+    )?;
 
     Ok(BootCatalogEntry {
         platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
         boot_image_lba: esp_lba,
-        boot_image_sectors: (esp_size_sectors * 4) as u16,
+        boot_image_sectors: boot_image_512_sectors as u16,
         bootable: true,
     })
 }
