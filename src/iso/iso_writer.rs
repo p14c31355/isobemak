@@ -1,6 +1,7 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
+use crate::for_sorted_children;
 use crate::iso::boot_catalog::{BootCatalogEntry, write_boot_catalog};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
@@ -41,9 +42,6 @@ pub fn write_directories(
 ) -> io::Result<()> {
     seek_to_lba(iso_file, dir.lba)?;
 
-    let mut sorted_children: Vec<_> = dir.children.iter().collect();
-    sorted_children.sort_by_key(|(name, _)| *name);
-
     let mut dir_entries = Vec::new();
     // Self-reference
     dir_entries.push(IsoDirEntry {
@@ -60,7 +58,7 @@ pub fn write_directories(
         name: "..",
     });
 
-    for (name, node) in &sorted_children {
+    for_sorted_children!(dir, |name, node| {
         let (lba, size, flags) = match node {
             IsoFsNode::File(file) => {
                 let file_size_u32 = u32::try_from(file.size).map_err(|_| {
@@ -82,7 +80,7 @@ pub fn write_directories(
             flags,
             name: name.as_str(),
         });
-    }
+    });
 
     let mut dir_sector = [0u8; ISO_SECTOR_SIZE];
     let mut offset = 0;
@@ -94,21 +92,18 @@ pub fn write_directories(
     }
     iso_file.write_all(&dir_sector)?;
 
-    for (_, node) in sorted_children {
+    for_sorted_children!(dir, |_name, node| {
         if let IsoFsNode::Directory(subdir) = node {
             write_directories(iso_file, subdir, dir.lba)?;
         }
-    }
+    });
 
     Ok(())
 }
 
 /// Copies all file contents to the ISO image.
 pub fn copy_files(iso_file: &mut File, dir: &IsoDirectory) -> io::Result<()> {
-    let mut sorted_children: Vec<_> = dir.children.iter().collect();
-    sorted_children.sort_by_key(|(name, _)| *name);
-
-    for (_, node) in sorted_children {
+    for_sorted_children!(dir, |_name, node| {
         match node {
             IsoFsNode::File(file) => {
                 seek_to_lba(iso_file, file.lba)?;
@@ -119,7 +114,7 @@ pub fn copy_files(iso_file: &mut File, dir: &IsoDirectory) -> io::Result<()> {
                 copy_files(iso_file, subdir)?;
             }
         }
-    }
+    });
 
     Ok(())
 }

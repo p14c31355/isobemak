@@ -47,6 +47,30 @@ macro_rules! ensure_boot_image_size_valid {
     };
 }
 
+/// Helper macro to iterate over sorted children of a directory
+#[macro_export]
+macro_rules! for_sorted_children {
+    ($dir:expr, |$name:ident, $node:ident| $body:block) => {
+        {
+            let mut sorted_children: Vec<_> = $dir.children.iter().collect();
+            sorted_children.sort_by_key(|(name, _)| *name);
+            for ($name, $node) in sorted_children {
+                $body
+            }
+        }
+    };
+
+    ($dir:expr, mut |$name:ident, $node:ident| $body:block) => {
+        {
+            let mut sorted_children: Vec<_> = $dir.children.iter_mut().collect();
+            sorted_children.sort_by_key(|(name, _)| *name);
+            for ($name, $node) in sorted_children {
+                $body
+            }
+        }
+    };
+}
+
 #[cfg(test)]
 pub mod test_utils {
     use std::fs;
