@@ -6,6 +6,31 @@ use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
 
+/// Enum representing different boot types for cleaner boot entry creation
+#[derive(Clone, Copy)]
+pub enum BootType {
+    Bios,
+    Uefi,
+    UefiEsp,
+}
+
+impl BootType {
+    fn platform_id(self) -> u8 {
+        match self {
+            BootType::Bios => 0x00,
+            BootType::Uefi | BootType::UefiEsp => BOOT_CATALOG_EFI_PLATFORM_ID,
+        }
+    }
+
+    fn description(self) -> &'static str {
+        match self {
+            BootType::Bios => "BIOS boot",
+            BootType::Uefi => "UEFI boot",
+            BootType::UefiEsp => "UEFI ESP",
+        }
+    }
+}
+
 /// Calculates the Logical Block Addresses (LBAs) for all files and directories.
 pub fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
     dir.lba = *current_lba;
@@ -127,26 +152,58 @@ pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> i
     Ok(())
 }
 
-/// Create a boot catalog entry for boot images (BIOS or UEFI)
-fn create_boot_entry(
+/// Generic function to create any boot entry type
+pub fn create_boot_entry_generic(
+    boot_type: BootType,
     root: &IsoDirectory,
-    destination_path: &str,
-    platform_id: u8,
-    image_type: &str,
+    destination_path: Option<&str>,
+    esp_lba: Option<u32>,
+    esp_size_sectors: Option<u32>,
 ) -> io::Result<BootCatalogEntry> {
-    let lba = get_lba_for_path(root, destination_path)?;
-    let size = get_file_size_in_iso(root, destination_path)?;
-    const EL_TORITO_SECTOR_SIZE: u64 = 512;
-    let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+    match boot_type {
+        BootType::Bios | BootType::Uefi => {
+            let path = destination_path.ok_or_else(|| {
+                io_error!(io::ErrorKind::InvalidInput, "Path required for {} boot", boot_type.description())
+            })?;
+            let lba = get_lba_for_path(root, path)?;
+            let size = get_file_size_in_iso(root, path)?;
+            const EL_TORITO_SECTOR_SIZE: u64 = 512;
+            let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
 
-    validate_boot_image_size(sectors, u16::MAX as u64, image_type)?;
+            validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
 
-    Ok(BootCatalogEntry {
-        platform_id,
-        boot_image_lba: lba,
-        boot_image_sectors: sectors as u16,
-        bootable: true,
-    })
+            Ok(BootCatalogEntry {
+                platform_id: boot_type.platform_id(),
+                boot_image_lba: lba,
+                boot_image_sectors: sectors as u16,
+                bootable: true,
+            })
+        }
+        BootType::UefiEsp => {
+            let esp_lba = esp_lba.ok_or_else(|| {
+                io_error!(io::ErrorKind::InvalidInput, "ESP LBA required for UEFI ESP boot")
+            })?;
+            let esp_size_sectors = esp_size_sectors.ok_or_else(|| {
+                io_error!(io::ErrorKind::InvalidInput, "ESP size required for UEFI ESP boot")
+            })?;
+
+            let boot_image_512_sectors = esp_size_sectors.checked_mul(4).ok_or_else(|| {
+                io_error!(
+                    io::ErrorKind::InvalidInput,
+                    "UEFI ESP boot image size calculation overflowed"
+                )
+            })?;
+
+            validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, boot_type.description())?;
+
+            Ok(BootCatalogEntry {
+                platform_id: boot_type.platform_id(),
+                boot_image_lba: esp_lba,
+                boot_image_sectors: boot_image_512_sectors as u16,
+                bootable: true,
+            })
+        }
+    }
 }
 
 /// Create a boot catalog entry for BIOS boot
@@ -154,7 +211,7 @@ pub fn create_bios_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    create_boot_entry(root, destination_path, 0x00, "BIOS boot")
+    create_boot_entry_generic(BootType::Bios, root, Some(destination_path), None, None)
 }
 
 /// Create a boot catalog entry for UEFI boot
@@ -162,12 +219,7 @@ pub fn create_uefi_boot_entry(
     root: &IsoDirectory,
     destination_path: &str,
 ) -> io::Result<BootCatalogEntry> {
-    create_boot_entry(
-        root,
-        destination_path,
-        BOOT_CATALOG_EFI_PLATFORM_ID,
-        "UEFI boot",
-    )
+    create_boot_entry_generic(BootType::Uefi, root, Some(destination_path), None, None)
 }
 
 /// Create a boot catalog entry for UEFI ESP partition
@@ -175,21 +227,7 @@ pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
 ) -> io::Result<BootCatalogEntry> {
-    let boot_image_512_sectors = esp_size_sectors.checked_mul(4).ok_or_else(|| {
-        io_error!(
-            io::ErrorKind::InvalidInput,
-            "UEFI ESP boot image size calculation overflowed"
-        )
-    })?;
-
-    validate_boot_image_size(boot_image_512_sectors as u64, u16::MAX as u64, "UEFI ESP")?;
-
-    Ok(BootCatalogEntry {
-        platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-        boot_image_lba: esp_lba,
-        boot_image_sectors: boot_image_512_sectors as u16,
-        bootable: true,
-    })
+    create_boot_entry_generic(BootType::UefiEsp, &IsoDirectory::new(), None, Some(esp_lba), Some(esp_size_sectors))
 }
 
 /// Get file metadata with consistent error handling
