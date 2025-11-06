@@ -27,6 +27,7 @@ use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
+    volume_id: Option<String>,
     root: IsoDirectory,
     boot_info: Option<BootInfo>,
     current_lba: u32,
@@ -46,6 +47,7 @@ impl Default for IsoBuilder {
 impl IsoBuilder {
     pub fn new() -> Self {
         Self {
+            volume_id: None,
             root: IsoDirectory::new(),
             boot_info: None,
             current_lba: 0,
@@ -55,6 +57,10 @@ impl IsoBuilder {
             esp_lba: None,
             esp_size_sectors: None,
         }
+    }
+
+    pub fn set_volume_id(&mut self, volume_id: Option<String>) {
+        self.volume_id = volume_id;
     }
 
     /// Adds a file to the ISO filesystem tree.
@@ -220,7 +226,12 @@ impl IsoBuilder {
         // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
         // Pass the calculated end of filesystem data as a preliminary total_sectors.
         // This will be correctly updated by finalize later. The VDs are at fixed locations.
-        write_descriptors(iso_file, self.root.lba, self.current_lba)?;
+        write_descriptors(
+            iso_file,
+            self.volume_id.as_deref(),
+            self.root.lba,
+            self.current_lba,
+        )?;
 
         let boot_entries = self.prepare_boot_entries(esp_lba, esp_size_sectors)?;
         write_boot_catalog_to_iso(iso_file, boot_catalog_lba, boot_entries)?;
@@ -253,6 +264,7 @@ pub fn build_iso(
 ) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)> {
     // Added Option<u32> for logical_fat_size_512_sectors
     let mut iso_builder = IsoBuilder::new();
+    iso_builder.set_volume_id(image.volume_id.clone());
     iso_builder.set_isohybrid(is_isohybrid);
 
     let mut temp_fat_file_holder: Option<NamedTempFile> = None;

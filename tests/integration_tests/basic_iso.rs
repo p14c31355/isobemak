@@ -1,3 +1,4 @@
+use std::path::Path;
 use std::{
     fs::File,
     io::{self, Read, Seek, SeekFrom},
@@ -10,6 +11,15 @@ use crate::integration_tests::common::{
     run_command, setup_integration_test_files, verify_iso_binary_structures,
 };
 
+fn run_isoinfo_d(iso_path: &Path) -> io::Result<String> {
+    let iso_path = iso_path.to_str().ok_or_else(|| io::Error::other("could not convert path to string"))?;
+
+    let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path])?;
+    println!("isoinfo -d output:\n{}", isoinfo_d_output);
+
+    Ok(isoinfo_d_output)
+}
+
 #[test]
 fn test_create_disk_and_iso() -> io::Result<()> {
     let temp_dir = tempdir()?;
@@ -17,9 +27,10 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     println!("Temp dir: {:?}", &temp_dir_path);
 
     // Setup files and paths
-    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(&temp_dir_path)?;
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(temp_dir_path)?;
 
     let iso_image = IsoImage {
+        volume_id: None,
         files: vec![
             IsoImageFile {
                 source: bootx64_path.clone(),
@@ -46,8 +57,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     assert!(iso_path.exists());
 
     // Verify ISO content using isoinfo
-    let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
-    println!("isoinfo -d output:\n{}", isoinfo_d_output);
+    let isoinfo_d_output = run_isoinfo_d(&iso_path)?;
     assert!(isoinfo_d_output.contains("Volume id: ISOBEMAKI"));
 
     // Verify Nsect value in the boot catalog
@@ -87,7 +97,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
 
     // Verify ISO content using 7z
     let sevenz_output = std::process::Command::new("7z")
-        .args(&["l", iso_path.to_str().unwrap()])
+        .args(["l", iso_path.to_str().unwrap()])
         .output()?;
     let sevenz_l_output = String::from_utf8_lossy(&sevenz_output.stdout).into_owned();
     println!("7z l output:\n{}", sevenz_l_output);
@@ -98,7 +108,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
     let extract_dir = temp_dir_path.join("extracted");
     std::fs::create_dir_all(&extract_dir)?;
     let _extract_output = std::process::Command::new("7z")
-        .args(&[
+        .args([
             "x",
             iso_path.to_str().unwrap(),
             "-o",
@@ -134,6 +144,31 @@ fn test_create_disk_and_iso() -> io::Result<()> {
 
     // Perform deeper binary verification of ISO structures
     verify_iso_binary_structures(&mut iso_file)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_sets_volume_label() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+
+    let iso_path = temp_dir.path().join("test.iso");
+
+    let iso_image = IsoImage {
+        volume_id: Some("cidata".into()),
+        files: vec![],
+        boot_info: BootInfo {
+            bios_boot: None,
+            uefi_boot: None,
+        },
+    };
+
+    // Call the main function with correct arguments
+    build_iso(&iso_path, &iso_image, false)?;
+
+    // Verify ISO content using isoinfo
+    let isoinfo_d_output = run_isoinfo_d(&iso_path)?;
+    assert!(isoinfo_d_output.contains("Volume id: cidata"));
 
     Ok(())
 }
