@@ -5,7 +5,6 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::io_error; // Macro from crate root
 use crate::iso::constants::ESP_START_LBA;
 use crate::utils::ISO_SECTOR_SIZE;
 
