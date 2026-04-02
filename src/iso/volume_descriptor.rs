@@ -67,7 +67,10 @@ pub fn write_primary_volume_descriptor(
 
     let project_name = match volume_id {
         None => b"ISOBEMAKI",
-        Some(id) => id.as_bytes(),
+        Some(id) => {
+            let bytes = id.as_bytes();
+            &bytes[..bytes.len().min(32)]
+        }
     };
 
     let mut volume_id = [b' '; 32];
