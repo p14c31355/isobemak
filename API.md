@@ -28,6 +28,7 @@ Top-level configuration structure for ISO images.
 
 ```rust
 pub struct IsoImage {
+    pub volume_id: Option<String>,
     pub files: Vec<IsoImageFile>,
     pub boot_info: BootInfo,
 }
@@ -155,6 +156,7 @@ let bootx64_efi_path = PathBuf::from("path/to/BOOTX64.EFI");
 let iso_output_path = PathBuf::from("bootable.iso");
 
 let iso_image = IsoImage {
+    volume_id: Some("label".to_string()),
     files: vec![
         IsoImageFile {
             source: kernel_path.clone(),
@@ -187,6 +189,7 @@ let bootx64_efi_path = PathBuf::from("path/to/BOOTX64.EFI");
 let iso_output_path = PathBuf::from("hybrid.iso");
 
 let iso_image = IsoImage {
+    volume_id: Some("label".to_string()),
     files: vec![
         IsoImageFile {
             source: kernel_path.clone(),

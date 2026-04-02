@@ -17,9 +17,10 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     println!("Temp dir for isohybrid UEFI test: {:?}", &temp_dir_path);
 
     // Setup files and paths
-    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(&temp_dir_path)?;
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(temp_dir_path)?;
 
     let iso_image = IsoImage {
+        volume_id: None,
         files: vec![
             IsoImageFile {
                 source: bootx64_path.clone(),

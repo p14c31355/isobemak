@@ -32,6 +32,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     let iso_path = temp_dir_path.join("integrity_test.iso");
 
     let iso_image = isobemak::IsoImage {
+        volume_id: None,
         files: vec![
             isobemak::IsoImageFile {
                 source: bios_cfg_path.clone(),

@@ -55,6 +55,7 @@ fn write_dual_endian(buf: &mut [u8], offset: usize, value: u32, byte_len: usize)
 
 pub fn write_primary_volume_descriptor(
     iso: &mut File,
+    volume_id: Option<&str>,
     total_sectors: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
@@ -64,7 +65,14 @@ pub fn write_primary_volume_descriptor(
     pvd[1..6].copy_from_slice(ISO_ID);
     pvd[6] = ISO_VERSION;
 
-    let project_name = b"ISOBEMAKI";
+    let project_name = match volume_id {
+        None => b"ISOBEMAKI",
+        Some(id) => {
+            let bytes = id.as_bytes();
+            &bytes[..bytes.len().min(32)]
+        }
+    };
+
     let mut volume_id = [b' '; 32];
     volume_id[..project_name.len()].copy_from_slice(project_name);
     pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
@@ -128,11 +136,12 @@ pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
 /// A combined function to write all necessary volume descriptors in sequence.
 pub fn write_volume_descriptors(
     iso: &mut File,
+    volume_id: Option<&str>,
     total_sectors: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
     // Primary Volume Descriptor at LBA 16
-    write_primary_volume_descriptor(iso, total_sectors, root_entry)?;
+    write_primary_volume_descriptor(iso, volume_id, total_sectors, root_entry)?;
     // Boot Record Volume Descriptor at LBA 17, pointing to boot catalog at LBA 19
     write_boot_record_volume_descriptor(iso, LBA_BOOT_CATALOG)?;
     // Volume Descriptor Terminator at LBA 18
@@ -164,7 +173,7 @@ mod tests {
         };
         let total_sectors = 1000;
 
-        write_primary_volume_descriptor(temp_file.as_file_mut(), total_sectors, &root_entry)?;
+        write_primary_volume_descriptor(temp_file.as_file_mut(), None, total_sectors, &root_entry)?;
 
         let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
         assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
@@ -194,7 +203,7 @@ mod tests {
             flags: 2,
             name: ".",
         };
-        write_primary_volume_descriptor(temp_file.as_file_mut(), 1000, &root_entry)?;
+        write_primary_volume_descriptor(temp_file.as_file_mut(), None, 1000, &root_entry)?;
 
         let new_total_sectors = 2500;
         update_total_sectors_in_pvd(temp_file.as_file_mut(), new_total_sectors)?;
@@ -254,7 +263,7 @@ mod tests {
         };
         let total_sectors = 1234;
 
-        write_volume_descriptors(temp_file.as_file_mut(), total_sectors, &root_entry)?;
+        write_volume_descriptors(temp_file.as_file_mut(), None, total_sectors, &root_entry)?;
 
         // Verify PVD
         let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;

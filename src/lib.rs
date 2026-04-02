@@ -41,6 +41,7 @@ mod tests {
 
         // Create the IsoImage configuration
         let iso_image = IsoImage {
+            volume_id: None,
             files: vec![
                 IsoImageFile {
                     source: isolinux_cfg_path.clone(),

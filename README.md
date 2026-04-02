@@ -35,6 +35,7 @@ let bootx64_efi_path = PathBuf::from("path/to/BOOTX64.EFI");
 let iso_output_path = PathBuf::from("bootable.iso");
 
 let iso_image = IsoImage {
+    volume_id: Some("basic".to_string()),
     files: vec![
         IsoImageFile {
             source: kernel_path.clone(),
@@ -67,6 +68,7 @@ let bootx64_efi_path = PathBuf::from("path/to/BOOTX64.EFI");
 let iso_output_path = PathBuf::from("hybrid.iso");
 
 let iso_image = IsoImage {
+    volume_id: Some("hybrid".to_string()),
     files: vec![
         IsoImageFile {
             source: kernel_path.clone(),

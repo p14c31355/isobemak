@@ -9,14 +9,19 @@ use crate::iso::volume_descriptor::{update_total_sectors_in_pvd, write_volume_de
 use crate::utils::{ISO_SECTOR_SIZE, seek_to_lba};
 
 /// Writes all ISO volume descriptors.
-pub fn write_descriptors(iso_file: &mut File, root_lba: u32, total_sectors: u32) -> io::Result<()> {
+pub fn write_descriptors(
+    iso_file: &mut File,
+    volume_id: Option<&str>,
+    root_lba: u32,
+    total_sectors: u32,
+) -> io::Result<()> {
     let root_entry = IsoDirEntry {
         lba: root_lba,
         size: ISO_SECTOR_SIZE as u32,
         flags: 0x02,
         name: ".",
     };
-    write_volume_descriptors(iso_file, total_sectors, &root_entry)
+    write_volume_descriptors(iso_file, volume_id, total_sectors, &root_entry)
 }
 
 /// Writes the El Torito boot catalog.
