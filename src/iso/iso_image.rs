@@ -11,7 +11,7 @@ pub struct IsoImageFile {
 /// Configuration for the entire ISO image to be built.
 #[derive(Clone, Debug)]
 pub struct IsoImage {
-    /// Defaults to ISOBEMAKI. Maximum length is 32 characters.
+    /// Defaults to ISOBEMAKI. Maximum length is 32 bytes.
     pub volume_id: Option<String>,
     pub files: Vec<IsoImageFile>,
     pub boot_info: BootInfo,
