@@ -1,7 +1,6 @@
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom, Write};
 
-use crate::for_sorted_children;
 use crate::iso::boot_catalog::{BootCatalogEntry, write_boot_catalog};
 use crate::iso::dir_record::IsoDirEntry;
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};

@@ -12,7 +12,9 @@ use crate::integration_tests::common::{
 };
 
 fn run_isoinfo_d(iso_path: &Path) -> io::Result<String> {
-    let iso_path = iso_path.to_str().ok_or_else(|| io::Error::other("could not convert path to string"))?;
+    let iso_path = iso_path
+        .to_str()
+        .ok_or_else(|| io::Error::other("could not convert path to string"))?;
 
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path])?;
     println!("isoinfo -d output:\n{}", isoinfo_d_output);
