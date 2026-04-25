@@ -105,30 +105,24 @@ impl IsoBuilder {
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<Vec<BootCatalogEntry>> {
-        let mut boot_entries = Vec::new();
+        let mut entries = Vec::new();
+        let bi = self.boot_info.as_ref();
 
-        // Add BIOS boot entry
-        if let Some(bios_boot) = self.boot_info.as_ref().and_then(|bi| bi.bios_boot.as_ref()) {
-            boot_entries.push(create_bios_boot_entry(
-                &self.root,
-                &bios_boot.destination_in_iso,
-            )?);
-        }
-
-        // Add UEFI boot entry (conditional on isohybrid)
+        // UEFI boot entry
         if self.is_isohybrid {
-            if let (Some(esp_lba), Some(esp_size_sectors)) = (esp_lba, esp_size_sectors) {
-                boot_entries.push(create_uefi_esp_boot_entry(esp_lba, esp_size_sectors)?);
+            if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+                entries.push(create_uefi_esp_boot_entry(lba, size)?);
             }
-        } else if let Some(uefi_boot) = self.boot_info.as_ref().and_then(|bi| bi.uefi_boot.as_ref())
-        {
-            boot_entries.push(create_uefi_boot_entry(
-                &self.root,
-                &uefi_boot.destination_in_iso,
-            )?);
+        } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
 
-        Ok(boot_entries)
+        // BIOS boot entry
+        if let Some(b) = bi.and_then(|b| b.bios_boot.as_ref()) {
+            entries.push(create_bios_boot_entry(&self.root, &b.destination_in_iso)?);
+        }
+
+        Ok(entries)
     }
 
     /// Writes MBR and GPT structures for hybrid ISOs.
