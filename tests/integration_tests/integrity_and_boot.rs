@@ -76,7 +76,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output (integrity test):\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("El Torito VD version 1 found")); // Updated assertion
-    assert!(isoinfo_d_output.contains("Arch 0 (x86)")); // Updated assertion
+    assert!(isoinfo_d_output.contains("Arch 239")); // Updated assertion for UEFI priority
     assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)")); // Updated assertion
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
     // Detailed UEFI boot entry verification is handled in `test_create_isohybrid_uefi_iso`.
