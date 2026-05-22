@@ -2,8 +2,6 @@ use std::io::{self, Seek, Write};
 use std::mem;
 use uuid::Uuid;
 
-use crate::iso::constants::ESP_START_LBA;
-
 // GPT Header structure
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +33,17 @@ impl GptHeader {
         let disk_guid_uuid = Uuid::new_v4();
         let disk_guid_bytes = disk_guid_uuid.into_bytes();
 
+        // For isohybrid ISO images:
+        // - MBR, GPT header, partition array are at LBA 0, 1, 2 (512-byte sectors)
+        // - GPT partition array is 128 entries * 128 bytes = 32 sectors (LBA 2..34)
+        // - First usable LBA is thus LBA 34 in 512-byte sectors
+        // - The ESP FAT image starts at LBA 34 * 4 = 136 in 512-byte sectors
+        //   (because ESP is placed at 2048-byte sector 34 = byte 69632)
+        // - But GPT doesn't know about the ISO sector layout; it only sees 512-byte sectors
+        //   So we reserve space for the partition array + header + MBR = 34 sectors
+        let first_usable_lba = 34u64; // MBR (1) + GPT Header (1) + Partition Array (32)
+        let last_usable_lba = total_lbas.saturating_sub(33); // Reserve 33 sectors for backup GPT at end
+
         GptHeader {
             signature: *b"EFI PART",
             revision: 0x00010000, // Version 1.0
@@ -43,8 +52,8 @@ impl GptHeader {
             _reserved0: 0,
             current_lba: 1, // LBA
             backup_lba: total_lbas - 1,
-            first_usable_lba: ESP_START_LBA as u64, // MBR (1) + GPT Header (1) + Partition Array (32)
-            last_usable_lba: total_lbas.saturating_sub(ESP_START_LBA as u64), // Last usable LBA before the backup GPT structures (33 sectors)
+            first_usable_lba,
+            last_usable_lba,
             disk_guid: disk_guid_bytes,
             partition_entry_lba,
             num_partition_entries,
