@@ -17,6 +17,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: 'main'
+          fetch-depth: 0
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable
@@ -25,27 +26,29 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-      
+
       - name: Install dependencies
         run: |
           cargo install git-cliff
           cargo install cargo-edit
 
       - name: Update Cargo.toml version
+        id: set_version
         run: |
           version="${GITHUB_REF_NAME#v}"
           cargo set-version "$version"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
 
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
 
       - name: Generate CHANGELOG
-        run: git cliff --config .github/cliff.toml --latest --tag ${{ github.ref_name }} --output - --prepend CHANGELOG.md
+        run: git cliff --config .github/cliff.toml --tag ${{ github.ref_name }} --unreleased --prepend CHANGELOG.md
 
       - name: Commit CHANGELOG and Cargo.toml version bump
         run: |
           git add CHANGELOG.md Cargo.toml Cargo.lock
-          git commit -m "chore(release): update changelog and version to ${{ steps.update_version.outputs.version }}"
+          git commit -m "chore(release): update changelog and version to ${{ steps.set_version.outputs.version }}"
           git push origin main
 
       - name: Publish to crates.io
