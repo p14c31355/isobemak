@@ -54,6 +54,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
                 additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: None,
             }),
         },
     };
@@ -179,6 +180,7 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
                 additional_efi_boot_files: vec![
                     ("GRUBX64.EFI".to_string(), grub_path.clone()),
                 ],
+                grub_cfg_content: None,
             }),
         },
     };
@@ -197,6 +199,81 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
     verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/KERNEL.EFI")?;
 
     println!("Verified GRUBX64.EFI in FAT image alongside BOOTX64.EFI and KERNEL.EFI");
+
+    Ok(())
+}
+
+#[test]
+fn test_isohybrid_with_auto_grub_cfg() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    // Setup files
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(temp_dir_path)?;
+
+    let grub_config = r#"set default=0
+set timeout=5
+
+menuentry "Boot from ISO" {
+    chainloader /EFI/BOOT/BOOTX64.EFI
+}
+
+menuentry "Kernel" {
+    linuxefi /EFI/BOOT/KERNEL.EFI
+}
+"#;
+
+    let iso_image = IsoImage {
+        volume_id: None,
+        files: vec![
+            IsoImageFile {
+                source: bootx64_path.clone(),
+                destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            },
+            IsoImageFile {
+                source: kernel_path.clone(),
+                destination: "EFI/BOOT/KERNEL.EFI".to_string(),
+            },
+        ],
+        boot_info: BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: Some(grub_config.to_string()),
+            }),
+        },
+    };
+
+    let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;
+    assert!(iso_path.exists());
+
+    let fat_img_path = temp_holder.as_ref().unwrap().path().to_path_buf();
+    assert!(fat_img_path.exists());
+
+    // Verify grub.cfg exists in the FAT image
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/grub.cfg")?;
+    // Verify the content of grub.cfg
+    let fat_file = File::open(&fat_img_path)?;
+    let fs = FileSystem::new(fat_file, FsOptions::new())
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let root_dir = fs.root_dir();
+    let mut grub_file = root_dir.open_file("EFI/BOOT/grub.cfg")
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let mut content = String::new();
+    grub_file.read_to_string(&mut content)
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    assert!(content.contains("Boot from ISO"), "grub.cfg content mismatch");
+    assert!(content.contains("chainloader /EFI/BOOT/BOOTX64.EFI"), "grub.cfg should reference BOOTX64.EFI");
+    assert!(content.contains("menuentry \"Kernel\""), "grub.cfg should have kernel entry");
+
+    // Verify original files still exist
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/BOOTX64.EFI")?;
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/KERNEL.EFI")?;
+
+    println!("Verified auto-generated grub.cfg in FAT image");
 
     Ok(())
 }

@@ -70,6 +70,7 @@ mod tests {
                     kernel_image: kernel_path.clone(),
                     destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
                     additional_efi_boot_files: Vec::new(),
+                    grub_cfg_content: None,
                 }),
             },
         };

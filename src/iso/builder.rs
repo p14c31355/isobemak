@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom}; // Keep Write for NamedTempFile in tests
+use std::io::{self, Seek, SeekFrom, Write}; // Keep Write for NamedTempFile in tests
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
@@ -261,6 +261,7 @@ pub fn build_iso(
     iso_builder.set_isohybrid(is_isohybrid);
 
     let mut temp_fat_file_holder: Option<NamedTempFile> = None;
+    let mut _temp_grub_cfg_file_holder: Option<NamedTempFile> = None; // Hold grub.cfg temp file
     let mut logical_fat_size_512_sectors: Option<u32> = None; // Declare here
 
     // Create the ISO file
@@ -281,6 +282,20 @@ pub fn build_iso(
             // Add any additional EFI boot files (e.g. GRUBX64.EFI)
             for (dest_name, source_path) in &uefi_boot.additional_efi_boot_files {
                 fat_files.push((dest_name.as_str(), source_path.as_path()));
+            }
+            // If grub.cfg content is specified, create a temporary file and add it
+            let grub_cfg_path_buf: Option<PathBuf> =
+                if let Some(grub_cfg) = &uefi_boot.grub_cfg_content {
+                    let mut grub_temp = NamedTempFile::new()?;
+                    write!(grub_temp, "{}", grub_cfg)?;
+                    let path = grub_temp.path().to_path_buf();
+                    _temp_grub_cfg_file_holder = Some(grub_temp);
+                    Some(path)
+                } else {
+                    None
+                };
+            if let Some(ref grub_path) = grub_cfg_path_buf {
+                fat_files.push(("grub.cfg", grub_path));
             }
             let size_512_sectors =
                 fat::create_fat_image(&path, &fat_files)?;

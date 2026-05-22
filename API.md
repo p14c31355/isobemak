@@ -77,10 +77,13 @@ pub struct UefiBootInfo {
     pub kernel_image: PathBuf,
     pub destination_in_iso: String,
     pub additional_efi_boot_files: Vec<(String, PathBuf)>,
+    pub grub_cfg_content: Option<String>,
 }
 ```
 
 **`additional_efi_boot_files`**: A list of (destination_filename, source_path) pairs for additional EFI boot files to include in the FAT ESP image (isohybrid only). For example, to add GRUBX64.EFI, set `additional_efi_boot_files: vec![("GRUBX64.EFI".to_string(), PathBuf::from("path/to/grubx64.efi"))]`.
+
+**`grub_cfg_content`**: Optional string content for an auto-generated `grub.cfg` file placed at `EFI/BOOT/grub.cfg` in the FAT ESP image. When set, a grub.cfg with the specified content is automatically created in the ESP. Set to `None` to skip.
 
 ## Builder API
 
@@ -172,6 +175,7 @@ let iso_image = IsoImage {
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
             additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: None,
         }),
     },
 };
@@ -209,6 +213,7 @@ let iso_image = IsoImage {
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
             additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: None,
         }),
     },
 };
@@ -245,11 +250,58 @@ let iso_image = IsoImage {
             additional_efi_boot_files: vec![
                 ("GRUBX64.EFI".to_string(), grubx64_path.clone()),
             ],
+            grub_cfg_content: None,
         }),
     },
 };
 
 // Create hybrid isohybrid ISO with GRUBX64.EFI in the ESP
+let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
+```
+
+### Isohybrid ISO with Auto-Generated grub.cfg
+
+```rust
+use isobemak::{build_iso, IsoImage, IsoImageFile, BootInfo, UefiBootInfo};
+use std::path::PathBuf;
+
+let bootx64_path = PathBuf::from("path/to/BOOTX64.EFI");
+let kernel_path = PathBuf::from("path/to/kernel");
+let iso_output_path = PathBuf::from("hybrid_grub_cfg.iso");
+
+let grub_config = r#"set default=0
+set timeout=5
+
+menuentry "Boot from ISO" {
+    chainloader /EFI/BOOT/BOOTX64.EFI
+}
+
+menuentry "Kernel" {
+    linuxefi /EFI/BOOT/KERNEL.EFI
+}
+"#;
+
+let iso_image = IsoImage {
+    volume_id: Some("hybrid".to_string()),
+    files: vec![
+        IsoImageFile {
+            source: kernel_path.clone(),
+            destination: "kernel".to_string(),
+        },
+    ],
+    boot_info: BootInfo {
+        bios_boot: None,
+        uefi_boot: Some(UefiBootInfo {
+            boot_image: bootx64_path.clone(),
+            kernel_image: kernel_path.clone(),
+            destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: Some(grub_config.to_string()),
+        }),
+    },
+};
+
+// Create hybrid isohybrid ISO with auto-generated EFI/BOOT/grub.cfg in the ESP
 let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
 ```
 
@@ -278,6 +330,7 @@ let boot_info = BootInfo {
         additional_efi_boot_files: vec![
             ("GRUBX64.EFI".to_string(), PathBuf::from("grubx64.efi")),
         ],
+        grub_cfg_content: Some("set default=0\nset timeout=5\nmenuentry \"Boot\" {\n  chainloader /EFI/BOOT/BOOTX64.EFI\n}".to_string()),
     }),
 };
 
