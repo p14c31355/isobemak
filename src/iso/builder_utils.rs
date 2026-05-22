@@ -245,7 +245,7 @@ pub fn create_uefi_esp_boot_entry(
         BootType::UefiEsp,
         &IsoDirectory::new(),
         None,
-        Some(esp_lba * 4), // Convert 2048-byte ISO sectors to 512-byte El Torito sectors
+        Some(esp_lba.saturating_mul(4)), // Convert 2048-byte ISO sectors to 512-byte El Torito sectors
         Some(esp_size_sectors),
     )
 }
