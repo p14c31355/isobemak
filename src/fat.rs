@@ -18,10 +18,7 @@ fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> 
 /// The image size and format (FAT16 or FAT32) are dynamically calculated.
 ///
 /// `files` is a list of (destination_filename, source_path) pairs copied to `EFI/BOOT/`.
-pub fn create_fat_image(
-    fat_img_path: &Path,
-    files: &[(&str, &Path)],
-) -> io::Result<u32> {
+pub fn create_fat_image(fat_img_path: &Path, files: &[(&str, &Path)]) -> io::Result<u32> {
     // Ensure all input files exist
     let mut content_size = 0u64;
     for (dest_name, source_path) in files {
@@ -112,10 +109,8 @@ mod tests {
         fs::write(&loader_path, loader_content)?;
         fs::write(&kernel_path, kernel_content)?;
 
-        let files: [(&str, &Path); 2] = [
-            ("BOOTX64.EFI", &loader_path),
-            ("KERNEL.EFI", &kernel_path),
-        ];
+        let files: [(&str, &Path); 2] =
+            [("BOOTX64.EFI", &loader_path), ("KERNEL.EFI", &kernel_path)];
         create_fat_image(&fat_img_path, &files)?;
 
         assert!(fat_img_path.exists());

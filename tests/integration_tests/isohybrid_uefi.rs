@@ -177,9 +177,7 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
-                additional_efi_boot_files: vec![
-                    ("GRUBX64.EFI".to_string(), grub_path.clone()),
-                ],
+                additional_efi_boot_files: vec![("GRUBX64.EFI".to_string(), grub_path.clone())],
                 grub_cfg_content: None,
             }),
         },
@@ -190,7 +188,11 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
 
     // Get the actual FAT image path from the NamedTempFile holder.
     let fat_img_path = temp_holder.as_ref().unwrap().path().to_path_buf();
-    assert!(fat_img_path.exists(), "FAT image must exist at {:?}", fat_img_path);
+    assert!(
+        fat_img_path.exists(),
+        "FAT image must exist at {:?}",
+        fat_img_path
+    );
 
     // Verify that the additional file exists in the FAT image
     verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/GRUBX64.EFI")?;
@@ -260,14 +262,25 @@ menuentry "Kernel" {
     let fs = FileSystem::new(fat_file, FsOptions::new())
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let root_dir = fs.root_dir();
-    let mut grub_file = root_dir.open_file("EFI/BOOT/grub.cfg")
+    let mut grub_file = root_dir
+        .open_file("EFI/BOOT/grub.cfg")
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
     let mut content = String::new();
-    grub_file.read_to_string(&mut content)
+    grub_file
+        .read_to_string(&mut content)
         .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    assert!(content.contains("Boot from ISO"), "grub.cfg content mismatch");
-    assert!(content.contains("chainloader /EFI/BOOT/BOOTX64.EFI"), "grub.cfg should reference BOOTX64.EFI");
-    assert!(content.contains("menuentry \"Kernel\""), "grub.cfg should have kernel entry");
+    assert!(
+        content.contains("Boot from ISO"),
+        "grub.cfg content mismatch"
+    );
+    assert!(
+        content.contains("chainloader /EFI/BOOT/BOOTX64.EFI"),
+        "grub.cfg should reference BOOTX64.EFI"
+    );
+    assert!(
+        content.contains("menuentry \"Kernel\""),
+        "grub.cfg should have kernel entry"
+    );
 
     // Verify original files still exist
     verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/BOOTX64.EFI")?;

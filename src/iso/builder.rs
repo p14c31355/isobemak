@@ -73,7 +73,7 @@ impl IsoBuilder {
 
         let current_dir = ensure_directory_path(&mut self.root, path_in_iso)?;
 
-        let file_metadata = get_file_metadata(&real_path)?;
+        let file_metadata = get_file_metadata(real_path)?;
         let file_size = file_metadata.len();
 
         let file = IsoFile {
@@ -297,8 +297,7 @@ pub fn build_iso(
             if let Some(ref grub_path) = grub_cfg_path_buf {
                 fat_files.push(("grub.cfg", grub_path));
             }
-            let size_512_sectors =
-                fat::create_fat_image(&path, &fat_files)?;
+            let size_512_sectors = fat::create_fat_image(&path, &fat_files)?;
             logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
