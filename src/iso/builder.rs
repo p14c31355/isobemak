@@ -132,40 +132,44 @@ impl IsoBuilder {
         total_lbas: u64,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
-        // GPT structures require at least 69 LBAs
-        if total_lbas < 69 {
+        // GPT structures require at least 69 LBAs (in 512-byte units)
+        // total_lbas here is in 2048-byte ISO sectors, convert to 512-byte sectors
+        let total_512_sectors = total_lbas * 4;
+        if total_512_sectors < 69 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
                     "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
-                    total_lbas
+                    total_512_sectors
                 ),
             ));
         }
 
-        // Write MBR
+        // Write MBR (MBR uses 512-byte sector LBA values)
         iso_file.seek(SeekFrom::Start(0))?;
-        let mbr = create_mbr_for_gpt_hybrid(self.total_sectors, self.is_isohybrid)?;
+        let mbr = create_mbr_for_gpt_hybrid(total_512_sectors.min(u32::MAX as u64) as u32, self.is_isohybrid)?;
         mbr.write_to(iso_file)?;
 
         // Write GPT structures if esp_size_sectors > 0
         if let Some(esp_size_sectors_val) = esp_size_sectors
             && esp_size_sectors_val > 0
         {
-            let esp_partition_start_lba = ESP_START_LBA;
-            let esp_partition_end_lba = esp_partition_start_lba + esp_size_sectors_val - 1;
+            // Convert ESP position and size from 2048-byte to 512-byte sector units
+            let esp_start_512 = (ESP_START_LBA as u64) * 4;
+            let esp_size_512 = (esp_size_sectors_val as u64) * 4;
+            let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
 
             let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
             let esp_unique_guid_str = Uuid::new_v4().to_string();
             let partitions = vec![GptPartitionEntry::new(
                 esp_guid_str,
                 &esp_unique_guid_str,
-                esp_partition_start_lba as u64,
-                esp_partition_end_lba as u64,
+                esp_start_512,
+                esp_partition_end_lba,
                 "EFI System Partition",
                 0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
             )];
-            write_gpt_structures(iso_file, total_lbas, &partitions)?;
+            write_gpt_structures(iso_file, total_512_sectors, &partitions)?;
             iso_file.sync_data()?;
         }
 
