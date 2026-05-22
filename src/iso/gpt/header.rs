@@ -42,7 +42,7 @@ impl GptHeader {
         // - But GPT doesn't know about the ISO sector layout; it only sees 512-byte sectors
         //   So we reserve space for the partition array + header + MBR = 34 sectors
         let first_usable_lba = 34u64; // MBR (1) + GPT Header (1) + Partition Array (32)
-        let last_usable_lba = total_lbas.saturating_sub(33); // Reserve 33 sectors for backup GPT at end
+        let last_usable_lba = total_lbas.saturating_sub(34); // Reserve 33 sectors for backup GPT at end + 1 for alignment
 
         GptHeader {
             signature: *b"EFI PART",
