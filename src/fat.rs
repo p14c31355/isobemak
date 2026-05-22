@@ -14,32 +14,31 @@ fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> 
     Ok(())
 }
 
-/// Creates a FAT image file for UEFI boot and populates it with a loader and kernel.
+/// Creates a FAT image file for UEFI boot and populates it with files.
 /// The image size and format (FAT16 or FAT32) are dynamically calculated.
+///
+/// `files` is a list of (destination_filename, source_path) pairs copied to `EFI/BOOT/`.
 pub fn create_fat_image(
     fat_img_path: &Path,
-    loader_path: &Path,
-    kernel_path: &Path,
+    files: &[(&str, &Path)],
 ) -> io::Result<u32> {
-    // Ensure both files exist
-    if !loader_path.exists() {
+    // Ensure all input files exist
+    let mut content_size = 0u64;
+    for (dest_name, source_path) in files {
+        if !source_path.exists() {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("File not found at {:?} (dest: {})", source_path, dest_name),
+            ));
+        }
+        content_size += source_path.metadata()?.len();
+    }
+    if files.is_empty() {
         return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Loader file not found at {:?}", loader_path),
+            io::ErrorKind::InvalidInput,
+            "At least one file is required to create a FAT image",
         ));
     }
-
-    if !kernel_path.exists() {
-        return Err(io::Error::new(
-            io::ErrorKind::NotFound,
-            format!("Kernel file not found at {:?}", kernel_path),
-        ));
-    }
-
-    // Calculate the minimum image size
-    let loader_size = loader_path.metadata()?.len();
-    let kernel_size = kernel_path.metadata()?.len();
-    let content_size = loader_size + kernel_size;
 
     // Add overhead and enforce a minimum size.
     const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensures FAT16 formatting.
@@ -47,7 +46,6 @@ pub fn create_fat_image(
     const SECTOR_SIZE: u64 = 512;
 
     // Calculate the logical size based on content + overhead, rounded up to sector size.
-    // This is the size we want to report as Nsect.
     let mut logical_size = (content_size + FAT_OVERHEAD).div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
     // Ensure logical_size is at least one sector
     if logical_size == 0 {
@@ -83,15 +81,14 @@ pub fn create_fat_image(
             .bytes_per_sector(512), // UEFI typically expects 512-byte sectors for FAT
     )?;
 
-    // Open filesystem and create directories
+    // Open filesystem and create directories and copy files
     let fs = FileSystem::new(file, FsOptions::new())?;
     let root_dir = fs.root_dir();
     let efi_dir = root_dir.create_dir("EFI")?;
     let boot_dir = efi_dir.create_dir("BOOT")?;
-
-    // Copy the bootloader and kernel into the FAT filesystem
-    copy_to_fat(&boot_dir, loader_path, "BOOTX64.EFI")?;
-    copy_to_fat(&boot_dir, kernel_path, "KERNEL.EFI")?;
+    for (dest_name, source_path) in files {
+        copy_to_fat(&boot_dir, source_path, dest_name)?;
+    }
 
     Ok((logical_size / SECTOR_SIZE) as u32)
 }
@@ -115,7 +112,11 @@ mod tests {
         fs::write(&loader_path, loader_content)?;
         fs::write(&kernel_path, kernel_content)?;
 
-        create_fat_image(&fat_img_path, &loader_path, &kernel_path)?;
+        let files: [(&str, &Path); 2] = [
+            ("BOOTX64.EFI", &loader_path),
+            ("KERNEL.EFI", &kernel_path),
+        ];
+        create_fat_image(&fat_img_path, &files)?;
 
         assert!(fat_img_path.exists());
         let fat_img_size = fat_img_path.metadata()?.len();

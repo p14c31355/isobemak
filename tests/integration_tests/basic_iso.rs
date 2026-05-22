@@ -49,6 +49,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
             }),
         },
     };

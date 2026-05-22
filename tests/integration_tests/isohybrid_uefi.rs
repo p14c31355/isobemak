@@ -3,12 +3,28 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
 };
 
+use fatfs::{FileSystem, FsOptions};
 use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
     run_command, setup_integration_test_files, verify_iso_binary_structures,
 };
+
+fn verify_fat_image_has_file(fat_img_path: &std::path::Path, fat_path: &str) -> io::Result<()> {
+    let fat_file = File::open(fat_img_path)?;
+    let fs = FileSystem::new(fat_file, FsOptions::new())
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    let root_dir = fs.root_dir();
+    // fatfs uses "/" as path separator
+    root_dir.open_file(fat_path).map_err(|e| {
+        io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("File '{}' not found in FAT image: {:?}", fat_path, e),
+        )
+    })?;
+    Ok(())
+}
 
 #[test]
 fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
@@ -37,6 +53,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
             }),
         },
     };
@@ -125,6 +142,61 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
 
     // Perform deeper binary verification of ISO structures
     verify_iso_binary_structures(&mut iso_file)?;
+
+    Ok(())
+}
+
+#[test]
+fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    // Setup files
+    let (bootx64_path, kernel_path, iso_path) = setup_integration_test_files(temp_dir_path)?;
+
+    // Create additional EFI boot files (e.g. GRUBX64.EFI)
+    let grub_path = temp_dir_path.join("grubx64.efi");
+    std::fs::write(&grub_path, vec![0xEFu8; 128])?;
+
+    let iso_image = IsoImage {
+        volume_id: None,
+        files: vec![
+            IsoImageFile {
+                source: bootx64_path.clone(),
+                destination: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            },
+            IsoImageFile {
+                source: kernel_path.clone(),
+                destination: "EFI/BOOT/KERNEL.EFI".to_string(),
+            },
+        ],
+        boot_info: BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: vec![
+                    ("GRUBX64.EFI".to_string(), grub_path.clone()),
+                ],
+            }),
+        },
+    };
+
+    let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;
+    assert!(iso_path.exists());
+
+    // Get the actual FAT image path from the NamedTempFile holder.
+    let fat_img_path = temp_holder.as_ref().unwrap().path().to_path_buf();
+    assert!(fat_img_path.exists(), "FAT image must exist at {:?}", fat_img_path);
+
+    // Verify that the additional file exists in the FAT image
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/GRUBX64.EFI")?;
+    // Also verify the original files still exist
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/BOOTX64.EFI")?;
+    verify_fat_image_has_file(&fat_img_path, "EFI/BOOT/KERNEL.EFI")?;
+
+    println!("Verified GRUBX64.EFI in FAT image alongside BOOTX64.EFI and KERNEL.EFI");
 
     Ok(())
 }

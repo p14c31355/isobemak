@@ -1,7 +1,6 @@
 use std::{
     fs::File,
     io::{self, Read},
-    path::PathBuf,
 };
 
 use isobemak::build_iso;
@@ -49,7 +48,6 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         ],
         boot_info: isobemak::BootInfo {
             bios_boot: Some(isobemak::BiosBootInfo {
-                boot_catalog: PathBuf::from("BOOT.CAT"),
                 boot_image: bios_boot_image_path.clone(),
                 destination_in_iso: "isolinux/isolinux.bin".to_string(),
             }),
@@ -57,6 +55,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
                 boot_image: bootx64_path.clone(),
                 kernel_image: kernel_path.clone(),
                 destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
             }),
         },
     };
