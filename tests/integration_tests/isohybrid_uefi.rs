@@ -121,7 +121,8 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Verified UEFI boot entry: LBA={} (expected: {}), Sectors={} (expected: {})",
         uefi_boot_lba,
         isobemak::ESP_START_LBA * 4,
-        uefi_boot_sectors, expected_esp_sectors
+        uefi_boot_sectors,
+        expected_esp_sectors
     );
 
     // Verify ISO content using isoinfo -l
