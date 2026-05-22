@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom}; // Keep Write for NamedTempFile in tests
+use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use uuid::Uuid;
@@ -63,7 +63,7 @@ impl IsoBuilder {
     }
 
     /// Adds a file to the ISO filesystem tree.
-    pub fn add_file(&mut self, path_in_iso: &str, real_path: PathBuf) -> io::Result<()> {
+    pub fn add_file(&mut self, path_in_iso: &str, real_path: &Path) -> io::Result<()> {
         let file_name = Path::new(path_in_iso)
             .file_name()
             .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid file name"))?
@@ -77,7 +77,7 @@ impl IsoBuilder {
         let file_size = file_metadata.len();
 
         let file = IsoFile {
-            path: real_path,
+            path: real_path.to_path_buf(),
             size: file_size,
             lba: 0,
         };
@@ -261,6 +261,7 @@ pub fn build_iso(
     iso_builder.set_isohybrid(is_isohybrid);
 
     let mut temp_fat_file_holder: Option<NamedTempFile> = None;
+    let mut _temp_grub_cfg_file_holder: Option<NamedTempFile> = None; // Hold grub.cfg temp file
     let mut logical_fat_size_512_sectors: Option<u32> = None; // Declare here
 
     // Create the ISO file
@@ -274,8 +275,30 @@ pub fn build_iso(
             let path = temp_fat_file.path().to_path_buf();
             temp_fat_file_holder = Some(temp_fat_file);
 
+            // Build the list of files for the FAT image
+            let mut fat_files: Vec<(&str, &Path)> = Vec::new();
+            fat_files.push(("BOOTX64.EFI", &uefi_boot.boot_image));
+            fat_files.push(("KERNEL.EFI", &uefi_boot.kernel_image));
+            // Add any additional EFI boot files (e.g. GRUBX64.EFI)
+            for (dest_name, source_path) in &uefi_boot.additional_efi_boot_files {
+                fat_files.push((dest_name.as_str(), source_path.as_path()));
+            }
+            // If grub.cfg content is specified, create a temporary file and add it
+            let grub_cfg_path_buf: Option<PathBuf> =
+                if let Some(grub_cfg) = &uefi_boot.grub_cfg_content {
+                    let mut grub_temp = NamedTempFile::new()?;
+                    write!(grub_temp, "{}", grub_cfg)?;
+                    let path = grub_temp.path().to_path_buf();
+                    _temp_grub_cfg_file_holder = Some(grub_temp);
+                    Some(path)
+                } else {
+                    None
+                };
+            if let Some(ref grub_path) = grub_cfg_path_buf {
+                fat_files.push(("grub.cfg", grub_path));
+            }
             let size_512_sectors =
-                fat::create_fat_image(&path, &uefi_boot.boot_image, &uefi_boot.kernel_image)?;
+                fat::create_fat_image(&path, &fat_files)?;
             logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
@@ -296,14 +319,14 @@ pub fn build_iso(
 
     // Add all regular files to the ISO builder
     for file in &image.files {
-        iso_builder.add_file(&file.destination, file.source.clone())?;
+        iso_builder.add_file(&file.destination, &file.source)?;
     }
 
-    // Handle BIOS boot image
+    // Handle BIOS boot image (add to ISO tree)
     if let Some(bios_boot_info) = &image.boot_info.bios_boot {
         iso_builder.add_file(
             &bios_boot_info.destination_in_iso,
-            bios_boot_info.boot_image.clone(),
+            &bios_boot_info.boot_image,
         )?;
     }
 
@@ -342,11 +365,11 @@ mod tests {
         let temp_path = temp_file.path().to_path_buf();
 
         // Add a root file
-        builder.add_file("root.txt", temp_path.clone())?;
+        builder.add_file("root.txt", &temp_path)?;
         assert!(builder.root.children.contains_key("root.txt"));
 
         // Add a nested file
-        builder.add_file("dir1/nested.txt", temp_path.clone())?;
+        builder.add_file("dir1/nested.txt", &temp_path)?;
         let dir1 = match builder.root.children.get("dir1") {
             Some(IsoFsNode::Directory(dir)) => dir,
             _ => panic!("dir1 was not created as a directory"),
@@ -419,7 +442,7 @@ mod tests {
         temp_file.write_all(b"some data")?;
         let temp_path = temp_file.path().to_path_buf();
 
-        builder.add_file("A/B/C.txt", temp_path)?;
+        builder.add_file("A/B/C.txt", &temp_path)?;
         builder.current_lba = 20;
         calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
 

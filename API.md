@@ -62,7 +62,6 @@ Configuration for BIOS/El Torito boot support.
 
 ```rust
 pub struct BiosBootInfo {
-    pub boot_catalog: PathBuf,
     pub boot_image: PathBuf,
     pub destination_in_iso: String,
 }
@@ -77,8 +76,14 @@ pub struct UefiBootInfo {
     pub boot_image: PathBuf,
     pub kernel_image: PathBuf,
     pub destination_in_iso: String,
+    pub additional_efi_boot_files: Vec<(String, PathBuf)>,
+    pub grub_cfg_content: Option<String>,
 }
 ```
+
+**`additional_efi_boot_files`**: A list of (destination_filename, source_path) pairs for additional EFI boot files to include in the FAT ESP image (isohybrid only). For example, to add GRUBX64.EFI, set `additional_efi_boot_files: vec![("GRUBX64.EFI".to_string(), PathBuf::from("path/to/grubx64.efi"))]`.
+
+**`grub_cfg_content`**: Optional string content for an auto-generated `grub.cfg` file placed at `EFI/BOOT/grub.cfg` in the FAT ESP image. When set, a grub.cfg with the specified content is automatically created in the ESP. Set to `None` to skip.
 
 ## Builder API
 
@@ -92,7 +97,7 @@ pub struct IsoBuilder { /* ... */ }
 
 **Methods:**
 - `new() -> Self`: Creates a new builder
-- `add_file(&mut self, path_in_iso: &str, real_path: PathBuf) -> io::Result<()>`: Adds a file to the ISO
+- `add_file(&mut self, path_in_iso: &str, real_path: &Path) -> io::Result<()>`: Adds a file to the ISO
 - `set_boot_info(&mut self, boot_info: BootInfo)`: Sets boot configuration
 - `set_isohybrid(&mut self, is_isohybrid: bool)`: Enables hybrid isohybrid creation
 - `build(&mut self, iso_file: &mut File, iso_path: &Path, esp_lba: Option<u32>, esp_size_sectors: Option<u32>) -> io::Result<()>`: Builds the ISO
@@ -169,6 +174,8 @@ let iso_image = IsoImage {
             boot_image: bootx64_efi_path.clone(),
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: None,
         }),
     },
 };
@@ -198,7 +205,6 @@ let iso_image = IsoImage {
     ],
     boot_info: BootInfo {
         bios_boot: Some(BiosBootInfo {
-            boot_catalog: PathBuf::from("BOOT.CAT"),
             boot_image: isolinux_bin_path.clone(),
             destination_in_iso: "isolinux/isolinux.bin".to_string(),
         }),
@@ -206,11 +212,96 @@ let iso_image = IsoImage {
             boot_image: bootx64_efi_path.clone(),
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: None,
         }),
     },
 };
 
 // Create hybrid isohybrid ISO
+let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
+```
+
+### Isohybrid ISO with GRUBX64.EFI
+
+```rust
+use isobemak::{build_iso, IsoImage, IsoImageFile, BootInfo, UefiBootInfo};
+use std::path::PathBuf;
+
+let bootx64_path = PathBuf::from("path/to/BOOTX64.EFI");
+let grubx64_path = PathBuf::from("path/to/GRUBX64.EFI");
+let kernel_path = PathBuf::from("path/to/kernel");
+let iso_output_path = PathBuf::from("hybrid_grub.iso");
+
+let iso_image = IsoImage {
+    volume_id: Some("hybrid".to_string()),
+    files: vec![
+        IsoImageFile {
+            source: kernel_path.clone(),
+            destination: "kernel".to_string(),
+        },
+    ],
+    boot_info: BootInfo {
+        bios_boot: None,
+        uefi_boot: Some(UefiBootInfo {
+            boot_image: bootx64_path.clone(),
+            kernel_image: kernel_path.clone(),
+            destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: vec![
+                ("GRUBX64.EFI".to_string(), grubx64_path.clone()),
+            ],
+            grub_cfg_content: None,
+        }),
+    },
+};
+
+// Create hybrid isohybrid ISO with GRUBX64.EFI in the ESP
+let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
+```
+
+### Isohybrid ISO with Auto-Generated grub.cfg
+
+```rust
+use isobemak::{build_iso, IsoImage, IsoImageFile, BootInfo, UefiBootInfo};
+use std::path::PathBuf;
+
+let bootx64_path = PathBuf::from("path/to/BOOTX64.EFI");
+let kernel_path = PathBuf::from("path/to/kernel");
+let iso_output_path = PathBuf::from("hybrid_grub_cfg.iso");
+
+let grub_config = r#"set default=0
+set timeout=5
+
+menuentry "Boot from ISO" {
+    chainloader /EFI/BOOT/BOOTX64.EFI
+}
+
+menuentry "Kernel" {
+    linuxefi /EFI/BOOT/KERNEL.EFI
+}
+"#;
+
+let iso_image = IsoImage {
+    volume_id: Some("hybrid".to_string()),
+    files: vec![
+        IsoImageFile {
+            source: kernel_path.clone(),
+            destination: "kernel".to_string(),
+        },
+    ],
+    boot_info: BootInfo {
+        bios_boot: None,
+        uefi_boot: Some(UefiBootInfo {
+            boot_image: bootx64_path.clone(),
+            kernel_image: kernel_path.clone(),
+            destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
+            grub_cfg_content: Some(grub_config.to_string()),
+        }),
+    },
+};
+
+// Create hybrid isohybrid ISO with auto-generated EFI/BOOT/grub.cfg in the ESP
 let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
 ```
 
@@ -229,7 +320,6 @@ builder.add_file("initrd.img", PathBuf::from("my_initrd"))?;
 
 let boot_info = BootInfo {
     bios_boot: Some(BiosBootInfo {
-        boot_catalog: PathBuf::from("BOOT.CAT"),
         boot_image: PathBuf::from("isolinux.bin"),
         destination_in_iso: "isolinux/isolinux.bin".to_string(),
     }),
@@ -237,6 +327,10 @@ let boot_info = BootInfo {
         boot_image: PathBuf::from("BOOTX64.EFI"),
         kernel_image: PathBuf::from("kernel"),
         destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+        additional_efi_boot_files: vec![
+            ("GRUBX64.EFI".to_string(), PathBuf::from("grubx64.efi")),
+        ],
+        grub_cfg_content: Some("set default=0\nset timeout=5\nmenuentry \"Boot\" {\n  chainloader /EFI/BOOT/BOOTX64.EFI\n}".to_string()),
     }),
 };
 

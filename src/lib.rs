@@ -18,7 +18,7 @@ pub use iso::iso_image::{IsoImage, IsoImageFile}; // Re-export ESP_START_LBA
 mod tests {
     use super::{BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
     use std::io;
-    use std::path::{Path, PathBuf};
+    use std::path::Path;
     use tempfile::tempdir;
 
     use crate::create_dummy_files;
@@ -62,7 +62,6 @@ mod tests {
             ],
             boot_info: BootInfo {
                 bios_boot: Some(BiosBootInfo {
-                    boot_catalog: PathBuf::from("BOOT.CAT"),
                     boot_image: isolinux_bin_path.clone(),
                     destination_in_iso: "isolinux/isolinux.bin".to_string(),
                 }),
@@ -70,6 +69,8 @@ mod tests {
                     boot_image: bootx64_efi_path.clone(),
                     kernel_image: kernel_path.clone(),
                     destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                    additional_efi_boot_files: Vec::new(),
+                    grub_cfg_content: None,
                 }),
             },
         };

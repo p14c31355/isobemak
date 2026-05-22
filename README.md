@@ -4,11 +4,12 @@
 
 ## Features
 
-- **ISO 9660 Filesystem Creation**: Generates standard ISO 9660 filesystem structures
-- **UEFI Boot Support**: Creates UEFI-bootable images with proper ESP (EFI System Partition) handling
-- **BIOS/El Torito Boot Support**: Provides legacy BIOS boot capability
-- **Hybrid Isohybrid Images**: Generates hybrid images that can boot both as optical media and USB drives with GPT/MBR structures
-- **FAT32 ESP Creation**: Automatically creates FAT32-formatted EFI System Partitions for UEFI booting
+- ISO 9660 Filesystem Creation: Generates standard ISO 9660 filesystem structures
+- UEFI Boot Support: Creates UEFI-bootable images with proper ESP (EFI System Partition) handling
+- BIOS/El Torito Boot Support: Provides legacy BIOS boot capability
+- Hybrid Isohybrid Images: Generates hybrid images that can boot both as optical media and USB drives with GPT/MBR structures
+- FAT32 ESP Creation: Automatically creates FAT32-formatted EFI System Partitions for UEFI booting
+- Additional EFI Boot Files: Supports including extra EFI binaries (e.g. GRUBX64.EFI) in the ESP FAT image
 
 ## Installation
 
@@ -16,7 +17,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-isobemak = "0.2.2"
+isobemak = "0.2.5"
 ```
 
 ## Usage
@@ -48,6 +49,7 @@ let iso_image = IsoImage {
             boot_image: bootx64_efi_path.clone(),
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
         }),
     },
 };
@@ -77,7 +79,6 @@ let iso_image = IsoImage {
     ],
     boot_info: BootInfo {
         bios_boot: Some(BiosBootInfo {
-            boot_catalog: PathBuf::from("BOOT.CAT"),
             boot_image: isolinux_bin_path.clone(),
             destination_in_iso: "isolinux/isolinux.bin".to_string(),
         }),
@@ -85,6 +86,7 @@ let iso_image = IsoImage {
             boot_image: bootx64_efi_path.clone(),
             kernel_image: kernel_path.clone(),
             destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: Vec::new(),
         }),
     },
 };
@@ -93,23 +95,60 @@ let iso_image = IsoImage {
 let (iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
 ```
 
+### Hybrid Isohybrid with GRUBX64.EFI
+
+```rust
+use isobemak::{build_iso, IsoImage, IsoImageFile, BootInfo, UefiBootInfo};
+use std::path::PathBuf;
+
+let bootx64_path = PathBuf::from("path/to/BOOTX64.EFI");
+let grubx64_path = PathBuf::from("path/to/GRUBX64.EFI");
+let kernel_path = PathBuf::from("path/to/kernel");
+let iso_output_path = PathBuf::from("hybrid_grub.iso");
+
+let iso_image = IsoImage {
+    volume_id: Some("hybrid".to_string()),
+    files: vec![
+        IsoImageFile {
+            source: kernel_path.clone(),
+            destination: "kernel".to_string(),
+        },
+    ],
+    boot_info: BootInfo {
+        bios_boot: None,
+        uefi_boot: Some(UefiBootInfo {
+            boot_image: bootx64_path.clone(),
+            kernel_image: kernel_path.clone(),
+            destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+            additional_efi_boot_files: vec![
+                ("GRUBX64.EFI".to_string(), grubx64_path.clone()),
+            ],
+        }),
+    },
+};
+
+// Create a hybrid isohybrid ISO with GRUBX64.EFI in the ESP
+let (iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &iso_image, true)?;
+```
+
 ## How It Works
 
 ### Standard ISO Creation
 
-1. **Filesystem Preparation**: Creates an ISO 9660 filesystem structure with directories and file records
-2. **Boot Catalog Creation**: Generates an El Torito boot catalog pointing to boot images
-3. **Volume Descriptors**: Writes Primary Volume Descriptor, Boot Record Volume Descriptor, and Volume Descriptor Set Terminator
-4. **File Copying**: Copies all specified files into the ISO at their designated locations
+1. Filesystem Preparation: Creates an ISO 9660 filesystem structure with directories and file records
+2. Boot Catalog Creation: Generates an El Torito boot catalog pointing to boot images
+3. Volume Descriptors: Writes Primary Volume Descriptor, Boot Record Volume Descriptor, and Volume Descriptor Set Terminator
+4. File Copying: Copies all specified files into the ISO at their designated locations
 
 ### Isohybrid (Hybrid) Creation
 
 For hybrid images, the process additionally includes:
 
-1. **EFI System Partition Creation**: Generates a FAT32-formatted disk image containing the UEFI bootloader and kernel
-2. **ESP Embedding**: Embeds the EFI System Partition into the ISO at a specific location (LBA 34)
-3. **MBR/GPT Structures**: Adds Master Boot Record and GUID Partition Table structures to make the image USB-bootable
-4. **Hybrid Boot Catalog**: Creates boot catalog entries for both BIOS (MBR) and UEFI (ESP) booting
+1. EFI System Partition Creation: Generates a FAT32-formatted disk image containing the UEFI bootloader and kernel
+2. Additional EFI Files: Includes any extra EFI binaries (e.g. GRUBX64.EFI) in the ESP
+3. ESP Embedding: Embeds the EFI System Partition into the ISO at a specific location (LBA 34)
+4. MBR/GPT Structures: Adds Master Boot Record and GUID Partition Table structures to make the image USB-bootable
+5. Hybrid Boot Catalog: Creates boot catalog entries for both BIOS (MBR) and UEFI (ESP) booting
 
 ## API Overview
 
@@ -123,7 +162,7 @@ For hybrid images, the process additionally includes:
 - `IsoImageFile` - Specifies source file and destination path in ISO
 - `BootInfo` - Contains optional BIOS and UEFI boot configurations
 - `BiosBootInfo` - BIOS/El Torito boot settings
-- `UefiBootInfo` - UEFI boot settings including ESP creation
+- `UefiBootInfo` - UEFI boot settings including ESP creation and optional additional EFI files
 
 ### Builder Pattern Alternative
 
@@ -142,7 +181,6 @@ builder.add_file("initrd.img", PathBuf::from("my_initrd"))?;
 
 let boot_info = BootInfo {
     bios_boot: Some(BiosBootInfo {
-        boot_catalog: PathBuf::from("BOOT.CAT"),
         boot_image: PathBuf::from("isolinux.bin"),
         destination_in_iso: "isolinux/isolinux.bin".to_string(),
     }),
@@ -150,6 +188,7 @@ let boot_info = BootInfo {
         boot_image: PathBuf::from("BOOTX64.EFI"),
         kernel_image: PathBuf::from("kernel"),
         destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+        additional_efi_boot_files: Vec::new(),
     }),
 };
 
