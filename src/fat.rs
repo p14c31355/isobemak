@@ -90,7 +90,7 @@ pub fn create_fat_image(
         copy_to_fat(&boot_dir, source_path, dest_name)?;
     }
 
-    Ok((logical_size / SECTOR_SIZE) as u32)
+    Ok((total_size / SECTOR_SIZE) as u32)
 }
 
 #[cfg(test)]
