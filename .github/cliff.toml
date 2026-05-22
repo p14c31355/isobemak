@@ -1,6 +1,5 @@
 # .github/cliff.toml
 [changelog]
-output = "CHANGELOG.md"
 template = """
 ## {{ version }} - {{ timestamp | date(format="%Y-%m-%d") }}
 {% if commits | length > 0 %}
