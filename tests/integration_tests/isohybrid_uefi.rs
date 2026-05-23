@@ -88,46 +88,20 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID is not EFI"
     );
 
-    // Boot Entry 0 (offset 32): UEFI ESP FAT image entry (bootable, points to ESP)
-    // El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
-    // so ESP_LBA stays in ISO sectors (e.g. 512 for 1 MiB alignment).
-    let esp_offset = 32;
-    let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
-    let esp_boot_indicator = esp_bytes[0];
-    let esp_boot_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
-    let esp_boot_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
-
-    assert_eq!(
-        esp_boot_indicator,
-        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
-        "UEFI ESP entry (Entry 0) is not marked bootable"
-    );
-    let expected_esp_lba = isobemak::ESP_START_LBA_ISO; // ISO LBA 512, 1 MiB aligned
-    assert_eq!(
-        esp_boot_lba, expected_esp_lba,
-        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA, in 2048-byte ISO sector units)",
-        esp_boot_lba, expected_esp_lba
-    );
-    // UEFI no-emulation: boot_image_sectors = 0 for maximum firmware compatibility
-    // (xorriso/GRUB convention).
-    assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
-
-    println!(
-        "Verified UEFI ESP boot entry: LBA={}, Sectors={}",
-        esp_boot_lba, esp_boot_sectors
-    );
-
-    // Boot Entry 1 (offset 64): Direct UEFI file entry, non‑bootable
-    // (points to BOOTX64.EFI inside ISO9660; kept as secondary fallback)
-    let uefi_file_offset = 64;
+    // Dual boot path: El Torito vs MBR/ESP
+    //
+    // Entry 0 (offset 32): Direct EFI binary — bootable, QEMU/OVMF primary path.
+    //   Points to BOOTX64.EFI inside the ISO9660 filesystem.
+    let uefi_file_offset = 32;
     let uefi_bytes = &boot_catalog_sector[uefi_file_offset..uefi_file_offset + 32];
     let uefi_boot_indicator = uefi_bytes[0];
     let uefi_boot_lba = u32::from_le_bytes(uefi_bytes[8..12].try_into().unwrap());
     let uefi_boot_sectors = u16::from_le_bytes(uefi_bytes[6..8].try_into().unwrap());
 
     assert_eq!(
-        uefi_boot_indicator, 0x00,
-        "UEFI direct file entry (Entry 1) must be non‑bootable (0x00), got {:#x}",
+        uefi_boot_indicator,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
+        "UEFI direct file entry (Entry 0) must be bootable (0x88), got {:#x}",
         uefi_boot_indicator
     );
     assert!(
@@ -138,8 +112,35 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     assert!(uefi_boot_sectors > 0, "Boot sectors must be > 0");
 
     println!(
-        "Verified UEFI direct file entry (non‑bootable): File LBA={}, Sectors={}",
+        "Verified UEFI direct file entry (bootable): File LBA={}, Sectors={}",
         uefi_boot_lba, uefi_boot_sectors
+    );
+
+    // Entry 1 (offset 64): ESP FAT image — non-bootable, MBR path for real hardware.
+    //   El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
+    //   so ESP_LBA stays in ISO sectors (e.g. 1024 for 2 MiB alignment).
+    let esp_offset = 64;
+    let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
+    let esp_boot_indicator = esp_bytes[0];
+    let esp_boot_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
+    let esp_boot_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
+
+    assert_eq!(
+        esp_boot_indicator, 0x00,
+        "ESP entry (Entry 1) must be non‑bootable (0x00), got {:#x}",
+        esp_boot_indicator
+    );
+    let expected_esp_lba = isobemak::ESP_START_LBA_ISO; // ISO LBA 1024, 2 MiB aligned
+    assert_eq!(
+        esp_boot_lba, expected_esp_lba,
+        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA_ISO, in 2048-byte ISO sector units)",
+        esp_boot_lba, expected_esp_lba
+    );
+    assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
+
+    println!(
+        "Verified ESP entry (non‑bootable): LBA={}, Sectors={}",
+        esp_boot_lba, esp_boot_sectors
     );
 
     // Verify ISO content using isoinfo -l

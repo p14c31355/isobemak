@@ -2,10 +2,9 @@ use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
-use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ESP_START_LBA_ISO, ESP_START_LBA_512};
+use crate::iso::constants::{ESP_START_LBA_ISO, ESP_START_LBA_512};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -16,13 +15,11 @@ use crate::iso::builder_utils::{
     ensure_directory_path, get_file_metadata,
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
-use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
-use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
 use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
-use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
+use crate::iso::mbr::create_mbr_for_gpt_hybrid;
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
@@ -108,25 +105,30 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // UEFI ESP boot entry (FAT image as a whole)
-        // OVMF and many real UEFI firmwares use El Torito to locate the
-        // boot image on CD-ROM.  The ESP FAT image must be listed as a
-        // no‑emulation boot entry so the firmware can mount it as a FAT
-        // filesystem and find BOOTX64.EFI inside.
+        // Dual boot path: El Torito vs MBR/ESP
+        //
+        // Entry 0 (bootable): UEFI direct-file entry
+        //   Points to BOOTX64.EFI inside the ISO9660 filesystem.
+        //   QEMU/OVMF boots via El Torito on CD-ROM and reads this.
+        //
+        // Entry 1 (non-bootable): UEFI ESP entry
+        //   Points to the FAT32 ESP image at 2 MiB offset.
+        //   Real USB hardware ignores El Torito and boots via MBR→ESP.
+        //   Kept as a secondary entry for firmware that prefers the
+        //   FAT image approach over direct EFI binary.
+
+        // Entry 0: Direct EFI binary (bootable, QEMU/OVMF primary path)
+        if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
+        }
+
+        // Entry 1: ESP FAT image (non-bootable, MBR path for real hardware)
         if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
             && size > 0
         {
-            entries.push(create_uefi_esp_boot_entry(lba, size)?);
-        }
-
-        // UEFI direct-file entry (points to BOOTX64.EFI inside ISO9660)
-        // Some firmwares prefer the FAT image entry above, others may
-        // fall back to a direct file entry.  Keep it as a secondary
-        // non‑bootable entry so the catalog remains valid.
-        if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-            let mut entry = create_uefi_boot_entry(&self.root, &u.destination_in_iso)?;
-            entry.bootable = false; // ESP FAT image entry is the primary boot target
-            entries.push(entry);
+            let mut esp_entry = create_uefi_esp_boot_entry(lba, size)?;
+            esp_entry.bootable = false;
+            entries.push(esp_entry);
         }
 
         // BIOS boot entry
@@ -137,7 +139,7 @@ impl IsoBuilder {
         Ok(entries)
     }
 
-    /// Writes MBR and GPT structures for hybrid ISOs.
+    /// Writes MBR for hybrid ISOs (xorriso-compatible, no GPT).
     fn write_hybrid_structures(
         &self,
         iso_file: &mut File,
@@ -157,41 +159,10 @@ impl IsoBuilder {
                 )
             })?;
 
-        if total_512_sectors < 69 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                format!(
-                    "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
-                    total_512_sectors
-                ),
-            ));
-        }
-
-        // Check that ESP does not overlap with backup GPT region.
-        // backup GPT = 33 sectors at the end (1 header + 32 partition entries).
-        if let Some(esp_size) = esp_size_sectors
-            && esp_size > 0
-        {
-            let esp_start_512 = ESP_START_LBA_512 as u64;
-            let esp_size_512 = (esp_size as u64) * 4;
-            let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
-            let backup_gpt_start_lba = total_512_sectors.saturating_sub(BACKUP_GPT_RESERVED_512);
-
-            if esp_partition_end_lba >= backup_gpt_start_lba {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "ESP (LBA {}-{}) overlaps with backup GPT region (starts at LBA {}); \
-                         increase total image size or reduce ESP size",
-                        esp_start_512, esp_partition_end_lba, backup_gpt_start_lba
-                    ),
-                ));
-            }
-        }
-
-        // Write MBR (MBR uses 512-byte sector LBA values).
-        // total_512_sectors is already validated; for MBR cap at u32::MAX
-        // but fail explicitly if information loss would occur.
+        // Write MBR only (MBR uses 512-byte sector LBA values).
+        // GPT is intentionally omitted — many NEC/Insyde/AMI firmwares
+        // fail when GPT is present on a USB-HDD boot medium.
+        // xorriso uses MBR-only hybrid for maximum compatibility.
         let total_for_mbr = if total_512_sectors <= u32::MAX as u64 {
             total_512_sectors as u32
         } else {
@@ -217,29 +188,7 @@ impl IsoBuilder {
             esp_size_512,
         )?;
         mbr.write_to(iso_file)?;
-
-        // Write GPT structures if esp_size_sectors > 0
-        if let Some(esp_size_sectors_val) = esp_size_sectors
-            && esp_size_sectors_val > 0
-        {
-            // ESP position in 512-byte sector units (direct from ESP_START_LBA_512)
-            let esp_start_512 = ESP_START_LBA_512 as u64;
-            let esp_size_512 = (esp_size_sectors_val as u64) * 4;
-            let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
-
-            let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
-            let esp_unique_guid_str = Uuid::new_v4().to_string();
-            let partitions = vec![GptPartitionEntry::new(
-                esp_guid_str,
-                &esp_unique_guid_str,
-                esp_start_512,
-                esp_partition_end_lba,
-                "EFI System Partition",
-                0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
-            )];
-            write_gpt_structures(iso_file, total_512_sectors, &partitions)?;
-            iso_file.sync_data()?;
-        }
+        iso_file.sync_data()?;
 
         Ok(())
     }

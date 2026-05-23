@@ -119,53 +119,32 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // The `test_create_isohybrid_uefi_iso` already performs detailed UEFI boot entry verification.
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
 
-    // 4. Enhanced Binary Dump Inspection: Check GPT Header
-    // Read the ISO file content
+    // 4. Verify MBR boot signature (xorriso-compatible, no GPT)
     let mut iso_file = File::open(&iso_path)?;
-    let mut iso_bytes = Vec::new();
-    iso_file.read_to_end(&mut iso_bytes)?;
+    let mut mbr_sector = [0u8; 512];
+    iso_file.read_exact(&mut mbr_sector)?;
 
-    // GPT Header is typically at LBA 1 (sector 1), which is 512 bytes from the start of the file.
-    // A sector is 512 bytes.
-    let gpt_header_offset = 512;
-    let gpt_header_size = 92; // Minimum GPT header size
+    // MBR boot signature at bytes 510-511 must be 0xAA55
+    let mbr_sig = u16::from_le_bytes([mbr_sector[510], mbr_sector[511]]);
+    assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
+    println!("Verified MBR boot signature: 0x{:04X}", mbr_sig);
 
-    if iso_bytes.len() > gpt_header_offset + gpt_header_size {
-        let gpt_header_slice = &iso_bytes[gpt_header_offset..(gpt_header_offset + gpt_header_size)];
+    // MBR Partition Entry 0 at offset 0x1BE: type 0x83 (Linux/ISO9660)
+    let entry0_type = mbr_sector[0x1BE + 4];
+    let entry0_start =
+        u32::from_le_bytes(mbr_sector[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
+    assert_eq!(entry0_type, 0x83, "MBR entry 0 should be type 0x83 (Linux)");
+    assert_eq!(entry0_start, 0, "MBR entry 0 should start at LBA 0");
+    println!("MBR entry 0: type=0x{:02X}, start={}", entry0_type, entry0_start);
 
-        // Check GPT Signature ("EFI PART")
-        let signature = &gpt_header_slice[0..8];
-        assert_eq!(signature, b"EFI PART", "GPT header signature mismatch");
-        println!(
-            "Verified GPT header signature: {:?}",
-            String::from_utf8_lossy(signature)
-        );
-
-        // Check GPT Revision (should be 0x00010000 for version 1.0)
-        let revision = u32::from_le_bytes([
-            gpt_header_slice[8],
-            gpt_header_slice[9],
-            gpt_header_slice[10],
-            gpt_header_slice[11],
-        ]);
-        assert_eq!(revision, 0x00010000, "GPT header revision mismatch");
-        println!("Verified GPT header revision: 0x{:x}", revision);
-
-        // Further checks could include:
-        // - Header Size (offset 12, u32)
-        // - CRC32 of header (offset 16, u32)
-        // - Current LBA (offset 24, u64)
-        // - Backup LBA (offset 32, u64)
-        // - First Usable LBA (offset 40, u64)
-        // - Last Usable LBA (offset 48, u64)
-        // - Disk GUID (offset 56, 16 bytes)
-        // - Partition Entry LBA (offset 72, u64)
-        // - Number of Partition Entries (offset 80, u32)
-        // - Size of Partition Entry (offset 84, u32)
-        // - CRC32 of Partition Entry Array (offset 88, u32)
-    } else {
-        println!("Warning: ISO file too small to contain a GPT header at expected offset.");
-    }
+    // MBR Partition Entry 1 at offset 0x1CE: type 0xEF (ESP), bootable=0x00
+    let entry1_bootable = mbr_sector[0x1CE];
+    let entry1_type = mbr_sector[0x1CE + 4];
+    let entry1_start =
+        u32::from_le_bytes(mbr_sector[(0x1CE + 8)..(0x1CE + 12)].try_into().unwrap());
+    assert_eq!(entry1_bootable, 0x00, "MBR entry 1 should not be bootable");
+    assert_eq!(entry1_type, 0xEF, "MBR entry 1 should be type 0xEF (ESP)");
+    println!("MBR entry 1: type=0x{:02X}, start={}", entry1_type, entry1_start);
 
     Ok(())
 }

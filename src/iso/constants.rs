@@ -6,7 +6,7 @@
 ///
 /// This satisfies the 1 MiB alignment requirement that many real UEFI
 /// firmwares (AMI, Insyde, older Lenovo, NEC, Panasonic) expect for ESP.
-pub const ESP_START_LBA_ISO: u32 = 512;
+pub const ESP_START_LBA_ISO: u32 = 1024;
 
 /// The starting LBA for the EFI System Partition in **512-byte sectors**.
 ///
@@ -16,7 +16,7 @@ pub const ESP_START_LBA_ISO: u32 = 512;
 ///
 /// NEVER mix this with ESP_START_LBA_ISO — one is for on‑disk partition
 /// tables, the other is for El Torito and ISO‑internal offsets.
-pub const ESP_START_LBA_512: u32 = 2048;
+pub const ESP_START_LBA_512: u32 = 4096;
 
 /// Number of ISO sectors reserved for the system area (MBR at LBA 0
 /// plus GPT header at LBA 1 and partition entries at LBA 2-33).
