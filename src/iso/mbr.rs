@@ -70,10 +70,11 @@ pub fn create_mbr_for_gpt_hybrid(
         mbr.partition_table[0].size_in_lba = total_lbas - 1;
 
         // EFI System Partition entry (needed by some firmware to find ESP)
+        // Set bootable=0x80 because older UEFI (e.g. NEC 2015) requires this flag.
         if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba)
             && size > 0
         {
-            mbr.partition_table[1].bootable = 0x00;
+            mbr.partition_table[1].bootable = 0x80;
             mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
             mbr.partition_table[1].starting_lba = start;
             mbr.partition_table[1].size_in_lba = size;
@@ -123,13 +124,13 @@ mod tests {
             assert_eq!(size, total_lbas - 1);
         }
 
-        // Part 2: EFI System Partition
+        // Part 2: EFI System Partition (bootable=0x80 for older UEFI)
         {
             let bootable = mbr.partition_table[1].bootable;
             let ptype = mbr.partition_table[1].partition_type;
             let start = mbr.partition_table[1].starting_lba;
             let size = mbr.partition_table[1].size_in_lba;
-            assert_eq!(bootable, 0x00);
+            assert_eq!(bootable, 0x80);
             assert_eq!(ptype, 0xEF);
             assert_eq!(start, esp_start);
             assert_eq!(size, esp_size);

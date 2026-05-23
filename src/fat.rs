@@ -43,7 +43,9 @@ pub fn create_fat_image(
     }
 
     // Add overhead and enforce a minimum size.
-    const MIN_FAT_SIZE: u64 = 16 * 1024 * 1024; // 16MB. Ensures FAT16 formatting.
+    // Keep well under 32768 512-byte sectors to avoid Nsect exceeding i16::MAX
+    // (the boot catalog stores sector count as u16, but some UEFI firmware treats it as signed).
+    const MIN_FAT_SIZE: u64 = 8 * 1024 * 1024; // 8MB = 16384 sectors. Enough for UEFI boot files.
     const FAT_OVERHEAD: u64 = 2 * 1024 * 1024; // 2MB. Overhead for filesystem structures.
     const SECTOR_SIZE: u64 = 512;
 
