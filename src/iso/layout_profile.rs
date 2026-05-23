@@ -117,11 +117,18 @@ impl IsoLayoutProfile {
             esp_mode: EspMode::AppendedPartition,
             esp_alignment_lba_512: 4096, // 2 MiB (matches ESP_START_LBA_512)
             mbr_mode: MbrMode::HybridLinuxEsp,
-            // PartitionOffset is required for real hardware to correctly
-            // locate the FAT volume within the disk layout.
-            // Firmware (NEC/Insyde/AMI) uses hidden_sectors to translate
-            // between partition-relative and absolute LBA addressing.
-            hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
+            // hidden_sectors MUST be 0 for real hardware compatibility.
+            //
+            // UEFI firmware locates the ESP via GPT partition entries (which
+            // provide the absolute starting LBA).  When hidden_sectors is
+            // non-zero, some firmware (InsydeH2O, older AMI) adds it on top
+            // of the GPT-provided offset, causing a double offset that
+            // breaks FAT cluster chain traversal, resulting in
+            // "No bootfile found for UEFI!".
+            //
+            // This matches the behaviour of other bootable
+            // ISOs that successfully boot on real hardware.
+            hidden_sectors_mode: HiddenSectorMode::Zero,
             uefi_boot_strategy: UefiBootStrategy::EspPartition,
         }
     }
