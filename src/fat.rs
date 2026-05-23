@@ -80,7 +80,7 @@ pub fn create_fat_image(
     let zero_buf = vec![0u8; 65536];
     let mut remaining = total_size;
     while remaining > 0 {
-        let chunk = (remaining as usize).min(zero_buf.len());
+        let chunk = remaining.min(zero_buf.len() as u64) as usize;
         file.write_all(&zero_buf[..chunk])?;
         remaining -= chunk as u64;
     }
