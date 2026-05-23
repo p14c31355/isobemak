@@ -82,8 +82,30 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     catalog[offset..offset + 32].copy_from_slice(&val);
     offset += 32;
 
+    // Pre-compute section entry counts for each SectionHeader.
+    // A SectionHeader (flag=0x91) at position i needs to know how many
+    // non-header entries follow it in the same section (up to the next
+    // SectionHeader or end of list).  Real UEFI firmware (OVMF, InsydeH2O)
+    // uses this value to locate boot entries.
+    let section_counts: Vec<u16> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            if matches!(e.entry_type, BootCatalogEntryType::SectionHeader) {
+                entries[i + 1..]
+                    .iter()
+                    .take_while(|next| {
+                        !matches!(next.entry_type, BootCatalogEntryType::SectionHeader)
+                    })
+                    .count() as u16
+            } else {
+                0
+            }
+        })
+        .collect();
+
     // Boot Entries
-    for entry_data in entries {
+    for (idx, entry_data) in entries.iter().enumerate() {
         let mut entry = [0u8; 32];
 
         let (flag, media_type) = match entry_data.entry_type {
@@ -107,7 +129,14 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
 
         entry[0] = flag;
         entry[1] = media_type;
-        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
+
+        // Bytes 2–3: Load segment for boot entries; "Number of section entries"
+        // for Section Header entries (El Torito §7.2.4 Table 8).
+        let field_2_3: u16 = match entry_data.entry_type {
+            BootCatalogEntryType::SectionHeader => section_counts[idx],
+            _ => 0,
+        };
+        entry[2..4].copy_from_slice(&field_2_3.to_le_bytes());
 
         // System type: platform_id for Boot/InitialDefault, 0x00 for SectionHeader
         entry[4] = match entry_data.entry_type {

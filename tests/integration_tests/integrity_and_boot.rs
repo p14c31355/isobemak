@@ -129,13 +129,13 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
     println!("Verified MBR boot signature: 0x{:04X}", mbr_sig);
 
-    // MBR Partition Entry 0 at offset 0x1BE: type 0xEE (GPT Protective)
-    // This matches xorriso protective GPT layout.
+    // MBR Partition Entry 0 at offset 0x1BE: type 0x83 (Linux native), LBA 0
+    // xorriso-compatible MBR layout for real hardware UEFI boot.
     let entry0_type = mbr_sector[0x1BE + 4];
     let entry0_start =
         u32::from_le_bytes(mbr_sector[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(entry0_type, 0xEE, "MBR entry 0 should be type 0xEE (GPT Protective)");
-    assert_eq!(entry0_start, 1, "MBR entry 0 should start at LBA 1 (protective GPT)");
+    assert_eq!(entry0_type, 0x83, "MBR entry 0 should be type 0x83 (Linux native, xorriso-compatible)");
+    assert_eq!(entry0_start, 0, "MBR entry 0 should start at LBA 0 (whole-disk)");
     println!("MBR entry 0: type=0x{:02X}, start={}", entry0_type, entry0_start);
 
     // MBR Partition Entry 1 at offset 0x1CE: type 0xEF (ESP), bootable=0x00

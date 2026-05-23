@@ -101,24 +101,26 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     let mbr_sig = u16::from_le_bytes([mbr[510], mbr[511]]);
     assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
 
-    // --- Entry 0 (offset 0x1BE): type 0xEE, protective GPT, LBA 1 ---
+    // --- Entry 0 (offset 0x1BE): type 0x83 (Linux native), LBA 0 ---
+    // xorriso-compatible MBR puts type 0x83 (Linux native) covering the whole disk
+    // from LBA 0.  This provides a fallback ESP discovery path for firmware
+    // (NEC/Insyde/old AMI) that cannot parse GPT when type 0xEE is present.
     let e0_type = mbr[0x1BE + 4];
     let e0_start = u32::from_le_bytes(mbr[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(e0_type, 0xEE, "MBR entry 0 must be type 0xEE (GPT Protective)");
-    assert_eq!(e0_start, 1, "MBR entry 0 must start at LBA 1");
+    assert_eq!(e0_type, 0x83, "MBR entry 0 must be type 0x83 (Linux native, xorriso-compatible)");
+    assert_eq!(e0_start, 0, "MBR entry 0 must start at LBA 0 (whole-disk)");
 
     // Verify CHS fields for entry 0 are populated.
-    // LBA=1 with H=64, SPT=32 → cylinder=0, head=0, sector=2
+    // LBA=0 is below CHS-addressable minimum (sector >= 1), so CHS is saturated to max.
     let e0_chs_start = &mbr[0x1BE + 1..0x1BE + 4];
     assert_ne!(
         e0_chs_start, &[0, 0, 0],
-        "MBR entry 0 starting CHS must not be zero (LBA=1 → H=0, S=2, C=0)"
+        "MBR entry 0 starting CHS must not be zero"
     );
-    // CHS encoding: head=0, sector=2, cylinder=0
-    // byte 0=head=0x00, byte 1=sector=0x02 (cyl_hi=0 → 0x02), byte 2=cyl_lo=0x00
-    assert_eq!(e0_chs_start[0], 0x00, "MBR entry 0 start head must be 0 (LBA=1 H=64 SPT=32)");
-    assert_eq!(e0_chs_start[1], 0x02, "MBR entry 0 start sector must be 2 (LBA=1 H=64 SPT=32)");
-    assert_eq!(e0_chs_start[2], 0x00, "MBR entry 0 start cylinder must be 0 (LBA=1)");
+    // LBA=0 → saturated CHS: head=255, sector=63|cyl_hi=3, cyl_lo=255
+    assert_eq!(e0_chs_start[0], 0xFF, "MBR entry 0 start head must be 255 (LBA=0 saturated)");
+    assert_eq!(e0_chs_start[1], 0xFF, "MBR entry 0 start sector/cyl_hi must be 0xFF");
+    assert_eq!(e0_chs_start[2], 0xFF, "MBR entry 0 start cyl_lo must be 0xFF");
 
     let e0_chs_end = &mbr[0x1BE + 5..0x1BE + 8];
     assert_ne!(
