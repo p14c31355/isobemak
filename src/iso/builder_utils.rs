@@ -201,21 +201,25 @@ pub fn create_boot_entry_generic(
                 sectors as u16
             }
             BootType::UefiEsp => {
-                let sectors = esp_size_sectors.ok_or_else(|| {
+                let iso_sectors = esp_size_sectors.ok_or_else(|| {
                     io_error!(
                         io::ErrorKind::InvalidInput,
                         "ESP size required for UEFI ESP boot"
                     )
                 })?;
+                // El Torito Nsect is in 512-byte virtual sectors (El Torito §6.2).
+                // esp_size_sectors is passed in ISO 2048-byte units, so multiply
+                // by 4 to convert to 512-byte units.
+                let sectors_512 = (iso_sectors as u64) * 4;
                 // UEFI no-emulation: some firmware (OVMF, GRUB, xorriso) expects
                 // boot_image_sectors = 0, but NEC/Insyde firmware requires a
                 // non-zero value.  Use a minimum of 1 for maximum compatibility.
                 validate_boot_image_size(
-                    sectors.max(1) as u64,
+                    sectors_512.max(1),
                     u16::MAX as u64,
                     boot_type.description(),
                 )?;
-                sectors.max(1) as u16
+                sectors_512.max(1) as u16
             }
         },
         entry_type: BootCatalogEntryType::BootEntry { bootable: true },

@@ -144,25 +144,26 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // Hybrid path (ESP present): xorriso 3-entry pattern
-        //   Entry 0: Initial/Default (0x90, HDD)
+        // Hybrid path (ESP present): xorriso-compatible 3-entry pattern
+        //   Entry 0: Boot Entry (0x88, NoEmul) → direct EFI binary in ISO9660
+        //            (for QEMU/OVMF CD-ROM emulation)
         //   Entry 1: Section Header (0x91, platform=0xEF)
-        //   Entry 2: Boot Entry (0x88) → ESP FAT image
+        //   Entry 2: Boot Entry (0x88) → ESP FAT image (for USB hardware)
         if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
             && size > 0
         {
-            // Entry 0: Initial/Default entry.
-            // platform_id=0xEF so the Validation Entry shows "Arch 239".
-            entries.push(BootCatalogEntry {
-                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID, // 0xEF
-                boot_image_lba: 0,
-                boot_image_sectors: 1,
-                entry_type: BootCatalogEntryType::InitialDefault,
-            });
+            // Entry 0: Direct EFI binary boot entry for QEMU/CD-ROM emulation.
+            // Points to BOOTX64.EFI inside the ISO9660 filesystem, matching
+            // Ubuntu/xorriso layout.  Real UEFI firmware ignores El Torito
+            // entirely and boots via MBR→GPT→ESP, so this entry only matters
+            // for QEMU/OVMF.
+            if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+                entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
+            }
 
             // Entry 1: Section Header for UEFI platform
             entries.push(BootCatalogEntry {
-                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID, // 0xEF → media byte
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: 0,
                 boot_image_sectors: 0,
                 entry_type: BootCatalogEntryType::SectionHeader,
