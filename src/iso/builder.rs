@@ -4,8 +4,7 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use crate::fat;
-use crate::iso::constants::{ESP_START_LBA_ISO, ESP_START_LBA_512};
-use crate::iso::layout_profile::{ElToritoMode, IsoLayoutProfile};
+use crate::iso::layout_profile::{ElToritoMode, HiddenSectorMode, IsoLayoutProfile};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -184,9 +183,11 @@ impl IsoBuilder {
         };
 
         // --- MBR (always written) ---
+        // Use profile-driven ESP alignment in 512-byte sector units.
+        let esp_start_512_profile = self.profile.esp_alignment_lba_512;
         iso_file.seek(SeekFrom::Start(0))?;
         let (esp_start_512, esp_size_512) = if let Some(esp_size) = esp_size_sectors {
-            (Some(ESP_START_LBA_512), Some(esp_size * 4))
+            (Some(esp_start_512_profile), Some(esp_size * 4))
         } else {
             (None, None)
         };
@@ -257,8 +258,10 @@ impl IsoBuilder {
         // iso_data_lba: start of ISO9660 directory records and file contents.
         // For isohybrid, this begins after the ESP partition.
         // For non-hybrid, this begins right after VDs+boot catalog.
+        // Derive ISO-sector ESP offset from profile alignment (512B → 2048B).
+        let esp_lba_iso_profile = self.profile.esp_alignment_lba_512 / 4;
         self.iso_data_lba = if self.is_isohybrid {
-            ESP_START_LBA_ISO + esp_size_sectors.unwrap_or(0)
+            esp_lba_iso_profile + esp_size_sectors.unwrap_or(0)
         } else {
             boot_catalog_lba + 1 // LBA 20
         };
@@ -309,6 +312,7 @@ pub fn build_iso(
 ) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)> {
     // Added Option<u32> for logical_fat_size_512_sectors
     let mut iso_builder = IsoBuilder::new();
+    iso_builder.set_profile(image.layout_profile.clone());
     iso_builder.set_volume_id(image.volume_id.clone());
     iso_builder.set_isohybrid(is_isohybrid);
 
@@ -349,21 +353,27 @@ pub fn build_iso(
             if let Some(ref grub_path) = grub_cfg_path_buf {
                 fat_files.push(("grub.cfg", grub_path));
             }
-            // ESP hidden sectors: offset from disk start to ESP in 512-byte units.
-            let esp_hidden_sectors = ESP_START_LBA_512;
+            // ESP hidden sectors: profile-controlled (Zero for emulator, PartitionOffset for hardware).
+            let esp_hidden_sectors = match iso_builder.profile.hidden_sectors_mode {
+                HiddenSectorMode::Zero => 0,
+                HiddenSectorMode::PartitionOffset => iso_builder.profile.esp_alignment_lba_512,
+            };
             let size_512_sectors = fat::create_fat_image(&path, &fat_files, esp_hidden_sectors)?;
             logical_fat_size_512_sectors = Some(size_512_sectors);
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
             let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
 
+            // Derive ISO-sector ESP LBA from profile alignment.
+            let esp_lba_iso_profile = iso_builder.profile.esp_alignment_lba_512 / 4;
+
             // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(ESP_START_LBA_ISO);
+            iso_builder.esp_lba = Some(esp_lba_iso_profile);
             iso_builder.esp_size_sectors = Some(calculated_esp_size_iso_sectors);
 
-            // Copy the FAT image to the ISO file at the ESP LBA (1 MiB aligned)
+            // Copy the FAT image to the ISO file at the profile-aligned ESP LBA
             iso_file.seek(SeekFrom::Start(
-                ESP_START_LBA_ISO as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
+                esp_lba_iso_profile as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
             ))?;
             let mut temp_fat = std::fs::File::open(&path)?;
             io::copy(&mut temp_fat, &mut iso_file)?;

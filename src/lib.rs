@@ -20,7 +20,7 @@ pub use iso::layout_profile::{
 
 #[cfg(test)]
 mod tests {
-    use super::{BiosBootInfo, BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+    use super::{BiosBootInfo, BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo, build_iso};
     use std::io;
     use std::path::Path;
     use tempfile::tempdir;
@@ -77,6 +77,7 @@ mod tests {
                     grub_cfg_content: None,
                 }),
             },
+            layout_profile: IsoLayoutProfile::default(),
         };
 
         Ok(iso_image)

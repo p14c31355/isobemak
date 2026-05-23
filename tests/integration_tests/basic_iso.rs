@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
 };
 
-use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+use isobemak::{BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
@@ -53,6 +53,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     // Call the main function with correct arguments
@@ -165,6 +166,7 @@ fn test_sets_volume_label() -> io::Result<()> {
             bios_boot: None,
             uefi_boot: None,
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     // Call the main function with correct arguments

@@ -59,6 +59,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
     };
 
     // Build the ISO

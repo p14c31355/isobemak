@@ -4,7 +4,7 @@ use std::{
 };
 
 use fatfs::{FileSystem, FsOptions};
-use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+use isobemak::{BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
@@ -57,6 +57,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     // Call the main function with is_isohybrid set to true
@@ -204,6 +205,7 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;
@@ -270,6 +272,7 @@ menuentry "Kernel" {
                 grub_cfg_content: Some(grub_config.to_string()),
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;

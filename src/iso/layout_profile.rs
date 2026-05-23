@@ -60,8 +60,13 @@ pub enum MbrMode {
 /// FAT BPB hidden_sectors policy.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HiddenSectorMode {
+    /// hidden_sectors = 0.
+    /// QEMU/OVMF passes even with zero; avoids confusing firmware that rejects
+    /// FAT images with non-zero hidden sectors inside an El Torito CD context.
+    Zero,
     /// hidden_sectors = ESP partition start LBA (in 512-byte sectors).
-    /// Required by NEC/Insyde/old AMI firmware for FAT geometry validation.
+    /// Required by NEC/Insyde/old AMI firmware for FAT geometry validation
+    /// when the medium is treated as USB-HDD.
     PartitionOffset,
 }
 
