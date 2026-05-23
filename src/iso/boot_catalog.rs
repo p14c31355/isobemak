@@ -138,10 +138,14 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         };
         entry[2..4].copy_from_slice(&field_2_3.to_le_bytes());
 
-        // System type: platform_id for Boot/InitialDefault, 0x00 for SectionHeader
+        // System type:
+        //   Section Header (0x91): always 0x00 (El Torito Table 8)
+        //   Boot Entry in a section (0x88): 0x00 (platform defined by Section Header, §7.2.3)
+        //   Initial/Default (0x90): platform_id (standalone, not in a section)
         entry[4] = match entry_data.entry_type {
             BootCatalogEntryType::SectionHeader => 0x00,
-            _ => entry_data.platform_id,
+            BootCatalogEntryType::BootEntry { .. } => 0x00,
+            BootCatalogEntryType::InitialDefault => entry_data.platform_id,
         };
 
         // Sector count is a u16 at offset 6.

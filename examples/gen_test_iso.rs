@@ -33,7 +33,7 @@ fn main() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
-        layout_profile: isobemak::IsoLayoutProfile::emulator(),
+        layout_profile: isobemak::IsoLayoutProfile::hardware(),
     };
     isobemak::build_iso(&iso_path, &img, true)?;
     println!("ISO: {:?} size={}", iso_path, iso_path.metadata()?.len());
