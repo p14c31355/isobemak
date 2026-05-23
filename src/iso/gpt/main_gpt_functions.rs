@@ -175,8 +175,10 @@ mod tests {
         assert_eq!(current_lba, 1);
         let backup_lba = header.backup_lba;
         assert_eq!(backup_lba, total_lbas - 1);
+        // GPT first_usable_lba = partition_entry_lba + partition_array_sectors
+        // = 2 + 32 = 34 (independent of ESP_START_LBA, which is a filesystem-level constant)
         let first_usable = header.first_usable_lba;
-        assert_eq!(first_usable, ESP_START_LBA as u64);
+        assert_eq!(first_usable, 34);
     }
 
     #[test]

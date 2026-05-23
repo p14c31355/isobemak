@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::constants::ESP_START_LBA;
+use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ESP_START_LBA};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -144,9 +144,19 @@ impl IsoBuilder {
         total_lbas: u64,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
-        // GPT structures require at least 69 LBAs (in 512-byte units)
-        // total_lbas here is in 2048-byte ISO sectors, convert to 512-byte sectors
-        let total_512_sectors = total_lbas * 4;
+        // total_lbas is in 2048-byte ISO sectors → convert to 512-byte sectors
+        let total_512_sectors = total_lbas
+            .checked_mul(4)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "ISO image too large: total_lbas * 4 overflows u64 ({} * 4)",
+                        total_lbas
+                    ),
+                )
+            })?;
+
         if total_512_sectors < 69 {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -157,7 +167,43 @@ impl IsoBuilder {
             ));
         }
 
-        // Write MBR (MBR uses 512-byte sector LBA values)
+        // Check that ESP does not overlap with backup GPT region.
+        // backup GPT = 33 sectors at the end (1 header + 32 partition entries).
+        if let Some(esp_size) = esp_size_sectors
+            && esp_size > 0
+        {
+            let esp_start_512 = (ESP_START_LBA as u64) * 4;
+            let esp_size_512 = (esp_size as u64) * 4;
+            let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
+            let backup_gpt_start_lba = total_512_sectors.saturating_sub(BACKUP_GPT_RESERVED_512);
+
+            if esp_partition_end_lba >= backup_gpt_start_lba {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    format!(
+                        "ESP (LBA {}-{}) overlaps with backup GPT region (starts at LBA {}); \
+                         increase total image size or reduce ESP size",
+                        esp_start_512, esp_partition_end_lba, backup_gpt_start_lba
+                    ),
+                ));
+            }
+        }
+
+        // Write MBR (MBR uses 512-byte sector LBA values).
+        // total_512_sectors is already validated; for MBR cap at u32::MAX
+        // but fail explicitly if information loss would occur.
+        let total_for_mbr = if total_512_sectors <= u32::MAX as u64 {
+            total_512_sectors as u32
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "ISO image too large for MBR ({} 512-byte sectors > u32::MAX)",
+                    total_512_sectors
+                ),
+            ));
+        };
+
         iso_file.seek(SeekFrom::Start(0))?;
         let (esp_start_512, esp_size_512) = if let Some(esp_size) = esp_size_sectors {
             (Some(ESP_START_LBA * 4), Some(esp_size * 4))
@@ -165,7 +211,7 @@ impl IsoBuilder {
             (None, None)
         };
         let mbr = create_mbr_for_gpt_hybrid(
-            total_512_sectors.min(u32::MAX as u64) as u32,
+            total_for_mbr,
             self.is_isohybrid,
             esp_start_512,
             esp_size_512,
@@ -210,30 +256,31 @@ impl IsoBuilder {
         self.esp_size_sectors = esp_size_sectors;
         // iso_file is now passed directly
 
-        // Placeholder for MBR and GPT structures.
-        // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
-        let reserved_sectors = if self.is_isohybrid {
-            ESP_START_LBA
-        } else {
-            16u32
-        };
-        let data_start_lba = reserved_sectors;
+        // Physical layout (ISO 2048-byte sectors) for isohybrid:
+        //
+        //   LBA 0-15:  system area (MBR/GPT written later by write_hybrid_structures)
+        //   LBA 16:    Primary Volume Descriptor (fixed by ISO 9660 spec)
+        //   LBA 17:    Boot Record Volume Descriptor (El Torito)
+        //   LBA 18:    Volume Descriptor Set Terminator
+        //   LBA 19:    El Torito Boot Catalog
+        //   LBA 20-511: padding / alignment gap (ensures ESP starts at 1 MiB = LBA 512)
+        //   LBA 512..512+esp_size-1: EFI System Partition (FAT image)
+        //   LBA 512+esp_size..:       ISO9660 directory records and file data
+        //
+        // Volume descriptors and boot catalog are written at fixed LBAs
+        // (16-19), independent of iso_data_lba.
+        // File data starts at iso_data_lba = ESP_START_LBA + esp_size,
+        // ensuring ISO9660 metadata never overlaps with the ESP region.
 
-        // Set current_lba to the start of filesystem data after VDs and catalog
-        // The volume descriptors and boot catalog will occupy sectors starting from data_start_lba.
-        // The actual file data will start after these.
-        // The calculate_lbas function will determine the LBA for the root directory and subsequent files/directories.
-        // We need to ensure that the total size calculation in finalize accounts for all written data.
-
-        // Seek to the start of the ISO9660 data area.
-        // LBA 16-18 for VDs, 19 for boot catalog. Data starts after.
         let boot_catalog_lba = 19;
-        // If hybrid, ISO9660 data starts after reserved sectors (MBR/GPT/ESP)
-        // Otherwise, it starts after VDs and boot catalog.
+
+        // iso_data_lba: start of ISO9660 directory records and file contents.
+        // For isohybrid, this begins after the ESP partition.
+        // For non-hybrid, this begins right after VDs+boot catalog.
         self.iso_data_lba = if self.is_isohybrid {
-            data_start_lba + esp_size_sectors.unwrap_or(0) // ISO filesystem starts after ESP partition
+            ESP_START_LBA + esp_size_sectors.unwrap_or(0)
         } else {
-            boot_catalog_lba + 1 // Should be 20
+            boot_catalog_lba + 1 // LBA 20
         };
         iso_file.seek(SeekFrom::Start(
             (self.iso_data_lba as u64) * ISO_SECTOR_SIZE as u64,
@@ -242,9 +289,8 @@ impl IsoBuilder {
         // Calculate LBAs for all files and directories. This also updates self.iso_data_lba to the end of the filesystem data.
         calculate_lbas(&mut self.iso_data_lba, &mut self.root)?;
 
-        // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
-        // Pass the calculated end of filesystem data as a preliminary total_sectors.
-        // This will be correctly updated by finalize later. The VDs are at fixed locations.
+        // Write volume descriptors at fixed ISO 9660 positions
+        // (LBA 16=PVD, 17=BRVD, 18=Terminator).
         write_descriptors(
             iso_file,
             self.volume_id.as_deref(),
@@ -323,19 +369,20 @@ pub fn build_iso(
             if let Some(ref grub_path) = grub_cfg_path_buf {
                 fat_files.push(("grub.cfg", grub_path));
             }
-            // ESP starts at ISO sector 34 (= 136 in 512-byte sectors)
+            // ESP hidden sectors: offset from disk start to ESP in 512-byte units.
+            // ESP_START_LBA is in ISO (2048-byte) sectors → multiply by 4 for FAT BPB.
             let esp_hidden_sectors = (ESP_START_LBA * 4) as u32;
             let size_512_sectors = fat::create_fat_image(&path, &fat_files, esp_hidden_sectors)?;
-            logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
+            logical_fat_size_512_sectors = Some(size_512_sectors);
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
             let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
 
             // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(ESP_START_LBA); // ESP starts at LBA 34 for hybrid ISOs
+            iso_builder.esp_lba = Some(ESP_START_LBA);
             iso_builder.esp_size_sectors = Some(calculated_esp_size_iso_sectors);
 
-            // Copy the FAT image to the ISO file at the designated ESP LBA (34)
+            // Copy the FAT image to the ISO file at the ESP LBA (1 MiB aligned)
             iso_file.seek(SeekFrom::Start(
                 ESP_START_LBA as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
             ))?;

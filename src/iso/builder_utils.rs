@@ -201,21 +201,17 @@ pub fn create_boot_entry_generic(
                 sectors as u16
             }
             BootType::UefiEsp => {
-                let sectors = esp_size_sectors.ok_or_else(|| {
+                let _sectors = esp_size_sectors.ok_or_else(|| {
                     io_error!(
                         io::ErrorKind::InvalidInput,
                         "ESP size required for UEFI ESP boot"
                     )
                 })?;
-                // ESP size stays in ISO sectors (2048‑byte).
-                // El Torito on CD-ROM uses the medium sector size (2048 bytes),
-                // which matches QEMU/OVMF's interpretation.
-                validate_boot_image_size(
-                    sectors as u64,
-                    u16::MAX as u64,
-                    boot_type.description(),
-                )?;
-                sectors as u16
+                // UEFI no-emulation: boot_image_sectors = 0 for maximum
+                // firmware compatibility.  xorriso and GRUB do the same.
+                // Some firmware expects 0, others the real size;
+                // 0 is the safer choice for UEFI ESP images.
+                0u16
             }
         },
         bootable: true,
