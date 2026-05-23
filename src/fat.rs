@@ -66,7 +66,9 @@ pub fn create_fat_image(
         FatType::Fat32
     };
 
-    // Create the file and set its length
+    // Create the file, set length, and zero-fill.
+    // `set_len` on some filesystems creates a sparse file with stale disk data,
+    // which corrupts FAT directory entries. Zero-fill ensures clean FAT structures.
     let mut file = OpenOptions::new()
         .read(true)
         .write(true)
@@ -74,7 +76,14 @@ pub fn create_fat_image(
         .truncate(true)
         .open(fat_img_path)?;
     file.set_len(total_size)?;
-    file.flush()?;
+    file.seek(io::SeekFrom::Start(0))?;
+    let zero_buf = vec![0u8; 65536];
+    let mut remaining = total_size;
+    while remaining > 0 {
+        let chunk = (remaining as usize).min(zero_buf.len());
+        file.write_all(&zero_buf[..chunk])?;
+        remaining -= chunk as u64;
+    }
     file.seek(io::SeekFrom::Start(0))?;
 
     // Format the FAT image

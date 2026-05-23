@@ -109,18 +109,11 @@ impl IsoBuilder {
         let bi = self.boot_info.as_ref();
 
         // UEFI boot entry
-        // When isohybrid, add the ESP-based entry for HDD/USB boot AND
-        // the direct file entry for El Torito CD-ROM boot. Older UEFI firmware
-        // (e.g. NEC 2015) reads the boot image via El Torito from the ISO filesystem,
-        // not via GPT/ESP.
-        if self.is_isohybrid {
-            if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
-                entries.push(create_uefi_esp_boot_entry(lba, size)?);
-            }
-            if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-                entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
-            }
-        } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+        // El Torito points to the EFI file inside the ISO filesystem (direct file entry).
+        // The ESP partition is described by MBR/GPT for HDD/USB boot, NOT by El Torito.
+        // Do NOT add the ESP entry: some firmware (OVMF) selects the last EFI entry as
+        // the default boot target, and the ESP (FAT BPB) is not executable.
+        if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
             entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
 
