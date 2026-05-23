@@ -1,4 +1,6 @@
 ## [unreleased]
+## [unreleased]
+## [unreleased]
 ## [0.2.5] - 2026-05-23
 - Add `UefiBootInfo::additional_efi_boot_files` field for including extra EFI binaries (e.g. GRUBX64.EFI) in the ESP FAT image
 - Remove unused `BiosBootInfo::boot_catalog` field
