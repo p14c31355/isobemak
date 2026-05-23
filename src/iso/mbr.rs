@@ -2,6 +2,52 @@
 
 use std::io::{self, Seek, Write};
 
+/// Disk geometry used for CHS calculations.
+/// Must match the BPB geometry written in fat.rs (heads=64, spt=32).
+const CHS_HEADS: u32 = 64;
+const CHS_SPT: u32 = 32;
+const CHS_SECTORS_PER_CYLINDER: u32 = CHS_HEADS * CHS_SPT; // 2048
+
+/// Maximum values for CHS fields (when LBA exceeds CHS addressable range).
+const CHS_MAX_CYL: u32 = 1023;
+const CHS_MAX_HEAD: u32 = 254; // heads are 0-indexed, max valid is 255
+const CHS_MAX_SECTOR: u32 = 63;
+
+/// Encode an LBA into a 3-byte CHS tuple `[head, sector_cyl, cyl_low]`
+/// using H=64, S=32 geometry.
+///
+/// CHS encoding (per MBR / INT 13h):
+///   byte 0 = head
+///   byte 1 = sector (bits 0–5) | cylinder bits 8–9 (bits 6–7)
+///   byte 2 = cylinder bits 0–7
+///
+/// When `lba` exceeds the CHS-addressable range, all fields are saturated
+/// to their maximum values.
+fn lba_to_chs(lba: u64) -> [u8; 3] {
+    let max_lba = (CHS_MAX_CYL as u64 + 1) * (CHS_MAX_HEAD as u64 + 1) * CHS_MAX_SECTOR as u64;
+
+    if lba == 0 || lba >= max_lba {
+        // LBA 0 or beyond CHS range → saturate
+        return [
+            (CHS_MAX_HEAD + 1) as u8, // head = 255
+            0xFF,                     // sector 63 | cylinder bits 8-9 = 11b → 0xFF
+            0xFF,                     // cylinder bits 0-7 = 0xFF
+        ];
+    }
+
+    let cylinder = (lba / CHS_SECTORS_PER_CYLINDER as u64) as u32;
+    let remainder = (lba % CHS_SECTORS_PER_CYLINDER as u64) as u32;
+    let head = remainder / CHS_SPT;
+    let sector = (remainder % CHS_SPT) + 1;
+
+    let cylinder_hi = ((cylinder >> 8) & 0x03) as u8; // bits 8-9
+    let cylinder_lo = (cylinder & 0xFF) as u8;
+    let head_byte = head as u8;
+    let sector_byte = ((sector as u8) & 0x3F) | (cylinder_hi << 6);
+
+    [head_byte, sector_byte, cylinder_lo]
+}
+
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
 pub struct MbrPartitionEntry {
@@ -105,19 +151,29 @@ pub fn create_mbr_for_gpt_hybrid(
         mbr.partition_table[0].bootable = 0x00;
         mbr.partition_table[0].partition_type = 0xEE; // GPT Protective
         mbr.partition_table[0].starting_lba = 1;
-        mbr.partition_table[0].size_in_lba = total_lbas
-            .saturating_sub(1)
-            .min(0xFFFF_FFFF);
+        let size_lba = total_lbas.saturating_sub(1).min(0xFFFF_FFFF);
+        mbr.partition_table[0].size_in_lba = size_lba;
+        // Populate CHS fields — InsydeH2O and older AMI firmware verify
+        // CHS/LBA consistency and ignore the MBR when CHS is all-zero.
+        mbr.partition_table[0].starting_chs = lba_to_chs(1);
+        let protective_end_lba = 1u64.saturating_add(size_lba as u64).saturating_sub(1);
+        mbr.partition_table[0].ending_chs = lba_to_chs(protective_end_lba);
 
         // EFI System Partition in MBR entry 1 (backward compatibility)
         // for firmware that checks MBR before GPT.
         if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba)
             && size > 0
         {
+            let esp_start = start;
+            let esp_size = (size as u64).min(0xFFFF_FFFF) as u32;
             mbr.partition_table[1].bootable = 0x00;
             mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
-            mbr.partition_table[1].starting_lba = start;
-            mbr.partition_table[1].size_in_lba = (size as u64).min(0xFFFF_FFFF) as u32;
+            mbr.partition_table[1].starting_lba = esp_start;
+            mbr.partition_table[1].size_in_lba = esp_size;
+            mbr.partition_table[1].starting_chs = lba_to_chs(esp_start as u64);
+            mbr.partition_table[1].ending_chs = lba_to_chs(
+                (esp_start as u64).saturating_add(esp_size as u64).saturating_sub(1),
+            );
         }
     } else {
         // Standard MBR for El Torito (if not isohybrid)

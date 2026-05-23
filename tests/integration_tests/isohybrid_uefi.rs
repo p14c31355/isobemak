@@ -8,7 +8,7 @@ use isobemak::{BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo,
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
-    run_command, setup_integration_test_files, verify_iso_binary_structures,
+    run_command, setup_integration_test_files, verify_gpt_and_mbr_chs, verify_iso_binary_structures,
 };
 
 fn verify_fat_image_has_file(fat_img_path: &std::path::Path, fat_path: &str) -> io::Result<()> {
@@ -60,13 +60,17 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         layout_profile: IsoLayoutProfile::default(),
     };
 
-    // Call the main function with is_isohybrid set to true
-    let (fat_image_path, _temp_fat_file_holder, _iso_file, _logical_fat_size_512_sectors) =
-        build_iso(&iso_path, &iso_image, true)?;
+    // Call the main function with is_isohybrid set to true.
+    // Scope the returned handles so they are dropped before we open the ISO
+    // read-only — this guarantees OS-level flush of all buffered writes
+    // (especially the GPT structures) before verification.
+    {
+        // Drop returned handles before verification so the OS flushes
+        // GPT/MBR structures written via write_hybrid_structures.
+        let (_fat_image_path, _temp_fat, _iso_file, _logical_size) =
+            build_iso(&iso_path, &iso_image, true)?;
+    }
     assert!(iso_path.exists());
-    assert!(fat_image_path.exists());
-    // _iso_file is kept in scope to ensure the ISO file remains open for verification
-    // _temp_fat_file_holder is kept in scope to prevent the temporary file from being deleted
 
     // Verify ISO content using isoinfo -d
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
@@ -172,6 +176,12 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
 
     // Perform deeper binary verification of ISO structures
     verify_iso_binary_structures(&mut iso_file)?;
+
+    // Verify GPT structures (CRC, ESP attributes) and MBR CHS fields —
+    // these are the structures real UEFI firmware uses, and bugs here
+    // cause "No bootfile found for UEFI!" on hardware.
+    iso_file.seek(SeekFrom::Start(0))?;
+    verify_gpt_and_mbr_chs(&mut iso_file)?;
 
     Ok(())
 }

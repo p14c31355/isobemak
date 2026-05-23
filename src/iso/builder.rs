@@ -257,13 +257,19 @@ impl IsoBuilder {
                 let esp_end_512 = start_512.saturating_add(size_512).saturating_sub(1);
                 if esp_end_512 > start_512 {
                     let uuid_str = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
+                    // GPT attribute bit 0 (System Partition) MUST be set for ESP
+                    // per UEFI specification §5.3.3.  Firmware such as InsydeH2O and
+                    // older AMI rejects the partition as a valid ESP when this bit
+                    // is missing, resulting in "No bootfile found for UEFI!" on
+                    // real hardware even though QEMU/OVMF accepts it.
+                    let esp_attributes: u64 = 1; // bit 0: System Partition
                     let esp_partition = GptPartitionEntry::new(
                         EFI_SYSTEM_PARTITION_GUID,
                         uuid_str,
                         start_512 as u64,
                         esp_end_512 as u64,
                         "EFI System Partition",
-                        0,
+                        esp_attributes,
                     );
                     write_gpt_structures(iso_file, total_512_sectors, &[esp_partition])?;
                 }
