@@ -1,7 +1,6 @@
 // src/iso/mbr.rs
 
 use std::io::{self, Seek, Write};
-use std::mem;
 
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy, Default)]
@@ -41,8 +40,44 @@ impl Mbr {
         }
     }
 
+    /// Serialize the MBR to bytes using explicit little-endian conversions.
+    /// This avoids `mem::transmute` which is unsafe and sensitive to
+    /// compiler padding / endianness differences.
+    pub fn to_bytes(&self) -> [u8; 512] {
+        let mut bytes = [0u8; 512];
+        let mut offset = 0;
+
+        // Boot code: 440 bytes
+        bytes[offset..offset + 440].copy_from_slice(&self.boot_code);
+        offset += 440;
+
+        // Disk signature: u32 LE
+        bytes[offset..offset + 4].copy_from_slice(&self.disk_signature.to_le_bytes());
+        offset += 4;
+
+        // Reserved: u16 LE
+        bytes[offset..offset + 2].copy_from_slice(&self.reserved.to_le_bytes());
+        offset += 2;
+
+        // 4 partition entries (16 bytes each)
+        for entry in &self.partition_table {
+            bytes[offset] = entry.bootable;
+            bytes[offset + 1..offset + 4].copy_from_slice(&entry.starting_chs);
+            bytes[offset + 4] = entry.partition_type;
+            bytes[offset + 5..offset + 8].copy_from_slice(&entry.ending_chs);
+            bytes[offset + 8..offset + 12].copy_from_slice(&entry.starting_lba.to_le_bytes());
+            bytes[offset + 12..offset + 16].copy_from_slice(&entry.size_in_lba.to_le_bytes());
+            offset += 16;
+        }
+
+        // Boot signature: u16 LE (0xAA55)
+        bytes[offset..offset + 2].copy_from_slice(&self.boot_signature.to_le_bytes());
+
+        bytes
+    }
+
     pub fn write_to<W: Write + Seek>(&self, writer: &mut W) -> io::Result<()> {
-        let bytes: [u8; mem::size_of::<Mbr>()] = unsafe { mem::transmute(*self) };
+        let bytes = self.to_bytes();
         writer.write_all(&bytes)?;
         Ok(())
     }
@@ -63,11 +98,15 @@ pub fn create_mbr_for_gpt_hybrid(
     let mut mbr = Mbr::new();
 
     if is_isohybrid {
-        // Protective MBR for GPT (covers the whole disk)
+        // Protective MBR for GPT (covers the whole disk).
+        // Per UEFI spec, size must be clamped to 0xFFFF_FFFF when total_lbas-1 overflows u32.
+        // This prevents overflow for ISOs larger than ~2 TiB.
         mbr.partition_table[0].bootable = 0x00;
         mbr.partition_table[0].partition_type = 0xEE; // GPT Protective MBR
         mbr.partition_table[0].starting_lba = 1;
-        mbr.partition_table[0].size_in_lba = total_lbas - 1;
+        mbr.partition_table[0].size_in_lba = total_lbas
+            .saturating_sub(1)
+            .min(0xFFFF_FFFF);
 
         // EFI System Partition entry (needed by some firmware to find ESP)
         // Set bootable=0x80 because older UEFI (e.g. NEC 2015) requires this flag.
@@ -77,14 +116,17 @@ pub fn create_mbr_for_gpt_hybrid(
             mbr.partition_table[1].bootable = 0x80;
             mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
             mbr.partition_table[1].starting_lba = start;
-            mbr.partition_table[1].size_in_lba = size;
+            // Clamp ESP size to u32 max (4 GiB) — MBR partition entries use u32.
+            mbr.partition_table[1].size_in_lba = (size as u64).min(0xFFFF_FFFF) as u32;
         }
     } else {
         // Standard MBR for El Torito (if not isohybrid)
         mbr.partition_table[0].bootable = 0x80; // Bootable
         mbr.partition_table[0].partition_type = 0xEF; // EFI System Partition (placeholder)
         mbr.partition_table[0].starting_lba = 1;
-        mbr.partition_table[0].size_in_lba = total_lbas - 1;
+        mbr.partition_table[0].size_in_lba = total_lbas
+            .saturating_sub(1)
+            .min(0xFFFF_FFFF);
     }
 
     Ok(mbr)
@@ -94,6 +136,7 @@ pub fn create_mbr_for_gpt_hybrid(
 mod tests {
     use super::*;
     use std::io::Cursor;
+    use std::mem;
 
     #[test]
     fn test_mbr_new() {

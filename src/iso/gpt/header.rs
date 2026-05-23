@@ -2,7 +2,7 @@ use std::io::{self, Seek, Write};
 use std::mem;
 use uuid::Uuid;
 
-// GPT Header structure
+// GPT Header structure (92 bytes of actual fields + 420 reserved = 512 total with packed repr)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
 pub struct GptHeader {
@@ -33,21 +33,28 @@ impl GptHeader {
         let disk_guid_uuid = Uuid::new_v4();
         let disk_guid_bytes = disk_guid_uuid.into_bytes();
 
-        // For isohybrid ISO images:
-        // - MBR, GPT header, partition array are at LBA 0, 1, 2 (512-byte sectors)
-        // - GPT partition array is 128 entries * 128 bytes = 32 sectors (LBA 2..34)
-        // - First usable LBA is thus LBA 34 in 512-byte sectors
-        // - The ESP FAT image starts at LBA 34 * 4 = 136 in 512-byte sectors
-        //   (because ESP is placed at 2048-byte sector 34 = byte 69632)
-        // - But GPT doesn't know about the ISO sector layout; it only sees 512-byte sectors
-        //   So we reserve space for the partition array + header + MBR = 34 sectors
-        let first_usable_lba = 34u64; // MBR (1) + GPT Header (1) + Partition Array (32)
-        let last_usable_lba = total_lbas.saturating_sub(34); // Reserve 33 sectors for backup GPT at end + 1 for alignment
+        // Calculate partition array size in 512-byte sectors.
+        // Example: 128 entries * 128 bytes = 16384 bytes → 32 sectors.
+        let partition_array_sectors =
+            ((num_partition_entries as u64) * (partition_entry_size as u64)).div_ceil(512);
+
+        // Usable LBA range for GPT partitions:
+        // - MBR at LBA 0 (1 sector)
+        // - GPT header at LBA 1 (1 sector)
+        // - Primary partition array at LBA 2 .. 2 + partition_array_sectors - 1
+        // - First usable = partition_entry_lba + partition_array_sectors
+        // - Backup partition array occupies the last partition_array_sectors sectors
+        // - Backup GPT header at last LBA (total_lbas - 1)
+        // - Last usable = total_lbas - 2 - partition_array_sectors
+        let first_usable_lba = partition_entry_lba + partition_array_sectors;
+        let last_usable_lba = total_lbas
+            .saturating_sub(2)
+            .saturating_sub(partition_array_sectors);
 
         GptHeader {
             signature: *b"EFI PART",
             revision: 0x00010000, // Version 1.0
-            header_size: mem::size_of::<GptHeader>() as u32,
+            header_size: 92, // GPT header is 92 bytes (fields before reserved area)
             header_crc32: 0, // Calculated later
             _reserved0: 0,
             current_lba: 1, // LBA

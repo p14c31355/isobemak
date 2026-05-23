@@ -60,7 +60,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     };
 
     // Call the main function with is_isohybrid set to true
-    let (fat_image_path, _temp_fat_file_holder, _iso_file, logical_fat_size_512_sectors) =
+    let (fat_image_path, _temp_fat_file_holder, _iso_file, _logical_fat_size_512_sectors) =
         build_iso(&iso_path, &iso_image, true)?;
     assert!(iso_path.exists());
     assert!(fat_image_path.exists());
@@ -88,7 +88,8 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID is not EFI"
     );
 
-    // Boot Entry 0 (offset 32): UEFI ESP FAT image entry (bootable, points to ESP at LBA 34)
+    // Boot Entry 0 (offset 32): UEFI ESP FAT image entry (bootable, points to ESP)
+    // Load RBA is in 512-byte sectors → ESP_START_LBA (34) * 4 = 136
     let esp_offset = 32;
     let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
     let esp_boot_indicator = esp_bytes[0];
@@ -100,10 +101,11 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
         "UEFI ESP entry (Entry 0) is not marked bootable"
     );
+    let expected_esp_lba = isobemak::ESP_START_LBA * 4; // ISO LBA 34 → 512-byte LBA 136
     assert_eq!(
-        esp_boot_lba, isobemak::ESP_START_LBA,
-        "ESP entry LBA ({}) should equal ESP_START_LBA",
-        esp_boot_lba
+        esp_boot_lba, expected_esp_lba,
+        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA * 4, in 512-byte units)",
+        esp_boot_lba, expected_esp_lba
     );
     assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
 

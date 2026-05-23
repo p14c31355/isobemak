@@ -172,12 +172,24 @@ pub fn create_boot_entry_generic(
                 })?;
                 get_lba_for_path(root, path)?
             }
-            BootType::UefiEsp => esp_lba.ok_or_else(|| {
-                io_error!(
-                    io::ErrorKind::InvalidInput,
-                    "ESP LBA required for UEFI ESP boot"
-                )
-            })?,
+            BootType::UefiEsp => {
+                let lba = esp_lba.ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "ESP LBA required for UEFI ESP boot"
+                    )
+                })?;
+                // El Torito Load RBA for no‑emulation: must be in 512‑byte sector units
+                // when the medium is a USB disk (isohybrid).  ESP_LBA is in 2048‑byte ISO
+                // sectors, so multiply by 4.  Real UEFI firmware on USB media interprets
+                // the Load RBA field as a 512‑byte sector address.
+                lba.checked_mul(4).ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "UEFI ESP boot image LBA overflowed when converting to 512-byte LBA"
+                    )
+                })?
+            }
         },
         boot_image_sectors: match boot_type {
             BootType::Bios | BootType::Uefi => {
@@ -200,6 +212,7 @@ pub fn create_boot_entry_generic(
                         "ESP size required for UEFI ESP boot"
                     )
                 })?;
+                // ESP size in ISO sectors → convert to 512-byte sectors
                 let boot_image_512_sectors = sectors.checked_mul(4).ok_or_else(|| {
                     io_error!(
                         io::ErrorKind::InvalidInput,
