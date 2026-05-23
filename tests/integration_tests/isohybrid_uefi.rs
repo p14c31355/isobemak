@@ -88,18 +88,42 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID is not EFI"
     );
 
-    // Boot Entry 0 (offset 32): Direct UEFI file entry (BOOTABLE, points to EFI file in ISO)
-    // ESP is described by MBR/GPT for HDD/USB boot, NOT by El Torito boot catalog.
-    let uefi_file_offset = 32;
+    // Boot Entry 0 (offset 32): UEFI ESP FAT image entry (bootable, points to ESP at LBA 34)
+    let esp_offset = 32;
+    let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
+    let esp_boot_indicator = esp_bytes[0];
+    let esp_boot_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
+    let esp_boot_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
+
+    assert_eq!(
+        esp_boot_indicator,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
+        "UEFI ESP entry (Entry 0) is not marked bootable"
+    );
+    assert_eq!(
+        esp_boot_lba, isobemak::ESP_START_LBA,
+        "ESP entry LBA ({}) should equal ESP_START_LBA",
+        esp_boot_lba
+    );
+    assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
+
+    println!(
+        "Verified UEFI ESP boot entry: LBA={}, Sectors={}",
+        esp_boot_lba, esp_boot_sectors
+    );
+
+    // Boot Entry 1 (offset 64): Direct UEFI file entry, non‑bootable
+    // (points to BOOTX64.EFI inside ISO9660; kept as secondary fallback)
+    let uefi_file_offset = 64;
     let uefi_bytes = &boot_catalog_sector[uefi_file_offset..uefi_file_offset + 32];
     let uefi_boot_indicator = uefi_bytes[0];
     let uefi_boot_lba = u32::from_le_bytes(uefi_bytes[8..12].try_into().unwrap());
     let uefi_boot_sectors = u16::from_le_bytes(uefi_bytes[6..8].try_into().unwrap());
 
     assert_eq!(
-        uefi_boot_indicator,
-        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
-        "UEFI direct file entry (Entry 0) is not marked bootable"
+        uefi_boot_indicator, 0x00,
+        "UEFI direct file entry (Entry 1) must be non‑bootable (0x00), got {:#x}",
+        uefi_boot_indicator
     );
     assert!(
         uefi_boot_lba > isobemak::ESP_START_LBA,
@@ -109,7 +133,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     assert!(uefi_boot_sectors > 0, "Boot sectors must be > 0");
 
     println!(
-        "Verified UEFI boot entry: File LBA={}, Sectors={}",
+        "Verified UEFI direct file entry (non‑bootable): File LBA={}, Sectors={}",
         uefi_boot_lba, uefi_boot_sectors
     );
 

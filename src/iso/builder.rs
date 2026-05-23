@@ -108,13 +108,25 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // UEFI boot entry
-        // El Torito points to the EFI file inside the ISO filesystem (direct file entry).
-        // The ESP partition is described by MBR/GPT for HDD/USB boot, NOT by El Torito.
-        // Do NOT add the ESP entry: some firmware (OVMF) selects the last EFI entry as
-        // the default boot target, and the ESP (FAT BPB) is not executable.
+        // UEFI ESP boot entry (FAT image as a whole)
+        // OVMF and many real UEFI firmwares use El Torito to locate the
+        // boot image on CD-ROM.  The ESP FAT image must be listed as a
+        // no‑emulation boot entry so the firmware can mount it as a FAT
+        // filesystem and find BOOTX64.EFI inside.
+        if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
+            && size > 0
+        {
+            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+        }
+
+        // UEFI direct-file entry (points to BOOTX64.EFI inside ISO9660)
+        // Some firmwares prefer the FAT image entry above, others may
+        // fall back to a direct file entry.  Keep it as a secondary
+        // non‑bootable entry so the catalog remains valid.
         if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
+            let mut entry = create_uefi_boot_entry(&self.root, &u.destination_in_iso)?;
+            entry.bootable = false; // ESP FAT image entry is the primary boot target
+            entries.push(entry);
         }
 
         // BIOS boot entry
