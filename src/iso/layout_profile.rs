@@ -117,7 +117,11 @@ impl IsoLayoutProfile {
             esp_mode: EspMode::AppendedPartition,
             esp_alignment_lba_512: 2048, // 1 MiB (Redox OS compatible)
             mbr_mode: MbrMode::HybridLinuxEsp,
-            hidden_sectors_mode: HiddenSectorMode::Zero, // Redox OS confirms zero is correct
+            // PartitionOffset is required for real hardware to correctly
+            // locate the FAT volume within the disk layout.
+            // Firmware (NEC/Insyde/AMI) uses hidden_sectors to translate
+            // between partition-relative and absolute LBA addressing.
+            hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
             uefi_boot_strategy: UefiBootStrategy::EspPartition,
         }
     }

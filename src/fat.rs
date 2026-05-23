@@ -19,10 +19,14 @@ fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> 
 ///
 /// `files` is a list of (destination_filename, source_path) pairs copied to `EFI/BOOT/`.
 /// `hidden_sectors` sets the BPB hidden sectors field (LBA of the partition start in 512B sectors).
+/// For USB-HDD boot on real hardware (NEC/Insyde/AMI), this MUST be the partition's
+/// starting LBA in 512-byte sectors, NOT zero.  Setting it to zero tells firmware the
+/// FAT volume starts at LBA 0 of the disk, which is only true for raw floppy/superfloppy
+/// images without an MBR.
 pub fn create_fat_image(
     fat_img_path: &Path,
     files: &[(&str, &Path)],
-    _hidden_sectors: u32,
+    hidden_sectors: u32,
 ) -> io::Result<u32> {
     // Ensure all input files exist
     let mut content_size = 0u64;
@@ -105,7 +109,7 @@ pub fn create_fat_image(
     file.seek(io::SeekFrom::Start(0x18))?;
     file.write_all(&32u16.to_le_bytes())?;  // sectors_per_track = 32
     file.write_all(&64u16.to_le_bytes())?;  // heads = 64
-    file.write_all(&0u32.to_le_bytes())?;   // hidden_sectors = 0
+    file.write_all(&hidden_sectors.to_le_bytes())?;   // hidden_sectors = partition start LBA
     file.seek(io::SeekFrom::Start(0))?;
 
     // Open filesystem and create directories and copy files
@@ -161,6 +165,45 @@ mod tests {
         let mut kernel_in_fat_content = Vec::new();
         kernel_in_fat.read_to_end(&mut kernel_in_fat_content)?;
         assert_eq!(kernel_content, kernel_in_fat_content.as_slice());
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_create_fat_image_with_hidden_sectors() -> io::Result<()> {
+        let dir = tempdir()?;
+        let loader_path = dir.path().join("boot.efi");
+        let fat_img_path = dir.path().join("fat_hidden.img");
+
+        fs::write(&loader_path, b"BOOT")?;
+        let files: [(&str, &Path); 1] = [("BOOTX64.EFI", &loader_path)];
+
+        // hidden_sectors = 2048 (1 MiB partition alignment)
+        create_fat_image(&fat_img_path, &files, 2048)?;
+
+        // Read the BPB hidden_sectors field at offset 0x1C
+        let mut fat_bytes = Vec::new();
+        fs::File::open(&fat_img_path)?.read_to_end(&mut fat_bytes)?;
+        let hidden = u32::from_le_bytes(
+            fat_bytes[0x1C..0x20].try_into().unwrap(),
+        );
+        assert_eq!(
+            hidden, 2048,
+            "BPB hidden_sectors must be 2048 (1 MiB), got {}",
+            hidden
+        );
+
+        // Verify the filesystem is still mountable after patching
+        let fat_file = fs::File::open(&fat_img_path)?;
+        let fs = FileSystem::new(fat_file, FsOptions::new())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let root_dir = fs.root_dir();
+        let mut found = root_dir.open_file("EFI/BOOT/BOOTX64.EFI")
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        let mut content = Vec::new();
+        found.read_to_end(&mut content)
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+        assert_eq!(content, b"BOOT");
 
         Ok(())
     }
