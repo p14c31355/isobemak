@@ -102,7 +102,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
         "UEFI ESP entry (Entry 0) is not marked bootable"
     );
-    let expected_esp_lba = isobemak::ESP_START_LBA; // ISO LBA 512, 1 MiB aligned
+    let expected_esp_lba = isobemak::ESP_START_LBA_ISO; // ISO LBA 512, 1 MiB aligned
     assert_eq!(
         esp_boot_lba, expected_esp_lba,
         "ESP entry Load RBA ({}) should be {} (ESP_START_LBA, in 2048-byte ISO sector units)",
@@ -110,7 +110,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     );
     // UEFI no-emulation: boot_image_sectors = 0 for maximum firmware compatibility
     // (xorriso/GRUB convention).
-    assert_eq!(esp_boot_sectors, 0, "ESP boot sectors should be 0 for UEFI no-emulation");
+    assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
 
     println!(
         "Verified UEFI ESP boot entry: LBA={}, Sectors={}",
@@ -131,7 +131,7 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         uefi_boot_indicator
     );
     assert!(
-        uefi_boot_lba > isobemak::ESP_START_LBA,
+        uefi_boot_lba > isobemak::ESP_START_LBA_ISO,
         "Direct UEFI file entry LBA ({}) should be after ESP area",
         uefi_boot_lba
     );

@@ -10,7 +10,8 @@ pub mod iso;
 pub use iso::boot_info::{BiosBootInfo, BootInfo, UefiBootInfo};
 pub use iso::builder::IsoBuilder;
 pub use iso::builder::build_iso;
-pub use iso::constants::ESP_START_LBA;
+pub use iso::constants::ESP_START_LBA_ISO;
+pub use iso::constants::ESP_START_LBA_512;
 pub use iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 pub use iso::iso_image::{IsoImage, IsoImageFile}; // Re-export ESP_START_LBA
 

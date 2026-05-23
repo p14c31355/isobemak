@@ -149,7 +149,8 @@ pub fn write_gpt_structures<W: Write + Seek>(
 
 #[cfg(test)]
 mod tests {
-    use crate::{ESP_START_LBA, iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID};
+    use crate::iso::constants::ESP_START_LBA_512;
+    use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
 
     use super::*;
     use std::io::Cursor;
@@ -186,10 +187,10 @@ mod tests {
         let p_guid = "C12A7328-F81F-11D2-BA4B-00A0C93EC93B";
         let u_guid = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
         let name = "EFI System Partition";
-        let entry = GptPartitionEntry::new(p_guid, u_guid, ESP_START_LBA as u64, 2048, name, 0);
+        let entry = GptPartitionEntry::new(p_guid, u_guid, ESP_START_LBA_512 as u64, 2048, name, 0);
 
         let starting_lba = entry.starting_lba;
-        assert_eq!(starting_lba, ESP_START_LBA as u64);
+        assert_eq!(starting_lba, ESP_START_LBA_512 as u64);
         let ending_lba = entry.ending_lba;
         assert_eq!(ending_lba, 2048);
 

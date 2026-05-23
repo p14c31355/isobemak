@@ -1,12 +1,22 @@
-/// The starting LBA (in 2048-byte ISO sectors) for the EFI System Partition.
+/// The starting LBA for the EFI System Partition in **ISO 2048-byte sectors**.
 ///
-/// LBA 512 in ISO sectors = 512 * 2048 = 1 MiB = 512-byte sector 2048.
+/// LBA 512 in ISO sectors = 512 × 2048 = 1 MiB = 512-byte sector 2048.
+/// Used for El Torito catalog entries (Load RBA) and ISO filesystem layout
+/// (seeking to the ESP position within the ISO image).
 ///
 /// This satisfies the 1 MiB alignment requirement that many real UEFI
 /// firmwares (AMI, Insyde, older Lenovo, NEC, Panasonic) expect for ESP.
-/// Firmware that boots via GPT reads the partition table in 512-byte
-/// sectors and expects the ESP to be aligned to a 1 MiB boundary.
-pub const ESP_START_LBA: u32 = 512;
+pub const ESP_START_LBA_ISO: u32 = 512;
+
+/// The starting LBA for the EFI System Partition in **512-byte sectors**.
+///
+/// 512 ISO sectors × 4 = 2048 512-byte sectors = exactly 1 MiB.
+/// Used **only** for GPT partition entries and MBR partition table,
+/// which always operate in 512-byte sector units.
+///
+/// NEVER mix this with ESP_START_LBA_ISO — one is for on‑disk partition
+/// tables, the other is for El Torito and ISO‑internal offsets.
+pub const ESP_START_LBA_512: u32 = 2048;
 
 /// Number of ISO sectors reserved for the system area (MBR at LBA 0
 /// plus GPT header at LBA 1 and partition entries at LBA 2-33).

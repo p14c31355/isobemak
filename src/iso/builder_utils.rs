@@ -201,17 +201,21 @@ pub fn create_boot_entry_generic(
                 sectors as u16
             }
             BootType::UefiEsp => {
-                let _sectors = esp_size_sectors.ok_or_else(|| {
+                let sectors = esp_size_sectors.ok_or_else(|| {
                     io_error!(
                         io::ErrorKind::InvalidInput,
                         "ESP size required for UEFI ESP boot"
                     )
                 })?;
-                // UEFI no-emulation: boot_image_sectors = 0 for maximum
-                // firmware compatibility.  xorriso and GRUB do the same.
-                // Some firmware expects 0, others the real size;
-                // 0 is the safer choice for UEFI ESP images.
-                0u16
+                // UEFI no-emulation: some firmware (OVMF, GRUB, xorriso) expects
+                // boot_image_sectors = 0, but NEC/Insyde firmware requires a
+                // non-zero value.  Use a minimum of 1 for maximum compatibility.
+                validate_boot_image_size(
+                    sectors.max(1) as u64,
+                    u16::MAX as u64,
+                    boot_type.description(),
+                )?;
+                sectors.max(1) as u16
             }
         },
         bootable: true,

@@ -5,7 +5,7 @@ use tempfile::NamedTempFile;
 use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ESP_START_LBA};
+use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ESP_START_LBA_ISO, ESP_START_LBA_512};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -172,7 +172,7 @@ impl IsoBuilder {
         if let Some(esp_size) = esp_size_sectors
             && esp_size > 0
         {
-            let esp_start_512 = (ESP_START_LBA as u64) * 4;
+            let esp_start_512 = ESP_START_LBA_512 as u64;
             let esp_size_512 = (esp_size as u64) * 4;
             let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
             let backup_gpt_start_lba = total_512_sectors.saturating_sub(BACKUP_GPT_RESERVED_512);
@@ -206,7 +206,7 @@ impl IsoBuilder {
 
         iso_file.seek(SeekFrom::Start(0))?;
         let (esp_start_512, esp_size_512) = if let Some(esp_size) = esp_size_sectors {
-            (Some(ESP_START_LBA * 4), Some(esp_size * 4))
+            (Some(ESP_START_LBA_512), Some(esp_size * 4))
         } else {
             (None, None)
         };
@@ -222,8 +222,8 @@ impl IsoBuilder {
         if let Some(esp_size_sectors_val) = esp_size_sectors
             && esp_size_sectors_val > 0
         {
-            // Convert ESP position and size from 2048-byte to 512-byte sector units
-            let esp_start_512 = (ESP_START_LBA as u64) * 4;
+            // ESP position in 512-byte sector units (direct from ESP_START_LBA_512)
+            let esp_start_512 = ESP_START_LBA_512 as u64;
             let esp_size_512 = (esp_size_sectors_val as u64) * 4;
             let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
 
@@ -278,7 +278,7 @@ impl IsoBuilder {
         // For isohybrid, this begins after the ESP partition.
         // For non-hybrid, this begins right after VDs+boot catalog.
         self.iso_data_lba = if self.is_isohybrid {
-            ESP_START_LBA + esp_size_sectors.unwrap_or(0)
+            ESP_START_LBA_ISO + esp_size_sectors.unwrap_or(0)
         } else {
             boot_catalog_lba + 1 // LBA 20
         };
@@ -370,8 +370,7 @@ pub fn build_iso(
                 fat_files.push(("grub.cfg", grub_path));
             }
             // ESP hidden sectors: offset from disk start to ESP in 512-byte units.
-            // ESP_START_LBA is in ISO (2048-byte) sectors → multiply by 4 for FAT BPB.
-            let esp_hidden_sectors = (ESP_START_LBA * 4) as u32;
+            let esp_hidden_sectors = ESP_START_LBA_512;
             let size_512_sectors = fat::create_fat_image(&path, &fat_files, esp_hidden_sectors)?;
             logical_fat_size_512_sectors = Some(size_512_sectors);
 
@@ -379,12 +378,12 @@ pub fn build_iso(
             let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
 
             // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(ESP_START_LBA);
+            iso_builder.esp_lba = Some(ESP_START_LBA_ISO);
             iso_builder.esp_size_sectors = Some(calculated_esp_size_iso_sectors);
 
             // Copy the FAT image to the ISO file at the ESP LBA (1 MiB aligned)
             iso_file.seek(SeekFrom::Start(
-                ESP_START_LBA as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
+                ESP_START_LBA_ISO as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
             ))?;
             let mut temp_fat = std::fs::File::open(&path)?;
             io::copy(&mut temp_fat, &mut iso_file)?;
