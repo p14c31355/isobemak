@@ -31,14 +31,13 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
     let first_platform = entries.first().map_or(0u8, |e| e.platform_id);
     val[1] = first_platform;
-    let id_bytes = if first_platform == BOOT_CATALOG_EFI_PLATFORM_ID {
-        [0u8; 24]
-    } else {
-        let mut bytes = [0u8; 24];
-        let spec = b"EL TORITO SPECIFICATION";
-        bytes[0..spec.len()].copy_from_slice(spec);
-        bytes
-    };
+    // ID string must always be "EL TORITO SPECIFICATION" per El Torito spec,
+    // regardless of platform ID.  Some real UEFI firmware rejects the boot
+    // catalog when this field is zero-filled.
+    let mut bytes = [0u8; 24];
+    let spec = b"EL TORITO SPECIFICATION";
+    bytes[0..spec.len()].copy_from_slice(spec);
+    let id_bytes = bytes;
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24].copy_from_slice(&id_bytes);
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
