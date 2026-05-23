@@ -48,23 +48,42 @@ impl Mbr {
     }
 }
 
-pub fn create_mbr_for_gpt_hybrid(total_lbas: u32, is_isohybrid: bool) -> io::Result<Mbr> {
+/// Creates an MBR with protective GPT and optional EFI System Partition entries.
+/// `total_lbas` is in 512-byte sectors.
+/// When `isohybrid` and ESP params are provided, the MBR gets:
+///   - Partition 1: type 0xEE (GPT Protective) covering the whole disk
+///   - Partition 2: type 0xEF (EFI System Partition) pointing to the ESP
+/// Older UEFI firmware (e.g. NEC 2015) often requires the 0xEF entry in MBR.
+pub fn create_mbr_for_gpt_hybrid(
+    total_lbas: u32,
+    is_isohybrid: bool,
+    esp_start_lba: Option<u32>,
+    esp_size_lba: Option<u32>,
+) -> io::Result<Mbr> {
     let mut mbr = Mbr::new();
 
     if is_isohybrid {
-        // Protective MBR for GPT
-        mbr.partition_table[0].bootable = 0x00; // Not bootable
+        // Protective MBR for GPT (covers the whole disk)
+        mbr.partition_table[0].bootable = 0x00;
         mbr.partition_table[0].partition_type = 0xEE; // GPT Protective MBR
-        mbr.partition_table[0].starting_lba = 1; // Starts after MBR itself
-        mbr.partition_table[0].size_in_lba = total_lbas - 1; // Spans rest of the disk
+        mbr.partition_table[0].starting_lba = 1;
+        mbr.partition_table[0].size_in_lba = total_lbas - 1;
+
+        // EFI System Partition entry (needed by some firmware to find ESP)
+        if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba)
+            && size > 0
+        {
+            mbr.partition_table[1].bootable = 0x00;
+            mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
+            mbr.partition_table[1].starting_lba = start;
+            mbr.partition_table[1].size_in_lba = size;
+        }
     } else {
         // Standard MBR for El Torito (if not isohybrid)
-        // This part might need more specific logic depending on your El Torito implementation
-        // For now, a simple bootable partition covering the whole disk (excluding MBR)
         mbr.partition_table[0].bootable = 0x80; // Bootable
-        mbr.partition_table[0].partition_type = 0xEF; // EFI System Partition (placeholder, adjust as needed)
-        mbr.partition_table[0].starting_lba = 1; // Starts after MBR itself
-        mbr.partition_table[0].size_in_lba = total_lbas - 1; // Spans rest of the disk
+        mbr.partition_table[0].partition_type = 0xEF; // EFI System Partition (placeholder)
+        mbr.partition_table[0].starting_lba = 1;
+        mbr.partition_table[0].size_in_lba = total_lbas - 1;
     }
 
     Ok(mbr)
@@ -87,31 +106,50 @@ mod tests {
 
     #[test]
     fn test_create_mbr_isohybrid() -> io::Result<()> {
-        let total_lbas = 1000;
-        let mbr = create_mbr_for_gpt_hybrid(total_lbas, true)?;
-        let part = mbr.partition_table[0];
+        let total_lbas = 1000u32;
+        let esp_start = 136u32;
+        let esp_size = 32768u32;
+        let mbr = create_mbr_for_gpt_hybrid(total_lbas, true, Some(esp_start), Some(esp_size))?;
 
-        assert_eq!(part.bootable, 0x00);
-        assert_eq!(part.partition_type, 0xEE);
-        let starting_lba = part.starting_lba;
-        assert_eq!(starting_lba, 1);
-        let size_in_lba = part.size_in_lba;
-        assert_eq!(size_in_lba, total_lbas - 1);
+        // Part 1: GPT protective
+        {
+            let bootable = mbr.partition_table[0].bootable;
+            let ptype = mbr.partition_table[0].partition_type;
+            let start = mbr.partition_table[0].starting_lba;
+            let size = mbr.partition_table[0].size_in_lba;
+            assert_eq!(bootable, 0x00);
+            assert_eq!(ptype, 0xEE);
+            assert_eq!(start, 1);
+            assert_eq!(size, total_lbas - 1);
+        }
+
+        // Part 2: EFI System Partition
+        {
+            let bootable = mbr.partition_table[1].bootable;
+            let ptype = mbr.partition_table[1].partition_type;
+            let start = mbr.partition_table[1].starting_lba;
+            let size = mbr.partition_table[1].size_in_lba;
+            assert_eq!(bootable, 0x00);
+            assert_eq!(ptype, 0xEF);
+            assert_eq!(start, esp_start);
+            assert_eq!(size, esp_size);
+        }
         Ok(())
     }
 
     #[test]
     fn test_create_mbr_no_isohybrid() -> io::Result<()> {
         let total_lbas = 2000;
-        let mbr = create_mbr_for_gpt_hybrid(total_lbas, false)?;
-        let part = mbr.partition_table[0];
+        let mbr = create_mbr_for_gpt_hybrid(total_lbas, false, None, None)?;
 
-        assert_eq!(part.bootable, 0x80);
-        assert_eq!(part.partition_type, 0xEF);
-        let starting_lba = part.starting_lba;
-        assert_eq!(starting_lba, 1);
-        let size_in_lba = part.size_in_lba;
-        assert_eq!(size_in_lba, total_lbas - 1);
+        let bootable = mbr.partition_table[0].bootable;
+        let ptype = mbr.partition_table[0].partition_type;
+        let start = mbr.partition_table[0].starting_lba;
+        let size = mbr.partition_table[0].size_in_lba;
+        assert_eq!(bootable, 0x80);
+        assert_eq!(ptype, 0xEF);
+        assert_eq!(start, 1);
+        assert_eq!(size, total_lbas - 1);
         Ok(())
     }
 

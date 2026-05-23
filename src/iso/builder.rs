@@ -147,7 +147,17 @@ impl IsoBuilder {
 
         // Write MBR (MBR uses 512-byte sector LBA values)
         iso_file.seek(SeekFrom::Start(0))?;
-        let mbr = create_mbr_for_gpt_hybrid(total_512_sectors.min(u32::MAX as u64) as u32, self.is_isohybrid)?;
+        let (esp_start_512, esp_size_512) = if let Some(esp_size) = esp_size_sectors {
+            (Some(ESP_START_LBA * 4), Some(esp_size * 4))
+        } else {
+            (None, None)
+        };
+        let mbr = create_mbr_for_gpt_hybrid(
+            total_512_sectors.min(u32::MAX as u64) as u32,
+            self.is_isohybrid,
+            esp_start_512,
+            esp_size_512,
+        )?;
         mbr.write_to(iso_file)?;
 
         // Write GPT structures if esp_size_sectors > 0
