@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use crate::fat;
+use crate::iso::disk_layout::DiskLayout;
 use crate::iso::layout_profile::{ElToritoMode, HiddenSectorMode, IsoLayoutProfile};
 use crate::utils::ISO_SECTOR_SIZE;
 
@@ -36,6 +37,10 @@ pub struct IsoBuilder {
     esp_lba: Option<u32>,          // LBA of the EFI System Partition image (in ISO 2048-byte sectors)
     esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in ISO sectors
     profile: IsoLayoutProfile,
+    /// Disk-centric layout model: partitions (ESP) + ISO9660 region.
+    /// When set, replaces the old "ESP as ISO object" model with the
+    /// xorriso-style "ESP as disk partition" approach.
+    disk_layout: Option<DiskLayout>,
 }
 
 impl Default for IsoBuilder {
@@ -57,6 +62,7 @@ impl IsoBuilder {
             esp_lba: None,
             esp_size_sectors: None,
             profile: IsoLayoutProfile::default(),
+            disk_layout: None,
         }
     }
 
@@ -106,6 +112,14 @@ impl IsoBuilder {
         self.is_isohybrid = is_isohybrid;
     }
 
+    /// Sets the disk-centric [DiskLayout] model.
+    ///
+    /// When set, the builder treats the ESP as a real disk partition
+    /// (xorriso `-append_partition` style), not an ISO9660 object.
+    pub fn set_disk_layout(&mut self, layout: DiskLayout) {
+        self.disk_layout = Some(layout);
+    }
+
     /// Prepares the list of boot catalog entries based on boot configuration.
     fn prepare_boot_entries(
         &self,
@@ -150,7 +164,14 @@ impl IsoBuilder {
         Ok(entries)
     }
 
-    /// Writes MBR and optionally GPT for hybrid ISOs, controlled by `self.profile`.
+    /// Writes MBR and optionally GPT for hybrid ISOs.
+    ///
+    /// Uses the [DiskLayout] model when available (preferred), falling back
+    /// to profile-driven partition placement from `esp_size_sectors`.
+    ///
+    /// The [DiskLayout] model treats the ESP as a real disk partition,
+    /// producing the xorriso-style layout that boots on real hardware
+    /// (NEC, Insyde, old AMI, Lenovo, Panasonic). See [DiskLayout] docs.
     fn write_hybrid_structures(
         &self,
         iso_file: &mut File,
@@ -182,15 +203,26 @@ impl IsoBuilder {
             ));
         };
 
-        // --- MBR (always written) ---
-        // Use profile-driven ESP alignment in 512-byte sector units.
-        let esp_start_512_profile = self.profile.esp_alignment_lba_512;
-        iso_file.seek(SeekFrom::Start(0))?;
-        let (esp_start_512, esp_size_512) = if let Some(esp_size) = esp_size_sectors {
-            (Some(esp_start_512_profile), Some(esp_size * 4))
+        // Determine ESP start/size in 512-byte sectors.
+        // Prefer DiskLayout when available (it models the ESP as a real
+        // partition), falling back to profile-driven calculation.
+        let (esp_start_512, esp_size_512) = if let Some(ref layout) = self.disk_layout {
+            if let Some(esp) = layout.esp_partition() {
+                (Some(esp.start_lba_512 as u32), Some(esp.size_lba_512 as u32))
+            } else {
+                (None, None)
+            }
+        } else if let Some(esp_size_iso) = esp_size_sectors {
+            (
+                Some(self.profile.esp_alignment_lba_512),
+                Some(esp_size_iso * 4),
+            )
         } else {
             (None, None)
         };
+
+        // --- MBR (always written) ---
+        iso_file.seek(SeekFrom::Start(0))?;
         let mbr = create_mbr_for_gpt_hybrid(
             total_for_mbr,
             self.is_isohybrid,
@@ -199,12 +231,9 @@ impl IsoBuilder {
         )?;
         mbr.write_to(iso_file)?;
 
-        // --- GPT (profile-controlled) ---
+        // --- GPT (profile-controlled, uses DiskLayout when available) ---
         if self.profile.use_gpt {
-            // Build a single ESP partition entry for GPT.
-            // GPT uses 512-byte sector LBA values.
             if let (Some(start_512), Some(size_512)) = (esp_start_512, esp_size_512) {
-                // ESP ending LBA (inclusive)
                 let esp_end_512 = start_512.saturating_add(size_512).saturating_sub(1);
                 if esp_end_512 > start_512 {
                     let uuid_str = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
@@ -366,6 +395,17 @@ pub fn build_iso(
 
             // Derive ISO-sector ESP LBA from profile alignment.
             let esp_lba_iso_profile = iso_builder.profile.esp_alignment_lba_512 / 4;
+
+            // Construct DiskLayout: ESP is a real disk partition, not an ISO object.
+            // This matches xorriso `-append_partition` behavior and is required
+            // for real hardware UEFI boot (NEC/Insyde/old AMI).
+            let disk_layout = DiskLayout::from_partition_params(
+                iso_builder.profile.esp_alignment_lba_512,
+                Some(size_512_sectors),
+                // ISO data starts after ESP: esp_lba_iso + esp_size_iso_sectors in ISO LBA
+                esp_lba_iso_profile + calculated_esp_size_iso_sectors,
+            );
+            iso_builder.set_disk_layout(disk_layout);
 
             // Store ESP LBA and size for the boot catalog
             iso_builder.esp_lba = Some(esp_lba_iso_profile);

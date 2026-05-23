@@ -14,6 +14,7 @@ pub use iso::constants::ESP_START_LBA_ISO;
 pub use iso::constants::ESP_START_LBA_512;
 pub use iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 pub use iso::iso_image::{IsoImage, IsoImageFile}; // Re-export ESP_START_LBA
+pub use iso::disk_layout::{DiskLayout, IsoRegion, Partition, UefiBootStrategy};
 pub use iso::layout_profile::{
     ElToritoMode, EspMode, HiddenSectorMode, IsoLayoutProfile, MbrMode,
 };

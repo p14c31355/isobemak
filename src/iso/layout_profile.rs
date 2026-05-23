@@ -1,3 +1,5 @@
+use crate::iso::disk_layout::UefiBootStrategy;
+
 /// ISO layout profile for firmware compatibility.
 ///
 /// Separates "UEFI spec compliant" settings from "broken firmware workaround" settings,
@@ -24,6 +26,11 @@ pub struct IsoLayoutProfile {
 
     /// FAT BPB hidden_sectors policy.
     pub hidden_sectors_mode: HiddenSectorMode,
+
+    /// UEFI boot strategy: El Torito direct EFI vs. ESP partition.
+    /// Determines whether the primary boot path is via CD-ROM emulation
+    /// (QEMU/OVMF) or via a real disk partition (USB-HDD hardware).
+    pub uefi_boot_strategy: UefiBootStrategy,
 }
 
 /// How the El Torito catalog exposes the UEFI boot target.
@@ -84,6 +91,7 @@ impl IsoLayoutProfile {
     /// - ESP at 1 MiB alignment (2048 512-byte sectors)
     /// - MBR: hybrid Linux+ESP
     /// - hidden_sectors: partition offset
+    /// - UEFI boot: El Torito direct EFI (primary for CD-ROM emulation)
     pub fn emulator() -> Self {
         Self {
             use_gpt: true,
@@ -92,6 +100,7 @@ impl IsoLayoutProfile {
             esp_alignment_lba_512: 2048, // 1 MiB
             mbr_mode: MbrMode::HybridLinuxEsp,
             hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
+            uefi_boot_strategy: UefiBootStrategy::ElToritoDirectEfi,
         }
     }
 
@@ -100,6 +109,7 @@ impl IsoLayoutProfile {
     ///   - ESP at 1 MiB alignment (2048 512-byte sectors)
     ///   - El Torito: BIOS + UEFI entries
     ///   - FAT BPB: heads=64, spt=32, hidden_sectors=0
+    ///   - UEFI boot: ESP partition (primary for USB-HDD hardware path)
     pub fn hardware() -> Self {
         Self {
             use_gpt: true,
@@ -108,6 +118,7 @@ impl IsoLayoutProfile {
             esp_alignment_lba_512: 2048, // 1 MiB (Redox OS compatible)
             mbr_mode: MbrMode::HybridLinuxEsp,
             hidden_sectors_mode: HiddenSectorMode::Zero, // Redox OS confirms zero is correct
+            uefi_boot_strategy: UefiBootStrategy::EspPartition,
         }
     }
 }
