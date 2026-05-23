@@ -89,59 +89,63 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID is not EFI"
     );
 
-    // Dual boot path: El Torito vs MBR/ESP
+    // xorriso-style 3-entry UEFI boot catalog:
     //
-    // Entry 0 (offset 32): Direct EFI binary — bootable, QEMU/OVMF primary path.
-    //   Points to BOOTX64.EFI inside the ISO9660 filesystem.
-    let uefi_file_offset = 32;
-    let uefi_bytes = &boot_catalog_sector[uefi_file_offset..uefi_file_offset + 32];
-    let uefi_boot_indicator = uefi_bytes[0];
-    let uefi_boot_lba = u32::from_le_bytes(uefi_bytes[8..12].try_into().unwrap());
-    let uefi_boot_sectors = u16::from_le_bytes(uefi_bytes[6..8].try_into().unwrap());
-
+    // Entry 0 (offset 32): Initial/Default (flag=0x90, media=HDD, sys=0xEF).
+    //   Marks this catalog as the default boot option.
+    let init_offset = 32;
+    let init_bytes = &boot_catalog_sector[init_offset..init_offset + 32];
+    let init_flag = init_bytes[0];
+    let init_media = init_bytes[1];
     assert_eq!(
-        uefi_boot_indicator,
-        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
-        "UEFI direct file entry (Entry 0) must be bootable (0x88), got {:#x}",
-        uefi_boot_indicator
+        init_flag,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID,
+        "Entry 0 must be Initial/Default (0x90), got {:#x}",
+        init_flag
     );
-    assert!(
-        uefi_boot_lba > isobemak::ESP_START_LBA_ISO,
-        "Direct UEFI file entry LBA ({}) should be after ESP area",
-        uefi_boot_lba
-    );
-    assert!(uefi_boot_sectors > 0, "Boot sectors must be > 0");
+    assert_eq!(init_media, 4, "Initial/Default media must be HDD (4), got {}", init_media);
 
-    println!(
-        "Verified UEFI direct file entry (bootable): File LBA={}, Sectors={}",
-        uefi_boot_lba, uefi_boot_sectors
+    // Entry 1 (offset 64): Section Header (flag=0x91, media=0xEF, sys=0x00).
+    //   El Torito Table 8 Section Entry for UEFI platform.
+    let sec_offset = 64;
+    let sec_bytes = &boot_catalog_sector[sec_offset..sec_offset + 32];
+    let sec_flag = sec_bytes[0];
+    let sec_media = sec_bytes[1];
+    let sec_sys = sec_bytes[4];
+    assert_eq!(
+        sec_flag,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_FINAL_ENTRY_HEADER_ID,
+        "Entry 1 must be Section Header (0x91), got {:#x}",
+        sec_flag
     );
+    assert_eq!(sec_media, isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID, "Section Header media must be 0xEF");
+    assert_eq!(sec_sys, 0x00, "Section Header sys type must be 0x00");
 
-    // Entry 1 (offset 64): ESP FAT image — non-bootable, MBR path for real hardware.
-    //   El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
-    //   so ESP_LBA stays in ISO sectors (e.g. 1024 for 2 MiB alignment).
-    let esp_offset = 64;
+    // Entry 2 (offset 96): Boot Entry (flag=0x88) → ESP FAT image.
+    //   QEMU/OVMF reads the FAT and loads \EFI\BOOT\BOOTX64.EFI.
+    let esp_offset = 96;
     let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
     let esp_boot_indicator = esp_bytes[0];
     let esp_boot_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
     let esp_boot_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
 
     assert_eq!(
-        esp_boot_indicator, 0x00,
-        "ESP entry (Entry 1) must be non‑bootable (0x00), got {:#x}",
+        esp_boot_indicator,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
+        "ESP boot entry (Entry 2) must be bootable (0x88), got {:#x}",
         esp_boot_indicator
     );
     // ESP is at 1 MiB alignment = 2048 512-byte sectors = 512 ISO 2048-byte sectors
     let expected_esp_lba = 512u32;
     assert_eq!(
         esp_boot_lba, expected_esp_lba,
-        "ESP entry Load RBA ({}) should be {} (1 MiB alignment, in 2048-byte ISO sector units)",
+        "ESP boot entry Load RBA ({}) should be {} (1 MiB alignment, in 2048-byte ISO sector units)",
         esp_boot_lba, expected_esp_lba
     );
     assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
 
     println!(
-        "Verified ESP entry (non‑bootable): LBA={}, Sectors={}",
+        "Verified 3-entry UEFI catalog: Initial/Default + Section Header + Boot Entry (LBA={}, Sectors={})",
         esp_boot_lba, esp_boot_sectors
     );
 

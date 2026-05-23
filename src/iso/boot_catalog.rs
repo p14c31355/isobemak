@@ -10,15 +10,30 @@ pub const LBA_BOOT_CATALOG: u32 = 19;
 pub const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
 pub const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
 pub const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
+/// Initial/Default entry flag (El Torito §6.2.1)
+pub const BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID: u8 = 0x90;
+/// Final/Section Header entry flag (El Torito §6.2.1, Table 8)
+pub const BOOT_CATALOG_FINAL_ENTRY_HEADER_ID: u8 = 0x91;
 pub const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 pub const ID_FIELD_OFFSET: usize = 4;
 pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
+
+/// Type of boot catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootCatalogEntryType {
+    /// Standard boot entry (flag=0x88 or 0x00)
+    BootEntry { bootable: bool },
+    /// Initial/Default entry (flag=0x90)
+    InitialDefault,
+    /// Section Header / Final entry (flag=0x91, per El Torito Table 8 for UEFI)
+    SectionHeader,
+}
 
 pub struct BootCatalogEntry {
     pub platform_id: u8,
     pub boot_image_lba: u32,
     pub boot_image_sectors: u16,
-    pub bootable: bool,
+    pub entry_type: BootCatalogEntryType,
 }
 
 /// Writes an El Torito boot catalog.
@@ -70,21 +85,41 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Boot Entries
     for entry_data in entries {
         let mut entry = [0u8; 32];
-        let boot_indicator = if entry_data.bootable {
-            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
-        } else {
-            0x00u8
-        };
-        entry[0] = boot_indicator;
-        entry[1] = 0x00; // No Emulation
-        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
-        entry[4] = entry_data.platform_id; // System type (0xEF for UEFI)
 
-        // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
+        let (flag, media_type) = match entry_data.entry_type {
+            BootCatalogEntryType::BootEntry { bootable } => {
+                let indicator = if bootable {
+                    BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
+                } else {
+                    0x00u8
+                };
+                (indicator, 0x00u8) // No Emulation
+            }
+            BootCatalogEntryType::InitialDefault => {
+                // Initial/Default: flag=0x90, media=4 (Hard Disk)
+                (BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID, 4u8)
+            }
+            BootCatalogEntryType::SectionHeader => {
+                // Section Header / Final: flag=0x91, media=platform_id (0xEF for UEFI)
+                (BOOT_CATALOG_FINAL_ENTRY_HEADER_ID, entry_data.platform_id)
+            }
+        };
+
+        entry[0] = flag;
+        entry[1] = media_type;
+        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
+
+        // System type: platform_id for Boot/InitialDefault, 0x00 for SectionHeader
+        entry[4] = match entry_data.entry_type {
+            BootCatalogEntryType::SectionHeader => 0x00,
+            _ => entry_data.platform_id,
+        };
+
+        // Sector count is a u16 at offset 6.
         let sectors = entry_data.boot_image_sectors;
         entry[6..8].copy_from_slice(&sectors.to_le_bytes());
 
-        // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.
+        // Load RBA is a u32 at offset 8.
         let load_rba = entry_data.boot_image_lba;
         entry[8..12].copy_from_slice(&load_rba.to_le_bytes());
 
@@ -122,7 +157,7 @@ mod tests {
             platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
             boot_image_lba: 100,
             boot_image_sectors: 50,
-            bootable: true,
+            entry_type: BootCatalogEntryType::BootEntry { bootable: true },
         }];
 
         write_boot_catalog(temp_file.as_file_mut(), entries)?;
@@ -158,7 +193,7 @@ mod tests {
             platform_id: 0, // BIOS
             boot_image_lba: 200,
             boot_image_sectors: 20,
-            bootable: false,
+            entry_type: BootCatalogEntryType::BootEntry { bootable: false },
         }];
 
         write_boot_catalog(temp_file.as_file_mut(), entries)?;

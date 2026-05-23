@@ -115,7 +115,7 @@ impl IsoLayoutProfile {
             use_gpt: true,
             eltorito_mode: ElToritoMode::Both,
             esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 2048, // 1 MiB (Redox OS compatible)
+            esp_alignment_lba_512: 2048, // 1 MiB
             mbr_mode: MbrMode::HybridLinuxEsp,
             // PartitionOffset is required for real hardware to correctly
             // locate the FAT volume within the disk layout.

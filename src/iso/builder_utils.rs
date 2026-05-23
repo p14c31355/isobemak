@@ -1,7 +1,7 @@
 use std::io::{self};
 use std::path::Path;
 
-use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
+use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, BootCatalogEntryType};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
 const EL_TORITO_SECTOR_SIZE: u64 = 512;
@@ -218,7 +218,7 @@ pub fn create_boot_entry_generic(
                 sectors.max(1) as u16
             }
         },
-        bootable: true,
+        entry_type: BootCatalogEntryType::BootEntry { bootable: true },
     })
 }
 

@@ -5,11 +5,11 @@ use tempfile::NamedTempFile;
 
 use crate::fat;
 use crate::iso::disk_layout::DiskLayout;
-use crate::iso::layout_profile::{ElToritoMode, HiddenSectorMode, IsoLayoutProfile};
+use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
-use crate::iso::boot_catalog::BootCatalogEntry;
+use crate::iso::boot_catalog::{BootCatalogEntry, BootCatalogEntryType, BOOT_CATALOG_EFI_PLATFORM_ID};
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
     calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
@@ -121,6 +121,20 @@ impl IsoBuilder {
     }
 
     /// Prepares the list of boot catalog entries based on boot configuration.
+    ///
+    /// Follows the xorriso 3-entry pattern for UEFI boot:
+    ///
+    ///   Entry 0 (Initial/Default): flag=0x90, media=HDD, sys=0xEE.
+    ///     Marks this catalog as the default boot option.
+    ///
+    ///   Entry 1 (Section Header): flag=0x91, media=0xEF, sys=0x00.
+    ///     El Torito Table 8 Section Entry for UEFI. Required by OVMF and
+    ///     real UEFI firmware to recognise the following boot entry as UEFI.
+    ///
+    ///   Entry 2 (Boot Entry): flag=0x88, media=NoEmul, sys=0x00.
+    ///     Points to the ESP FAT image. QEMU/OVMF reads the FAT and loads
+    ///     \EFI\BOOT\BOOTX64.EFI from it. Real hardware ignores El Torito
+    ///     and boots via MBR→GPT→ESP instead.
     fn prepare_boot_entries(
         &self,
         esp_lba: Option<u32>,
@@ -129,31 +143,36 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // Dual boot path: El Torito vs MBR/ESP
-        //
-        // Entry 0 (bootable): UEFI direct-file entry
-        //   Points to BOOTX64.EFI inside the ISO9660 filesystem.
-        //   QEMU/OVMF boots via El Torito on CD-ROM and reads this.
-        //
-        // Entry 1 (non-bootable): UEFI ESP entry
-        //   Points to the FAT32 ESP image at 2 MiB offset.
-        //   Real USB hardware ignores El Torito and boots via MBR→ESP.
-        //   Kept as a secondary entry for firmware that prefers the
-        //   FAT image approach over direct EFI binary.
-
-        // Entry 0: Direct EFI binary (bootable, QEMU/OVMF primary path)
-        if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
-        }
-
-        // Entry 1: ESP FAT image (non-bootable, MBR path for real hardware)
+        // Hybrid path (ESP present): xorriso 3-entry pattern
+        //   Entry 0: Initial/Default (0x90, HDD)
+        //   Entry 1: Section Header (0x91, platform=0xEF)
+        //   Entry 2: Boot Entry (0x88) → ESP FAT image
         if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
             && size > 0
-            && self.profile.eltorito_mode == ElToritoMode::Both
         {
-            let mut esp_entry = create_uefi_esp_boot_entry(lba, size)?;
-            esp_entry.bootable = false;
-            entries.push(esp_entry);
+            // Entry 0: Initial/Default entry.
+            // platform_id=0xEF so the Validation Entry shows "Arch 239".
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID, // 0xEF
+                boot_image_lba: 0,
+                boot_image_sectors: 1,
+                entry_type: BootCatalogEntryType::InitialDefault,
+            });
+
+            // Entry 1: Section Header for UEFI platform
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID, // 0xEF → media byte
+                boot_image_lba: 0,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::SectionHeader,
+            });
+
+            // Entry 2: Boot entry pointing to the ESP FAT image
+            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+        } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+            // Non-hybrid path (CD-ROM / QEMU only): direct EFI binary entry.
+            // Points to BOOTX64.EFI inside the ISO9660 filesystem.
+            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
 
         // BIOS boot entry
