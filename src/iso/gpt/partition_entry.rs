@@ -25,12 +25,14 @@ impl GptPartitionEntry {
         partition_name: &str,
         attributes: u64,
     ) -> Self {
-        let partition_type_guid_bytes = Uuid::parse_str(partition_type_guid)
-            .expect("Failed to parse partition type GUID")
-            .into_bytes();
-        let unique_partition_guid_bytes = Uuid::parse_str(unique_partition_guid)
-            .expect("Failed to parse unique partition GUID")
-            .into_bytes();
+        let partition_type_guid_bytes = uuid_to_gpt_mixed_endian(
+            &Uuid::parse_str(partition_type_guid)
+                .expect("Failed to parse partition type GUID"),
+        );
+        let unique_partition_guid_bytes = uuid_to_gpt_mixed_endian(
+            &Uuid::parse_str(unique_partition_guid)
+                .expect("Failed to parse unique partition GUID"),
+        );
 
         let mut name_bytes = [0u16; 36];
         for (i, c) in partition_name.encode_utf16().take(36).enumerate() {
@@ -74,4 +76,24 @@ impl GptPartitionEntry {
         writer.write_all(&partition_bytes)?;
         Ok(())
     }
+}
+
+/// Convert a UUID to the mixed-endian byte order required by GPT/UEFI spec.
+///
+/// GPT stores GUIDs in a mixed-endian format:
+///   - time_low (u32): little-endian
+///   - time_mid (u16): little-endian
+///   - time_high_and_version (u16): little-endian
+///   - clock_seq_and_variant + node: big-endian
+///
+/// The `uuid` crate's `into_bytes()` returns RFC 4122 big-endian format,
+/// which is incorrect for GPT. This function corrects the endianness.
+pub(crate) fn uuid_to_gpt_mixed_endian(uuid: &Uuid) -> [u8; 16] {
+    let (time_low, time_mid, time_high, rest) = uuid.as_fields();
+    let mut bytes = [0u8; 16];
+    bytes[0..4].copy_from_slice(&time_low.to_le_bytes());
+    bytes[4..6].copy_from_slice(&time_mid.to_le_bytes());
+    bytes[6..8].copy_from_slice(&time_high.to_le_bytes());
+    bytes[8..16].copy_from_slice(rest);
+    bytes
 }

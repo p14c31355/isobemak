@@ -2,6 +2,8 @@ use std::io::{self, Seek, Write};
 use std::mem;
 use uuid::Uuid;
 
+use super::partition_entry::uuid_to_gpt_mixed_endian;
+
 // GPT Header structure (92 bytes of actual fields + 420 reserved = 512 total with packed repr)
 #[repr(C, packed)]
 #[derive(Debug, Clone, Copy)]
@@ -31,7 +33,7 @@ impl GptHeader {
         partition_entry_size: u32,
     ) -> Self {
         let disk_guid_uuid = Uuid::new_v4();
-        let disk_guid_bytes = disk_guid_uuid.into_bytes();
+        let disk_guid_bytes = uuid_to_gpt_mixed_endian(&disk_guid_uuid);
 
         // Calculate partition array size in 512-byte sectors.
         // Example: 128 entries * 128 bytes = 16384 bytes → 32 sectors.
