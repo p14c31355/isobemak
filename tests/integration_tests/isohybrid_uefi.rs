@@ -101,11 +101,11 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
         "UEFI boot entry is not marked bootable"
     );
-    // El Torito boot catalog on CD-ROM media uses 2048-byte ISO sector LBA values.
+    // El Torito spec requires Load RBA in 512-byte sector units.
     assert_eq!(
         uefi_boot_lba,
-        isobemak::ESP_START_LBA,
-        "UEFI boot LBA in boot catalog is incorrect"
+        isobemak::ESP_START_LBA * 4,
+        "UEFI boot LBA in boot catalog is incorrect (expected 512-byte sector LBA)"
     );
 
     // The expected number of sectors in the boot catalog is the logical FAT size in 512-byte sectors,
