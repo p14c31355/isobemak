@@ -88,25 +88,39 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID is not EFI"
     );
 
-    // Verify the first Boot Entry (which should be the UEFI one in this test case)
-    let boot_entry_offset = 32; // After the 32-byte validation entry
-    let boot_entry_bytes = &boot_catalog_sector[boot_entry_offset..boot_entry_offset + 32];
+    // Boot Entry 0: ESP partition entry (non-bootable, describes the ESP)
+    let esp_entry_offset = 32;
+    let esp_bytes = &boot_catalog_sector[esp_entry_offset..esp_entry_offset + 32];
+    let esp_boot_indicator = esp_bytes[0];
+    let esp_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
+    let esp_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
 
-    let uefi_boot_indicator = boot_entry_bytes[0];
-    let uefi_boot_sectors = u16::from_le_bytes(boot_entry_bytes[6..8].try_into().unwrap());
-    let uefi_boot_lba = u32::from_le_bytes(boot_entry_bytes[8..12].try_into().unwrap());
+    // ESP entry is NOT bootable in El Torito; it's for HDD/USB boot via MBR/GPT.
+    assert_eq!(esp_boot_indicator, 0x00, "ESP entry should be non-bootable");
+    assert_eq!(
+        esp_lba,
+        isobemak::ESP_START_LBA,
+        "ESP LBA in boot catalog is incorrect"
+    );
+
+    // Boot Entry 1: Direct UEFI file entry (bootable, points to EFI file in ISO)
+    let uefi_entry_offset = 64; // Second boot entry (32 bytes after ESP entry)
+    let uefi_bytes = &boot_catalog_sector[uefi_entry_offset..uefi_entry_offset + 32];
+    let uefi_boot_indicator = uefi_bytes[0];
+    let uefi_boot_sectors = u16::from_le_bytes(uefi_bytes[6..8].try_into().unwrap());
+    let uefi_boot_lba = u32::from_le_bytes(uefi_bytes[8..12].try_into().unwrap());
 
     assert_eq!(
         uefi_boot_indicator,
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
         "UEFI boot entry is not marked bootable"
     );
-    // El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
-    // so the LBA stays in ISO sector units.
-    assert_eq!(
-        uefi_boot_lba,
-        isobemak::ESP_START_LBA,
-        "UEFI boot LBA in boot catalog is incorrect (expected ISO 2048-byte sector LBA)"
+    // The direct file entry points to the EFI file in the ISO filesystem.
+    // LBA > 34 because ISO filesystem data starts after the ESP partition.
+    assert!(
+        uefi_boot_lba > isobemak::ESP_START_LBA,
+        "Direct UEFI file entry LBA ({}) should be after ESP area",
+        uefi_boot_lba
     );
 
     // The expected number of sectors in the boot catalog is the logical FAT size in 512-byte sectors,
@@ -114,14 +128,14 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     let expected_esp_sectors = logical_fat_size_512_sectors.unwrap().div_ceil(4) * 4;
 
     assert_eq!(
-        uefi_boot_sectors, expected_esp_sectors as u16,
-        "UEFI boot sectors in boot catalog is incorrect"
+        esp_sectors, expected_esp_sectors as u16,
+        "ESP boot sectors in boot catalog is incorrect"
     );
     println!(
-        "Verified UEFI boot entry: LBA={} (expected: {}), Sectors={} (expected: {})",
+        "Verified UEFI boot entries: ESP LBA={} (non-bootable), File LBA={} (bootable), Sectors={} (expected: {})",
+        esp_lba,
         uefi_boot_lba,
-        isobemak::ESP_START_LBA * 4,
-        uefi_boot_sectors, expected_esp_sectors
+        esp_sectors, expected_esp_sectors
     );
 
     // Verify ISO content using isoinfo -l

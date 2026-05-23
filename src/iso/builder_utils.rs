@@ -214,7 +214,9 @@ pub fn create_boot_entry_generic(
                 boot_image_512_sectors as u16
             }
         },
-        bootable: true,
+        // ESP partition entries are NOT bootable in El Torito.
+        // They describe the ESP for HDD/USB boot via MBR/GPT, not for CD-ROM.
+        bootable: !matches!(boot_type, BootType::UefiEsp),
     })
 }
 
