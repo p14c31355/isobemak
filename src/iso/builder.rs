@@ -301,7 +301,9 @@ pub fn build_iso(
             if let Some(ref grub_path) = grub_cfg_path_buf {
                 fat_files.push(("grub.cfg", grub_path));
             }
-            let size_512_sectors = fat::create_fat_image(&path, &fat_files)?;
+            // ESP starts at ISO sector 34 (= 136 in 512-byte sectors)
+            let esp_hidden_sectors = (ESP_START_LBA * 4) as u32;
+            let size_512_sectors = fat::create_fat_image(&path, &fat_files, esp_hidden_sectors)?;
             logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors

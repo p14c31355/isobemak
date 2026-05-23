@@ -18,7 +18,12 @@ fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> 
 /// The image size and format (FAT16 or FAT32) are dynamically calculated.
 ///
 /// `files` is a list of (destination_filename, source_path) pairs copied to `EFI/BOOT/`.
-pub fn create_fat_image(fat_img_path: &Path, files: &[(&str, &Path)]) -> io::Result<u32> {
+/// `hidden_sectors` sets the BPB hidden sectors field (LBA of the partition start in 512B sectors).
+pub fn create_fat_image(
+    fat_img_path: &Path,
+    files: &[(&str, &Path)],
+    hidden_sectors: u32,
+) -> io::Result<u32> {
     // Ensure all input files exist
     let mut content_size = 0u64;
     for (dest_name, source_path) in files {
@@ -78,6 +83,14 @@ pub fn create_fat_image(fat_img_path: &Path, files: &[(&str, &Path)]) -> io::Res
             .bytes_per_sector(512), // UEFI typically expects 512-byte sectors for FAT
     )?;
 
+    // Patch BPB hidden_sectors field (offset 28 in boot sector)
+    // fatfs always sets hidden_sectors to 0, but real UEFI firmware
+    // (especially older models like NEC Versapro) depends on this
+    // to locate the FAT filesystem within a partitioned disk.
+    file.seek(io::SeekFrom::Start(28))?;
+    file.write_all(&hidden_sectors.to_le_bytes())?;
+    file.seek(io::SeekFrom::Start(0))?;
+
     // Open filesystem and create directories and copy files
     let fs = FileSystem::new(file, FsOptions::new())?;
     let root_dir = fs.root_dir();
@@ -111,7 +124,7 @@ mod tests {
 
         let files: [(&str, &Path); 2] =
             [("BOOTX64.EFI", &loader_path), ("KERNEL.EFI", &kernel_path)];
-        create_fat_image(&fat_img_path, &files)?;
+        create_fat_image(&fat_img_path, &files, 0)?;
 
         assert!(fat_img_path.exists());
         let fat_img_size = fat_img_path.metadata()?.len();
