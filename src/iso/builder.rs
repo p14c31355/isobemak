@@ -29,12 +29,12 @@ pub struct IsoBuilder {
     volume_id: Option<String>,
     root: IsoDirectory,
     boot_info: Option<BootInfo>,
-    current_lba: u32,
+    iso_data_lba: u32,     // LBA where ISO9660 filesystem data starts (QEMU/El Torito path)
     total_sectors: u32,
-    is_isohybrid: bool, // New field
+    is_isohybrid: bool,
     uefi_catalog_path: Option<String>,
-    esp_lba: Option<u32>,          // LBA of the EFI System Partition image
-    esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in sectors
+    esp_lba: Option<u32>,          // LBA of the EFI System Partition image (in ISO 2048-byte sectors)
+    esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in ISO sectors
 }
 
 impl Default for IsoBuilder {
@@ -49,7 +49,7 @@ impl IsoBuilder {
             volume_id: None,
             root: IsoDirectory::new(),
             boot_info: None,
-            current_lba: 0,
+            iso_data_lba: 0,
             total_sectors: 0,
             is_isohybrid: false, // Initialize new field
             uefi_catalog_path: None,
@@ -230,17 +230,17 @@ impl IsoBuilder {
         let boot_catalog_lba = 19;
         // If hybrid, ISO9660 data starts after reserved sectors (MBR/GPT/ESP)
         // Otherwise, it starts after VDs and boot catalog.
-        self.current_lba = if self.is_isohybrid {
+        self.iso_data_lba = if self.is_isohybrid {
             data_start_lba + esp_size_sectors.unwrap_or(0) // ISO filesystem starts after ESP partition
         } else {
             boot_catalog_lba + 1 // Should be 20
         };
         iso_file.seek(SeekFrom::Start(
-            (self.current_lba as u64) * ISO_SECTOR_SIZE as u64,
+            (self.iso_data_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
 
-        // Calculate LBAs for all files and directories. This also updates self.current_lba to the end of the filesystem data.
-        calculate_lbas(&mut self.current_lba, &mut self.root)?;
+        // Calculate LBAs for all files and directories. This also updates self.iso_data_lba to the end of the filesystem data.
+        calculate_lbas(&mut self.iso_data_lba, &mut self.root)?;
 
         // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
         // Pass the calculated end of filesystem data as a preliminary total_sectors.
@@ -249,7 +249,7 @@ impl IsoBuilder {
             iso_file,
             self.volume_id.as_deref(),
             self.root.lba,
-            self.current_lba,
+            self.iso_data_lba,
         )?;
 
         let boot_entries = self.prepare_boot_entries(esp_lba, esp_size_sectors)?;
@@ -470,8 +470,8 @@ mod tests {
         let temp_path = temp_file.path().to_path_buf();
 
         builder.add_file("A/B/C.txt", &temp_path)?;
-        builder.current_lba = 20;
-        calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
+        builder.iso_data_lba = 20;
+        calculate_lbas(&mut builder.iso_data_lba, &mut builder.root)?;
 
         let lba = crate::iso::builder_utils::get_lba_for_path(&builder.root, "A/B/C.txt")?;
         let size = crate::iso::builder_utils::get_file_size_in_iso(&builder.root, "A/B/C.txt")?;

@@ -89,7 +89,8 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     );
 
     // Boot Entry 0 (offset 32): UEFI ESP FAT image entry (bootable, points to ESP)
-    // Load RBA is in 512-byte sectors → ESP_START_LBA (34) * 4 = 136
+    // El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
+    // so ESP_LBA stays in ISO sectors (e.g. 34).
     let esp_offset = 32;
     let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
     let esp_boot_indicator = esp_bytes[0];
@@ -101,10 +102,10 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
         "UEFI ESP entry (Entry 0) is not marked bootable"
     );
-    let expected_esp_lba = isobemak::ESP_START_LBA * 4; // ISO LBA 34 → 512-byte LBA 136
+    let expected_esp_lba = isobemak::ESP_START_LBA; // ISO LBA 34, El Torito uses 2048-byte sector units
     assert_eq!(
         esp_boot_lba, expected_esp_lba,
-        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA * 4, in 512-byte units)",
+        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA, in 2048-byte ISO sector units)",
         esp_boot_lba, expected_esp_lba
     );
     assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
