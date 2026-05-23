@@ -10,8 +10,13 @@ pub mod iso;
 pub use iso::boot_info::{BiosBootInfo, BootInfo, UefiBootInfo};
 pub use iso::builder::IsoBuilder;
 pub use iso::builder::build_iso;
-pub use iso::constants::ESP_START_LBA_ISO;
 pub use iso::constants::ESP_START_LBA_512;
+pub use iso::constants::ISO_SECTOR_SIZE;
+pub use iso::constants::DISK_SECTOR_SIZE;
+pub use iso::constants::GPT_RESERVED_512_SECTORS;
+pub use iso::constants::BACKUP_GPT_RESERVED_512;
+pub use iso::constants::disk512_to_iso;
+pub use iso::constants::iso_to_512;
 pub use iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 pub use iso::iso_image::{IsoImage, IsoImageFile}; // Re-export ESP_START_LBA
 pub use iso::disk_layout::{DiskLayout, IsoRegion, Partition, UefiBootStrategy};

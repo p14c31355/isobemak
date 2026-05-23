@@ -135,11 +135,11 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "ESP boot entry (Entry 2) must be bootable (0x88), got {:#x}",
         esp_boot_indicator
     );
-    // ESP is at 1 MiB alignment = 2048 512-byte sectors = 512 ISO 2048-byte sectors
-    let expected_esp_lba = 512u32;
+    // ESP is at 2 MiB alignment = 4096 512-byte sectors = 1024 ISO 2048-byte sectors
+    let expected_esp_lba = 1024u32;
     assert_eq!(
         esp_boot_lba, expected_esp_lba,
-        "ESP boot entry Load RBA ({}) should be {} (1 MiB alignment, in 2048-byte ISO sector units)",
+        "ESP boot entry Load RBA ({}) should be {} (2 MiB alignment, in 2048-byte ISO sector units)",
         esp_boot_lba, expected_esp_lba
     );
     assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");

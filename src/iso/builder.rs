@@ -6,6 +6,7 @@ use tempfile::NamedTempFile;
 use crate::fat;
 use crate::iso::disk_layout::DiskLayout;
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
+use crate::iso::constants::disk512_to_iso;
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -307,7 +308,7 @@ impl IsoBuilder {
         // For isohybrid, this begins after the ESP partition.
         // For non-hybrid, this begins right after VDs+boot catalog.
         // Derive ISO-sector ESP offset from profile alignment (512B → 2048B).
-        let esp_lba_iso_profile = self.profile.esp_alignment_lba_512 / 4;
+        let esp_lba_iso_profile = disk512_to_iso(self.profile.esp_alignment_lba_512);
         self.iso_data_lba = if self.is_isohybrid {
             esp_lba_iso_profile + esp_size_sectors.unwrap_or(0)
         } else {
@@ -410,10 +411,10 @@ pub fn build_iso(
             logical_fat_size_512_sectors = Some(size_512_sectors);
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
-            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
+            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 × 512-byte sectors
 
             // Derive ISO-sector ESP LBA from profile alignment.
-            let esp_lba_iso_profile = iso_builder.profile.esp_alignment_lba_512 / 4;
+            let esp_lba_iso_profile = disk512_to_iso(iso_builder.profile.esp_alignment_lba_512);
 
             // Construct DiskLayout: ESP is a real disk partition, not an ISO object.
             // This matches xorriso `-append_partition` behavior and is required

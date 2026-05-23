@@ -88,7 +88,7 @@ impl IsoLayoutProfile {
     ///
     /// - GPT enabled (UEFI spec compliant)
     /// - El Torito: both direct EFI binary and ESP image entries
-    /// - ESP at 1 MiB alignment (2048 512-byte sectors)
+    /// - ESP at 2 MiB alignment (4096 512-byte sectors)
     /// - MBR: hybrid Linux+ESP
     /// - hidden_sectors: partition offset
     /// - UEFI boot: El Torito direct EFI (primary for CD-ROM emulation)
@@ -97,7 +97,7 @@ impl IsoLayoutProfile {
             use_gpt: true,
             eltorito_mode: ElToritoMode::Both,
             esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 2048, // 1 MiB
+            esp_alignment_lba_512: 4096, // 2 MiB (matches ESP_START_LBA_512)
             mbr_mode: MbrMode::HybridLinuxEsp,
             hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
             uefi_boot_strategy: UefiBootStrategy::ElToritoDirectEfi,
@@ -106,7 +106,7 @@ impl IsoLayoutProfile {
 
     /// Real hardware profile (NEC, Insyde, old AMI, Lenovo, Panasonic).
     ///   - GPT enabled (protective MBR + GPT, matching xorriso)
-    ///   - ESP at 1 MiB alignment (2048 512-byte sectors)
+    ///   - ESP at 2 MiB alignment (4096 512-byte sectors)
     ///   - El Torito: BIOS + UEFI entries
     ///   - FAT BPB: heads=64, spt=32, hidden_sectors=0
     ///   - UEFI boot: ESP partition (primary for USB-HDD hardware path)
@@ -115,7 +115,7 @@ impl IsoLayoutProfile {
             use_gpt: true,
             eltorito_mode: ElToritoMode::Both,
             esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 2048, // 1 MiB
+            esp_alignment_lba_512: 4096, // 2 MiB (matches ESP_START_LBA_512)
             mbr_mode: MbrMode::HybridLinuxEsp,
             // PartitionOffset is required for real hardware to correctly
             // locate the FAT volume within the disk layout.
