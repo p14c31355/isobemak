@@ -236,9 +236,9 @@ pub fn create_uefi_boot_entry(
 
 /// Create a boot catalog entry for UEFI ESP partition
 /// `esp_lba` is in 2048-byte ISO sector units (the ISO filesystem LBA).
-/// El Torito spec requires Load RBA to be in 512-byte sectors,
-/// so we multiply by 4. GPT partition table separately records
-/// the ESP with the same 512-byte sector LBA (via `builder.rs`).
+/// El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
+/// so the LBA stays in ISO sectors. GPT partition table separately records
+/// the ESP with 512-byte sector LBA values in `builder.rs`.
 pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
@@ -247,7 +247,7 @@ pub fn create_uefi_esp_boot_entry(
         BootType::UefiEsp,
         &IsoDirectory::new(),
         None,
-        Some(esp_lba.saturating_mul(4)), // Convert to 512-byte sectors for El Torito spec
+        Some(esp_lba), // 2048-byte ISO sectors (El Torito uses medium sector size)
         Some(esp_size_sectors),
     )
 }
