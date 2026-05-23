@@ -96,20 +96,18 @@ impl IsoLayoutProfile {
     }
 
     /// Real hardware profile (NEC, Insyde, old AMI, Lenovo, Panasonic).
-    ///
-    /// - GPT disabled (many older firmwares fail with GPT present on USB-HDD)
-    /// - El Torito: both entries (direct EFI + ESP reference)
-    /// - ESP at 2 MiB alignment (4096 512-byte sectors)
-    /// - MBR: hybrid Linux+ESP
-    /// - hidden_sectors: partition offset
+    ///   - GPT enabled (protective MBR + GPT, matching xorriso)
+    ///   - ESP at 1 MiB alignment (2048 512-byte sectors)
+    ///   - El Torito: BIOS + UEFI entries
+    ///   - FAT BPB: heads=64, spt=32, hidden_sectors=0
     pub fn hardware() -> Self {
         Self {
-            use_gpt: false,
+            use_gpt: true,
             eltorito_mode: ElToritoMode::Both,
             esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 4096, // 2 MiB
+            esp_alignment_lba_512: 2048, // 1 MiB (Redox OS compatible)
             mbr_mode: MbrMode::HybridLinuxEsp,
-            hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
+            hidden_sectors_mode: HiddenSectorMode::Zero, // Redox OS confirms zero is correct
         }
     }
 }

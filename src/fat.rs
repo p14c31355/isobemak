@@ -22,7 +22,7 @@ fn copy_to_fat(fat_dir: &Dir<fs::File>, source_path: &Path, dest_name: &str) -> 
 pub fn create_fat_image(
     fat_img_path: &Path,
     files: &[(&str, &Path)],
-    hidden_sectors: u32,
+    _hidden_sectors: u32,
 ) -> io::Result<u32> {
     // Ensure all input files exist
     let mut content_size = 0u64;
@@ -94,12 +94,18 @@ pub fn create_fat_image(
             .bytes_per_sector(512), // UEFI typically expects 512-byte sectors for FAT
     )?;
 
-    // Patch BPB hidden_sectors field (offset 28 in boot sector)
-    // fatfs always sets hidden_sectors to 0, but real UEFI firmware
-    // (especially older models like NEC Versapro) depends on this
-    // to locate the FAT filesystem within a partitioned disk.
-    file.seek(io::SeekFrom::Start(28))?;
-    file.write_all(&hidden_sectors.to_le_bytes())?;
+    // Patch BPB fields for compatibility with old UEFI firmware
+    // (NEC/Insyde/AMI).  fatfs sets these fields to its own defaults,
+    // but real hardware often requires specific geometry values.
+    //
+    // Offsets in the FAT boot sector (FAT12/16 BPB):
+    //   0x18 (24): sectors_per_track (u16 LE)
+    //   0x1A (26): heads (u16 LE)
+    //   0x1C (28): hidden_sectors (u32 LE)
+    file.seek(io::SeekFrom::Start(0x18))?;
+    file.write_all(&32u16.to_le_bytes())?;  // sectors_per_track = 32
+    file.write_all(&64u16.to_le_bytes())?;  // heads = 64
+    file.write_all(&0u32.to_le_bytes())?;   // hidden_sectors = 0
     file.seek(io::SeekFrom::Start(0))?;
 
     // Open filesystem and create directories and copy files

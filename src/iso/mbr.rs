@@ -98,27 +98,25 @@ pub fn create_mbr_for_gpt_hybrid(
     let mut mbr = Mbr::new();
 
     if is_isohybrid {
-        // xorriso-compatible MBR-only hybrid layout (no GPT).
-        // Entry 0: type 0x83 (Linux), covers the ISO9660 portion from LBA 0.
-        // Entry 1: type 0xEF (EFI System Partition), bootable=0x00.
-        // GPT is intentionally omitted because many NEC/Insyde/AMI firmwares
-        // fail when GPT is present on a USB-HDD boot medium.
+        // Protective GPT MBR layout (matching xorriso behavior).
+        // Single entry: type 0xEE (GPT Protective), covers the whole disk.
+        // The actual EFI System Partition is defined only in the GPT table.
+        // This matches the layout that boots on NEC VersaPro (InsydeH2O, 2015).
         mbr.partition_table[0].bootable = 0x00;
-        mbr.partition_table[0].partition_type = 0x83; // Linux / ISO9660 data
-        mbr.partition_table[0].starting_lba = 0;
+        mbr.partition_table[0].partition_type = 0xEE; // GPT Protective
+        mbr.partition_table[0].starting_lba = 1;
         mbr.partition_table[0].size_in_lba = total_lbas
+            .saturating_sub(1)
             .min(0xFFFF_FFFF);
 
-        // EFI System Partition entry
-        // bootable=0x00 matches xorriso behavior; older firmware (NEC/AMI)
-        // may treat active flag as legacy BIOS partition indicator.
+        // EFI System Partition in MBR entry 1 (backward compatibility)
+        // for firmware that checks MBR before GPT.
         if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba)
             && size > 0
         {
             mbr.partition_table[1].bootable = 0x00;
             mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
             mbr.partition_table[1].starting_lba = start;
-            // Clamp ESP size to u32 max (4 GiB) — MBR partition entries use u32.
             mbr.partition_table[1].size_in_lba = (size as u64).min(0xFFFF_FFFF) as u32;
         }
     } else {
@@ -157,16 +155,16 @@ mod tests {
         let esp_size = 32768u32;
         let mbr = create_mbr_for_gpt_hybrid(total_lbas, true, Some(esp_start), Some(esp_size))?;
 
-        // Part 1: type 0x83 (Linux), covers whole medium from LBA 0
+        // Part 1: type 0xEE (GPT Protective), covers whole disk from LBA 1
         {
             let bootable = mbr.partition_table[0].bootable;
             let ptype = mbr.partition_table[0].partition_type;
             let start = mbr.partition_table[0].starting_lba;
             let size = mbr.partition_table[0].size_in_lba;
             assert_eq!(bootable, 0x00);
-            assert_eq!(ptype, 0x83);
-            assert_eq!(start, 0);
-            assert_eq!(size, total_lbas);
+            assert_eq!(ptype, 0xEE);
+            assert_eq!(start, 1);
+            assert_eq!(size, total_lbas - 1);
         }
 
         // Part 2: EFI System Partition (bootable=0x00, matches xorriso)

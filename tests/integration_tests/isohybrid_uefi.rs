@@ -131,10 +131,11 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "ESP entry (Entry 1) must be non‑bootable (0x00), got {:#x}",
         esp_boot_indicator
     );
-    let expected_esp_lba = isobemak::ESP_START_LBA_ISO; // ISO LBA 1024, 2 MiB aligned
+    // ESP is at 1 MiB alignment = 2048 512-byte sectors = 512 ISO 2048-byte sectors
+    let expected_esp_lba = 512u32;
     assert_eq!(
         esp_boot_lba, expected_esp_lba,
-        "ESP entry Load RBA ({}) should be {} (ESP_START_LBA_ISO, in 2048-byte ISO sector units)",
+        "ESP entry Load RBA ({}) should be {} (1 MiB alignment, in 2048-byte ISO sector units)",
         esp_boot_lba, expected_esp_lba
     );
     assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
