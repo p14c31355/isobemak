@@ -47,17 +47,10 @@ fn make_lfn(
 
     let chk = lfn_checksum(short);
     let mut chars: Vec<u16> = name.encode_utf16().collect();
-    let num_lfn = chars.len().div_ceil(13);
-    let padded_len = num_lfn * 13;
-    chars.resize(padded_len, 0xFFFF);
-    let slot_start = (num_lfn - 1) * 13;
-    let tail_len = (chars.len() - slot_start).min(13);
-    chars[slot_start + tail_len - 1] = 0x0000;
-    for j in (slot_start + tail_len)..slot_start + 13 {
-        if j < chars.len() {
-            chars[j] = 0xFFFF;
-        }
-    }
+    let len = chars.len();
+    let num_lfn = (len + 1).div_ceil(13); // +1 for null terminator
+    chars.resize(num_lfn * 13, 0xFFFF);
+    chars[len] = 0x0000; // null-terminate immediately after the string
 
     let mut lfn = Vec::with_capacity(num_lfn * 32);
     for i in (0..num_lfn).rev() {
