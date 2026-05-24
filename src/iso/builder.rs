@@ -260,10 +260,13 @@ impl IsoBuilder {
             // is the first GPT entry.
             let iso9660_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
             let iso9660_uuid = "94BC9F38-B638-4D1A-8964-87488DB3D5A5";
-            // ISO9660 partition starts at the first usable LBA (34) and covers
-            // up to the end of raw ISO data.
+            // ISO9660 partition starts at the first usable LBA (34) and extends
+            // to last_usable_lba (total_512_sectors - 34), matching Ubuntu/xorriso
+            // convention.  This ensures parser compatibility with tools (Ventoy,
+            // xorriso libisofs) that expect the ISO partition to cover the full
+            // usable GPT range rather than ending at the raw ISO data boundary.
             let iso_start: u64 = 34;
-            let iso_end: u64 = raw_512_sectors.saturating_sub(1);
+            let iso_end: u64 = total_512_sectors.saturating_sub(34);
             if iso_end > iso_start {
                 let iso_partition = GptPartitionEntry::new(
                     iso9660_guid,
@@ -292,23 +295,6 @@ impl IsoBuilder {
                     );
                     gpt_partitions.push(esp_partition);
 
-                    // GPT partition 3: Gap1 (padding between IS09660 and backup GPT).
-                    // This matches Ubuntu/xorriso layout for GPT structural integrity.
-                    let gap_end = total_512_sectors.saturating_sub(1).saturating_sub(BACKUP_GPT_RESERVED_512);
-                    let gap_start = raw_512_sectors; // starts right after raw ISO data
-                    let gap_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
-                    let gap_uuid = "94BC9F38-B638-4D1A-8966-87488DB3D5A5";
-                    if gap_end > gap_start {
-                        let gap_partition = GptPartitionEntry::new(
-                            gap_guid,
-                            gap_uuid,
-                            gap_start,
-                            gap_end,
-                            "Gap1",
-                            0,
-                        );
-                        gpt_partitions.push(gap_partition);
-                    }
                 }
             }
 
