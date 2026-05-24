@@ -8,10 +8,9 @@ const CHS_HEADS: u32 = 64;
 const CHS_SPT: u32 = 32;
 const CHS_SECTORS_PER_CYLINDER: u32 = CHS_HEADS * CHS_SPT; // 2048
 
-/// Maximum values for CHS fields (when LBA exceeds CHS addressable range).
+/// Maximum cylinder value for CHS addressing with the configured geometry.
+/// When cylinder exceeds this value, CHS is saturated (0xFF, 0xFF, 0xFF).
 const CHS_MAX_CYL: u32 = 1023;
-const CHS_MAX_HEAD: u32 = 254; // heads are 0-indexed, max valid is 255
-const CHS_MAX_SECTOR: u32 = 63;
 
 /// Encode an LBA into a 3-byte CHS tuple `[head, sector_cyl, cyl_low]`
 /// using H=64, S=32 geometry.
@@ -21,21 +20,21 @@ const CHS_MAX_SECTOR: u32 = 63;
 ///   byte 1 = sector (bits 0–5) | cylinder bits 8–9 (bits 6–7)
 ///   byte 2 = cylinder bits 0–7
 ///
-/// When `lba` exceeds the CHS-addressable range, all fields are saturated
-/// to their maximum values.
+/// LBA 0 is a valid address (the MBR itself) and maps to cylinder 0,
+/// head 0, sector 1 (INT 13h sectors are 1-indexed).
+///
+/// When `lba` exceeds the CHS-addressable range for the configured
+/// geometry (H=64, SPT=32), all fields are saturated to their
+/// maximum values.
 fn lba_to_chs(lba: u64) -> [u8; 3] {
-    let max_lba = (CHS_MAX_CYL as u64 + 1) * (CHS_MAX_HEAD as u64 + 1) * CHS_MAX_SECTOR as u64;
+    let cylinder = lba / CHS_SECTORS_PER_CYLINDER as u64;
 
-    if lba == 0 || lba >= max_lba {
-        // LBA 0 or beyond CHS range → saturate
-        return [
-            (CHS_MAX_HEAD + 1) as u8, // head = 255
-            0xFF,                     // sector 63 | cylinder bits 8-9 = 11b → 0xFF
-            0xFF,                     // cylinder bits 0-7 = 0xFF
-        ];
+    if cylinder > CHS_MAX_CYL as u64 {
+        // LBA beyond CHS addressable range for this geometry
+        return [0xFF, 0xFF, 0xFF];
     }
 
-    let cylinder = (lba / CHS_SECTORS_PER_CYLINDER as u64) as u32;
+    let cylinder = cylinder as u32;
     let remainder = (lba % CHS_SECTORS_PER_CYLINDER as u64) as u32;
     let head = remainder / CHS_SPT;
     let sector = (remainder % CHS_SPT) + 1;
