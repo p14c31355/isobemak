@@ -22,13 +22,13 @@ pub enum UefiBootStrategy {
 impl DiskLayout {
     pub fn from_partition_params(esp_align: u32, esp_size: Option<u32>, iso_data_lba: u32) -> Self {
         let mut parts = Vec::new();
-        if let Some(sz) = esp_size {
-            if sz > 0 {
-                parts.push(Partition {
-                    start_lba_512: esp_align as u64,
-                    size_lba_512: sz as u64,
-                });
-            }
+        if let Some(sz) = esp_size
+            && sz > 0
+        {
+            parts.push(Partition {
+                start_lba_512: esp_align as u64,
+                size_lba_512: sz as u64,
+            });
         }
         Self {
             partitions: parts,

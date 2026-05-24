@@ -108,10 +108,10 @@ pub fn create_mbr_for_gpt_hybrid(
             1,
             total_lbas.saturating_sub(1),
         );
-        if let (Some(s), Some(sz)) = (esp_start, esp_size) {
-            if sz > 0 {
-                set_part(&mut mbr.partition_table[1], 0, 0xEF, s, sz);
-            }
+        if let (Some(s), Some(sz)) = (esp_start, esp_size)
+            && sz > 0
+        {
+            set_part(&mut mbr.partition_table[1], 0, 0xEF, s, sz);
         }
     } else {
         set_part(
