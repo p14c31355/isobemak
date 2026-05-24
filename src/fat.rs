@@ -112,7 +112,7 @@ fn make_directory_entries(
     // Set valid creation time (00:00:00) and date (2000-01-01 = 0x21 in FAT encoding).
     // This matches entry_83 and avoids fsck.fat warnings about zero timestamps.
     sfn[16..18].copy_from_slice(&0x0000u16.to_le_bytes()); // creation time 00:00:00
-    sfn[18..20].copy_from_slice(&0x21u16.to_le_bytes());   // creation date 2000-01-01
+    sfn[18..20].copy_from_slice(&0x21u16.to_le_bytes()); // creation date 2000-01-01
     sfn[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
     sfn[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
     sfn[28..32].copy_from_slice(&file_size.to_le_bytes());
@@ -180,7 +180,7 @@ fn entry_83(short: &[u8; 11], attr: u8, first_cluster: u32, file_size: u32) -> [
     // Set valid creation time (00:00:00) and date (2000-01-01 = 0x21 in FAT encoding)
     // This avoids fsck.fat warnings about zero timestamps.
     e[16..18].copy_from_slice(&0x0000u16.to_le_bytes()); // creation time 00:00:00
-    e[18..20].copy_from_slice(&0x21u16.to_le_bytes());   // creation date 2000-01-01
+    e[18..20].copy_from_slice(&0x21u16.to_le_bytes()); // creation date 2000-01-01
     e[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
     e[22..24].copy_from_slice(&0x0000u16.to_le_bytes()); // last access date
     e[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
@@ -223,23 +223,19 @@ fn write_u16_le(img: &mut [u8], offset: u64, val: u16) {
 }
 
 /// Write the complete FAT32 image into a Vec<u8>.
-fn build_image(
-    files: &[(&str, &Path)],
-    hidden: u32,
-) -> io::Result<(Vec<u8>, u32)> {
+fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32)> {
     let mut content_size = 0u64;
     for (_, p) in files {
         content_size += p.metadata()?.len();
     }
 
     let logical = (content_size + FAT_OVERHEAD).div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
-    let min_size = MIN_CLUSTERS as u64 * CLUSTER_SIZE + RESERVED_SECTORS * SECTOR_SIZE + 2 * 1024 * SECTOR_SIZE;
+    let min_size = MIN_CLUSTERS as u64 * CLUSTER_SIZE
+        + RESERVED_SECTORS * SECTOR_SIZE
+        + 2 * 1024 * SECTOR_SIZE;
     let total_size = logical.max(min_size);
-    let (fat_sectors_raw, _data) = calculate_fat32_layout(
-        total_size / SECTOR_SIZE,
-        RESERVED_SECTORS,
-        SEC_PER_CLUS,
-    );
+    let (fat_sectors_raw, _data) =
+        calculate_fat32_layout(total_size / SECTOR_SIZE, RESERVED_SECTORS, SEC_PER_CLUS);
     let data_sectors = (_data / SEC_PER_CLUS) * SEC_PER_CLUS;
     let fat_sectors = fat_sectors_raw as u32;
     let total_sectors = (RESERVED_SECTORS + 2 * fat_sectors as u64 + data_sectors) as u32;
@@ -258,13 +254,22 @@ fn build_image(
     // 2. Allocate clusters
     let mut alloc = Alloc::new(total_sectors as u64, fat_sectors as u64);
     let root = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for root directory")
+        io::Error::new(
+            io::ErrorKind::Other,
+            "FAT32: out of free clusters for root directory",
+        )
     })?;
     let efi = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for EFI directory")
+        io::Error::new(
+            io::ErrorKind::Other,
+            "FAT32: out of free clusters for EFI directory",
+        )
     })?;
     let boot = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for BOOT directory")
+        io::Error::new(
+            io::ErrorKind::Other,
+            "FAT32: out of free clusters for BOOT directory",
+        )
     })?;
     let mut file_starts = Vec::with_capacity(files.len());
     let mut file_sizes = Vec::with_capacity(files.len());
@@ -272,7 +277,10 @@ fn build_image(
         let sz = p.metadata()?.len();
         let n = (sz.div_ceil(CLUSTER_SIZE)).max(1) as u32;
         let start = alloc.alloc(n).ok_or_else(|| {
-            io::Error::new(io::ErrorKind::Other, format!("FAT32: out of free clusters for file (need {} clusters)", n))
+            io::Error::new(
+                io::ErrorKind::Other,
+                format!("FAT32: out of free clusters for file (need {} clusters)", n),
+            )
         })?;
         file_starts.push(start);
         file_sizes.push(sz);
@@ -298,12 +306,23 @@ fn build_image(
     let total_clusters = alloc.clusters as u32;
     let used = alloc.fat.iter().filter(|&&v| v != 0x0000_0000).count() as u32 - 2;
     let free = total_clusters - used;
-    let next = alloc.fat.iter().position(|&v| v == 0x0000_0000).unwrap_or(2) as u32;
+    let next = alloc
+        .fat
+        .iter()
+        .position(|&v| v == 0x0000_0000)
+        .unwrap_or(2) as u32;
     write_fsinfo_to_slice(&mut img, 1, free, next);
     write_fsinfo_to_slice(&mut img, 7, free, next);
 
     // 6. Backup BPB at sector 6 (last)
-    write_bpb_to_slice(&mut img, 6 * SECTOR_SIZE, total_sectors, fat_sectors, hidden, serial);
+    write_bpb_to_slice(
+        &mut img,
+        6 * SECTOR_SIZE,
+        total_sectors,
+        fat_sectors,
+        hidden,
+        serial,
+    );
 
     Ok((img, total_sectors))
 }
@@ -440,8 +459,14 @@ fn write_tree_to_slice(
             src.read_exact(&mut img[off..off + chunk])?;
             remaining = remaining.saturating_sub(chunk as u64);
             let next = alloc.fat[cur as usize];
-            if next == 0x0FFFFFFF || remaining == 0 {
+            if remaining == 0 {
                 break;
+            }
+            if next == 0x0FFFFFFF {
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "FAT cluster chain too short for file data",
+                ));
             }
             cur = next;
         }
@@ -500,10 +525,7 @@ pub fn create_fat_image(
     // Check files exist
     for (_, p) in files {
         if !p.exists() {
-            return Err(io::Error::new(
-                io::ErrorKind::NotFound,
-                format!("{:?}", p),
-            ));
+            return Err(io::Error::new(io::ErrorKind::NotFound, format!("{:?}", p)));
         }
     }
     if files.is_empty() {
@@ -550,14 +572,19 @@ mod tests {
         std::fs::write(&l, b"UEFI loader")?;
         std::fs::write(&k, b"ELF kernel")?;
         let img = dir.path().join("f.img");
-        create_fat_image(&img, &[("BOOTX64.EFI", l.as_path()), ("KERNEL.EFI", k.as_path())], 0)?;
+        create_fat_image(
+            &img,
+            &[("BOOTX64.EFI", l.as_path()), ("KERNEL.EFI", k.as_path())],
+            0,
+        )?;
         assert!(img.exists());
         // fatfs read-back
         let r = File::open(&img)?;
         let fs = fatfs::FileSystem::new(r, fatfs::FsOptions::new())?;
         let root = fs.root_dir();
         let mut v = Vec::new();
-        root.open_file("EFI/BOOT/BOOTX64.EFI")?.read_to_end(&mut v)?;
+        root.open_file("EFI/BOOT/BOOTX64.EFI")?
+            .read_to_end(&mut v)?;
         assert_eq!(v, b"UEFI loader");
         v.clear();
         root.open_file("EFI/BOOT/KERNEL.EFI")?.read_to_end(&mut v)?;
@@ -588,10 +615,7 @@ mod tests {
 
     #[test]
     fn test_checksum() {
-        assert_eq!(
-            lfn_checksum(&pack_83(b"BOOTX64", b"EFI")),
-            0x1D
-        );
+        assert_eq!(lfn_checksum(&pack_83(b"BOOTX64", b"EFI")), 0x1D);
     }
 
     #[test]
@@ -601,14 +625,8 @@ mod tests {
 
     #[test]
     fn test_lfn() {
-        let r = make_directory_entries(
-            "BOOTX64.EFI",
-            &pack_83(b"BOOTX64", b"EFI"),
-            0x20,
-            5,
-            1024,
-        )
-        .unwrap();
+        let r = make_directory_entries("BOOTX64.EFI", &pack_83(b"BOOTX64", b"EFI"), 0x20, 5, 1024)
+            .unwrap();
         assert_eq!(r.0.len(), 32);
         assert_eq!(r.1.len(), 32);
     }

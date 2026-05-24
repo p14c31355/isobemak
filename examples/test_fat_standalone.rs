@@ -6,7 +6,11 @@ fn main() -> std::io::Result<()> {
     std::fs::write(&l, b"UEFI loader")?;
     std::fs::write(&k, b"ELF kernel content here for testing")?;
     let img = dir.path().join("f.img");
-    isobemak::fat::create_fat_image(&img, &[("BOOTX64.EFI", l.as_path()), ("KERNEL.EFI", k.as_path())], 0)?;
+    isobemak::fat::create_fat_image(
+        &img,
+        &[("BOOTX64.EFI", l.as_path()), ("KERNEL.EFI", k.as_path())],
+        0,
+    )?;
     // Read back immediately without re-creating
     let mut f = std::fs::File::open(&img)?;
     use std::io::{Read, Seek, SeekFrom};
@@ -17,6 +21,15 @@ fn main() -> std::io::Result<()> {
     f.read_exact(&mut buf)?;
     println!("Root dir: {:02x?}", buf);
     // Also dump via shell for certainty
-    std::process::Command::new("hexdump").args(&["-C", "-s", &format!("{}", cluster2), "-n", "128", img.to_str().unwrap()]).status()?;
+    std::process::Command::new("hexdump")
+        .args(&[
+            "-C",
+            "-s",
+            &format!("{}", cluster2),
+            "-n",
+            "128",
+            img.to_str().unwrap(),
+        ])
+        .status()?;
     Ok(())
 }

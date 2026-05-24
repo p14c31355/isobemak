@@ -176,7 +176,9 @@ pub fn create_mbr_for_gpt_hybrid(
                 mbr.partition_table[1].size_in_lba = esp_size;
                 mbr.partition_table[1].starting_chs = lba_to_chs(esp_start as u64);
                 mbr.partition_table[1].ending_chs = lba_to_chs(
-                    (esp_start as u64).saturating_add(esp_size as u64).saturating_sub(1),
+                    (esp_start as u64)
+                        .saturating_add(esp_size as u64)
+                        .saturating_sub(1),
                 );
             }
         }
@@ -185,9 +187,7 @@ pub fn create_mbr_for_gpt_hybrid(
         mbr.partition_table[0].bootable = 0x80; // Bootable
         mbr.partition_table[0].partition_type = 0xEF; // EFI System Partition (placeholder)
         mbr.partition_table[0].starting_lba = 1;
-        mbr.partition_table[0].size_in_lba = total_lbas
-            .saturating_sub(1)
-            .min(0xFFFF_FFFF);
+        mbr.partition_table[0].size_in_lba = total_lbas.saturating_sub(1);
     }
 
     Ok(mbr)

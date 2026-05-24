@@ -56,8 +56,8 @@ impl GptHeader {
         GptHeader {
             signature: *b"EFI PART",
             revision: 0x00010000, // Version 1.0
-            header_size: 92, // GPT header is 92 bytes (fields before reserved area)
-            header_crc32: 0, // Calculated later
+            header_size: 92,      // GPT header is 92 bytes (fields before reserved area)
+            header_crc32: 0,      // Calculated later
             _reserved0: 0,
             current_lba: 1, // LBA
             backup_lba: total_lbas - 1,

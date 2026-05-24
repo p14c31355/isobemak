@@ -106,24 +106,41 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     // the entire disk from LBA 1.  This tells firmware the disk uses GPT.
     let e0_type = mbr[0x1BE + 4];
     let e0_start = u32::from_le_bytes(mbr[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(e0_type, 0xEE, "MBR entry 0 must be type 0xEE (GPT Protective, UEFI spec)");
-    assert_eq!(e0_start, 1, "MBR entry 0 must start at LBA 1 (LBA 0 is MBR itself)");
+    assert_eq!(
+        e0_type, 0xEE,
+        "MBR entry 0 must be type 0xEE (GPT Protective, UEFI spec)"
+    );
+    assert_eq!(
+        e0_start, 1,
+        "MBR entry 0 must start at LBA 1 (LBA 0 is MBR itself)"
+    );
 
     // Verify CHS fields for entry 0 are populated.
     // LBA=1: with H=64, SPT=32 → cylinder=0, head=0, sector=2
     let e0_chs_start = &mbr[0x1BE + 1..0x1BE + 4];
     assert_ne!(
-        e0_chs_start, &[0, 0, 0],
+        e0_chs_start,
+        &[0, 0, 0],
         "MBR entry 0 starting CHS must not be zero"
     );
     // LBA=1 with H=64, SPT=32: C=0, H=0, S=2
-    assert_eq!(e0_chs_start[0], 0x00, "MBR entry 0 start head must be 0 (LBA=1)");
-    assert_eq!(e0_chs_start[1], 0x02, "MBR entry 0 start sector must be 2 (LBA=1)");
-    assert_eq!(e0_chs_start[2], 0x00, "MBR entry 0 start cylinder lo must be 0 (LBA=1)");
+    assert_eq!(
+        e0_chs_start[0], 0x00,
+        "MBR entry 0 start head must be 0 (LBA=1)"
+    );
+    assert_eq!(
+        e0_chs_start[1], 0x02,
+        "MBR entry 0 start sector must be 2 (LBA=1)"
+    );
+    assert_eq!(
+        e0_chs_start[2], 0x00,
+        "MBR entry 0 start cylinder lo must be 0 (LBA=1)"
+    );
 
     let e0_chs_end = &mbr[0x1BE + 5..0x1BE + 8];
     assert_ne!(
-        e0_chs_end, &[0, 0, 0],
+        e0_chs_end,
+        &[0, 0, 0],
         "MBR entry 0 ending CHS must not be zero (protective GPT covers whole disk)"
     );
 
@@ -135,13 +152,25 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     // depends on the ISO filesystem layout.  With a ~260 MiB FAT32 image
     // placed alphabetically after regular files, the ESP start can be far
     // beyond 4096.  We only assert it comes after the GPT reserved area.
-    assert!(e1_start >= 34, "MBR entry 1 (ESP) must start after GPT reserved area (>=34), got {}", e1_start);
+    assert!(
+        e1_start >= 34,
+        "MBR entry 1 (ESP) must start after GPT reserved area (>=34), got {}",
+        e1_start
+    );
 
     // Verify CHS fields for entry 1 (ESP) are populated.
     let e1_chs_start = &mbr[0x1CE + 1..0x1CE + 4];
-    assert_ne!(e1_chs_start, &[0, 0, 0], "MBR entry 1 (ESP) starting CHS must not be zero");
+    assert_ne!(
+        e1_chs_start,
+        &[0, 0, 0],
+        "MBR entry 1 (ESP) starting CHS must not be zero"
+    );
     let e1_chs_end = &mbr[0x1CE + 5..0x1CE + 8];
-    assert_ne!(e1_chs_end, &[0, 0, 0], "MBR entry 1 (ESP) ending CHS must not be zero");
+    assert_ne!(
+        e1_chs_end,
+        &[0, 0, 0],
+        "MBR entry 1 (ESP) ending CHS must not be zero"
+    );
 
     // ── Read GPT header (LBA 1, 512 bytes) ──
     iso_file.seek(SeekFrom::Start(512))?;
@@ -175,7 +204,10 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
 
     // Validate GPT header points to partition array at LBA 2
     let partition_array_lba = u64::from_le_bytes(gpt_header[72..80].try_into().unwrap());
-    assert_eq!(partition_array_lba, 2, "Partition entry array must start at LBA 2");
+    assert_eq!(
+        partition_array_lba, 2,
+        "Partition entry array must start at LBA 2"
+    );
     let num_entries = u32::from_le_bytes(gpt_header[80..84].try_into().unwrap());
     let entry_size = u32::from_le_bytes(gpt_header[84..88].try_into().unwrap());
     assert_eq!(num_entries, 128, "GPT must have 128 partition entries");
@@ -207,11 +239,12 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
 
     // Verify entry 0 is ISO9660 partition
     let expected_iso_guid: [u8; 16] = [
-        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
-        0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
+        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99,
+        0xC7,
     ];
     assert_eq!(
-        &esp_entry[0..16], &expected_iso_guid,
+        &esp_entry[0..16],
+        &expected_iso_guid,
         "GPT partition entry 0 must have ISO9660 type GUID"
     );
 
@@ -222,11 +255,12 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
 
     // Verify type GUID is ESP: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
     let expected_esp_guid: [u8; 16] = [
-        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
-        0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B,
+        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9,
+        0x3B,
     ];
     assert_eq!(
-        &esp_entry_1[0..16], &expected_esp_guid,
+        &esp_entry_1[0..16],
+        &expected_esp_guid,
         "GPT partition entry 1 must have ESP type GUID (C12A7328-F81F-11D2-BA4B-00A0C93EC93B)"
     );
 
@@ -235,20 +269,26 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     // placed alphabetically after regular files, the ESP start can be far
     // beyond 4096.  We only assert it comes after the GPT reserved area.
     let esp_start = u64::from_le_bytes(esp_entry_1[32..40].try_into().unwrap());
-    assert!(esp_start >= 34, "ESP must start after GPT reserved area (>=34), got {}", esp_start);
+    assert!(
+        esp_start >= 34,
+        "ESP must start after GPT reserved area (>=34), got {}",
+        esp_start
+    );
 
     // ESP must have non-zero size and end after start
     let esp_end = u64::from_le_bytes(esp_entry_1[40..48].try_into().unwrap());
     assert!(
         esp_end > esp_start,
         "ESP partition ending LBA ({}) must be greater than starting LBA ({})",
-        esp_end, esp_start
+        esp_end,
+        esp_start
     );
 
     // ESP attributes bit 0 (System Partition) must be set
     let esp_attrs = u64::from_le_bytes(esp_entry_1[48..56].try_into().unwrap());
     assert_ne!(
-        esp_attrs & 1, 0,
+        esp_attrs & 1,
+        0,
         "ESP partition attributes bit 0 (System Partition) must be set, got {:#x}",
         esp_attrs
     );
@@ -268,7 +308,9 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
         name.trim_end_matches('\0')
     );
 
-    println!("GPT header CRC32, MBR CHS fields, and ESP partition entry content verified successfully");
+    println!(
+        "GPT header CRC32, MBR CHS fields, and ESP partition entry content verified successfully"
+    );
 
     Ok(())
 }

@@ -148,9 +148,18 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     let entry0_type = mbr_sector[0x1BE + 4];
     let entry0_start =
         u32::from_le_bytes(mbr_sector[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(entry0_type, 0xEE, "MBR entry 0 should be type 0xEE (GPT Protective, UEFI spec)");
-    assert_eq!(entry0_start, 1, "MBR entry 0 should start at LBA 1 (LBA 0 is the MBR itself)");
-    println!("MBR entry 0: type=0x{:02X}, start={}", entry0_type, entry0_start);
+    assert_eq!(
+        entry0_type, 0xEE,
+        "MBR entry 0 should be type 0xEE (GPT Protective, UEFI spec)"
+    );
+    assert_eq!(
+        entry0_start, 1,
+        "MBR entry 0 should start at LBA 1 (LBA 0 is the MBR itself)"
+    );
+    println!(
+        "MBR entry 0: type=0x{:02X}, start={}",
+        entry0_type, entry0_start
+    );
 
     // MBR Partition Entry 1 at offset 0x1CE: type 0xEF (ESP), bootable=0x00
     let entry1_bootable = mbr_sector[0x1CE];
@@ -159,7 +168,10 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         u32::from_le_bytes(mbr_sector[(0x1CE + 8)..(0x1CE + 12)].try_into().unwrap());
     assert_eq!(entry1_bootable, 0x00, "MBR entry 1 should not be bootable");
     assert_eq!(entry1_type, 0xEF, "MBR entry 1 should be type 0xEF (ESP)");
-    println!("MBR entry 1: type=0x{:02X}, start={}", entry1_type, entry1_start);
+    println!(
+        "MBR entry 1: type=0x{:02X}, start={}",
+        entry1_type, entry1_start
+    );
 
     Ok(())
 }
@@ -230,7 +242,8 @@ fn test_iso9660_volume_space_size_matches_file_size() -> io::Result<()> {
     })?;
 
     assert_eq!(
-        pvd_total_sectors, expected_sectors,
+        pvd_total_sectors,
+        expected_sectors,
         "PVD Volume Space Size ({pvd_total_sectors} sectors) must match actual file size \
          ({actual_size} bytes / 2048 = {expected_sectors} sectors).  \
          The difference is {} bytes ({} GPT sectors).",
@@ -282,9 +295,12 @@ fn test_efi_fat_image_validation() -> io::Result<()> {
     let extract = run_command(
         "xorriso",
         &[
-            "-osirrox", "on",
-            "-indev", iso_path.to_str().unwrap(),
-            "-extract", "/BOOT/EFIBOOT.IMG",
+            "-osirrox",
+            "on",
+            "-indev",
+            iso_path.to_str().unwrap(),
+            "-extract",
+            "/BOOT/EFIBOOT.IMG",
             extracted_img.to_str().unwrap(),
         ],
     );
@@ -294,10 +310,14 @@ fn test_efi_fat_image_validation() -> io::Result<()> {
         run_command(
             "xorriso",
             &[
-                "-abort_on", "NEVER",
-                "-osirrox", "on",
-                "-indev", iso_path.to_str().unwrap(),
-                "-extract", "/BOOT/EFIBOOT.IMG",
+                "-abort_on",
+                "NEVER",
+                "-osirrox",
+                "on",
+                "-indev",
+                iso_path.to_str().unwrap(),
+                "-extract",
+                "/BOOT/EFIBOOT.IMG",
                 extracted_img.to_str().unwrap(),
             ],
         )?;
@@ -324,13 +344,18 @@ fn test_efi_fat_image_validation() -> io::Result<()> {
         .unwrap_or_default();
     println!("fsck.fat output:\n{}", fsck_out);
     assert!(
-        !fsck_out.contains("Invalid BPB") && !fsck_out.contains("damaged") && !fsck_out.contains("unreadable"),
+        !fsck_out.contains("Invalid BPB")
+            && !fsck_out.contains("damaged")
+            && !fsck_out.contains("unreadable"),
         "fsck.fat reported critical filesystem errors:\n{}",
         fsck_out
     );
 
     // ── mdir: EFI/BOOT/BOOTX64.EFI must exist ──
-    let mdir = run_command("mdir", &["-i", extracted_img.to_str().unwrap(), "::EFI/BOOT"])?;
+    let mdir = run_command(
+        "mdir",
+        &["-i", extracted_img.to_str().unwrap(), "::EFI/BOOT"],
+    )?;
     println!("mdir output:\n{}", mdir);
     assert!(
         mdir.contains("BOOTX64.EFI"),

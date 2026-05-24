@@ -18,8 +18,12 @@ fn main() -> std::io::Result<()> {
         ("KERNEL.EFI", kernel.as_path()),
     ];
     let sectors = create_fat_image(&fat_img, &files, 0)?;
-    println!("Created FAT image at {:?} ({} sectors, {} bytes)",
-        fat_img, sectors, fat_img.metadata()?.len());
+    println!(
+        "Created FAT image at {:?} ({} sectors, {} bytes)",
+        fat_img,
+        sectors,
+        fat_img.metadata()?.len()
+    );
 
     // Verify
     let mut f = File::open(&fat_img)?;
@@ -27,6 +31,9 @@ fn main() -> std::io::Result<()> {
     f.seek(SeekFrom::Start(6 * 512))?;
     f.read_exact(&mut buf)?;
     println!("Sector 6 first byte: {:02x} (should be eb, not 00)", buf[0]);
-    println!("Sector 6 OEM: {:?}", std::str::from_utf8(&buf[3..11]).unwrap_or("???"));
+    println!(
+        "Sector 6 OEM: {:?}",
+        std::str::from_utf8(&buf[3..11]).unwrap_or("???")
+    );
     Ok(())
 }

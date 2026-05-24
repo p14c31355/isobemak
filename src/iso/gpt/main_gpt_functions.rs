@@ -277,15 +277,13 @@ mod tests {
         let expected_backup_array_start_lba = total_lbas - 1 - partition_array_sectors;
         let backup_part_entry_lba = { backup_header.partition_entry_lba };
         assert_eq!(
-            backup_part_entry_lba,
-            expected_backup_array_start_lba,
+            backup_part_entry_lba, expected_backup_array_start_lba,
             "Backup partition_entry_lba must point to start of backup partition array"
         );
 
         // Verify backup partition array content
         let backup_array_byte_offset = (expected_backup_array_start_lba * 512) as usize;
-        let backup_entry: GptPartitionEntry =
-            read_struct(&disk_bytes, backup_array_byte_offset);
+        let backup_entry: GptPartitionEntry = read_struct(&disk_bytes, backup_array_byte_offset);
         let be_starting_lba = { backup_entry.starting_lba };
         let be_ending_lba = { backup_entry.ending_lba };
         assert_eq!(be_starting_lba, 2048);

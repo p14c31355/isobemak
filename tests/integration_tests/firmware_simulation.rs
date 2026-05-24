@@ -60,8 +60,10 @@ fn build_test_iso() -> io::Result<(std::path::PathBuf, tempfile::TempDir)> {
 /// Validate ISO file size is 512-byte aligned (required by GPT/MBR).
 fn assert_512_aligned(file_len: u64) -> u64 {
     assert_eq!(
-        file_len % 512, 0,
-        "ISO file size ({} bytes) must be 512-byte aligned for GPT/MBR", file_len
+        file_len % 512,
+        0,
+        "ISO file size ({} bytes) must be 512-byte aligned for GPT/MBR",
+        file_len
     );
     file_len / 512 - 1
 }
@@ -90,10 +92,16 @@ fn read_boot_catalog_lba(iso_file: &mut File) -> io::Result<u32> {
 
     // BRVD: bytes 0-6 = header (0x00, CD001, version), bytes 7-38 = boot id
     // Boot Catalog LBA is at offset 71-74 (little-endian)
-    assert_eq!(&brvd[0..7], &[0x00, b'C', b'D', b'0', b'0', b'1', 0x01],
-        "BRVD not found at LBA 17");
-    assert_eq!(&brvd[7..30], b"EL TORITO SPECIFICATION",
-        "BRVD must contain 'EL TORITO SPECIFICATION'");
+    assert_eq!(
+        &brvd[0..7],
+        &[0x00, b'C', b'D', b'0', b'0', b'1', 0x01],
+        "BRVD not found at LBA 17"
+    );
+    assert_eq!(
+        &brvd[7..30],
+        b"EL TORITO SPECIFICATION",
+        "BRVD must contain 'EL TORITO SPECIFICATION'"
+    );
 
     let lba = u32::from_le_bytes(brvd[71..75].try_into().unwrap());
     assert!(lba > 0, "Boot catalog LBA in BRVD is invalid (0)");
@@ -117,10 +125,17 @@ fn test_gpt_guid_exact_bytes() -> io::Result<()> {
     let mut primary = [0u8; 92];
     iso_file.read_exact(&mut primary)?;
 
-    assert_eq!(&primary[0..8], b"EFI PART", "Primary GPT signature mismatch");
+    assert_eq!(
+        &primary[0..8],
+        b"EFI PART",
+        "Primary GPT signature mismatch"
+    );
     assert_eq!(gpt_u64(&primary, 24), 1, "Primary current_lba must be 1");
-    assert_eq!(gpt_u64(&primary, 32), last_lba_512,
-        "Primary backup_lba must point to last sector");
+    assert_eq!(
+        gpt_u64(&primary, 32),
+        last_lba_512,
+        "Primary backup_lba must point to last sector"
+    );
 
     let partition_entry_lba = gpt_u64(&primary, 72);
     assert_eq!(partition_entry_lba, 2);
@@ -140,29 +155,39 @@ fn test_gpt_guid_exact_bytes() -> io::Result<()> {
 
     // Entry 0: Microsoft Basic Data (used for ISO9660 by Ubuntu/xorriso)
     let expected_iso_guid: [u8; 16] = [
-        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
-        0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
+        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44, 0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99,
+        0xC7,
     ];
-    assert_eq!(gpt_guid(&entry0), &expected_iso_guid,
-        "Entry 0 GUID must be Microsoft Basic Data (EBD0A0A2-...)");
+    assert_eq!(
+        gpt_guid(&entry0),
+        &expected_iso_guid,
+        "Entry 0 GUID must be Microsoft Basic Data (EBD0A0A2-...)"
+    );
 
     let iso_start = u64::from_le_bytes(entry0[32..40].try_into().unwrap());
     assert!(iso_start >= 34);
 
     // Entry 1: ESP
     let expected_esp_guid: [u8; 16] = [
-        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
-        0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B,
+        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9,
+        0x3B,
     ];
-    assert_eq!(gpt_guid(&entry1), &expected_esp_guid,
-        "Entry 1 GUID must be EFI System Partition (C12A7328-...)");
+    assert_eq!(
+        gpt_guid(&entry1),
+        &expected_esp_guid,
+        "Entry 1 GUID must be EFI System Partition (C12A7328-...)"
+    );
 
     let esp_start = u64::from_le_bytes(entry1[32..40].try_into().unwrap());
     // ESP is file-backed (efiboot.img in ISO filesystem).  Its 512-byte LBA
     // depends on the ISO filesystem layout.  With a ~260 MiB FAT32 image
     // placed alphabetically after regular files, the ESP start can be far
     // beyond 4096.  We only assert it comes after the GPT reserved area.
-    assert!(esp_start >= 34, "ESP must start after GPT reserved area (>=34), got {}", esp_start);
+    assert!(
+        esp_start >= 34,
+        "ESP must start after GPT reserved area (>=34), got {}",
+        esp_start
+    );
 
     // Soft warn on attributes bit 0 (Ubuntu also omits)
     let esp_attrs = u64::from_le_bytes(entry1[48..56].try_into().unwrap());
@@ -184,17 +209,30 @@ fn test_gpt_guid_exact_bytes() -> io::Result<()> {
     iso_file.read_exact(&mut backup)?;
 
     assert_eq!(&backup[0..8], b"EFI PART", "Backup GPT signature mismatch");
-    assert_eq!(gpt_u64(&backup, 24), last_lba_512, "Backup current_lba mismatch");
+    assert_eq!(
+        gpt_u64(&backup, 24),
+        last_lba_512,
+        "Backup current_lba mismatch"
+    );
     assert_eq!(gpt_u64(&backup, 32), 1, "Backup backup_lba must be 1");
     assert_eq!(gpt_u64(&backup, 72), last_lba_512.saturating_sub(32));
 
     // Backup UUIDs must match primary
-    assert_eq!(backup[56..72], primary[56..72],
-        "Backup disk GUID must match primary");
-    assert_eq!(gpt_u64(&backup, 40), gpt_u64(&primary, 40),
-        "Backup first_usable_lba mismatch");
-    assert_eq!(gpt_u64(&backup, 48), gpt_u64(&primary, 48),
-        "Backup last_usable_lba mismatch");
+    assert_eq!(
+        backup[56..72],
+        primary[56..72],
+        "Backup disk GUID must match primary"
+    );
+    assert_eq!(
+        gpt_u64(&backup, 40),
+        gpt_u64(&primary, 40),
+        "Backup first_usable_lba mismatch"
+    );
+    assert_eq!(
+        gpt_u64(&backup, 48),
+        gpt_u64(&primary, 48),
+        "Backup last_usable_lba mismatch"
+    );
 
     // ── Backup GPT header CRC32 ──
     let backup_stored_crc = gpt_u32(&backup, 16);
@@ -258,8 +296,10 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
             let start = u32::from_le_bytes(mbr[(off + 8)..(off + 12)].try_into().unwrap());
             let size = u32::from_le_bytes(mbr[(off + 12)..(off + 16)].try_into().unwrap());
             assert_eq!(start, 1, "Protective MBR must start at LBA 1");
-            assert!(size == 0xFFFFFFFF || size > 0,
-                "Protective MBR size must be non-zero or 0xFFFFFFFF");
+            assert!(
+                size == 0xFFFFFFFF || size > 0,
+                "Protective MBR size must be non-zero or 0xFFFFFFFF"
+            );
             protective_ok = true;
             break;
         }
@@ -283,14 +323,17 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
         h.update(&hdr_crc[..hdr_sz]);
         h.finalize()
     };
-    assert_eq!(stored_crc, calc_crc, "GPT header CRC mismatch — firmware would reject");
+    assert_eq!(
+        stored_crc, calc_crc,
+        "GPT header CRC mismatch — firmware would reject"
+    );
 
     // ── Step 3: Scan for ESP ──
     iso_file.seek(SeekFrom::Start(gpt_u64(&gpt_header, 72) * 512))?;
 
     let esp_guid: [u8; 16] = [
-        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
-        0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B,
+        0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11, 0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9,
+        0x3B,
     ];
 
     let mut esp_found = false;
@@ -298,7 +341,9 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
     for _ in 0..128 {
         let mut entry = [0u8; 128];
         iso_file.read_exact(&mut entry)?;
-        if entry.iter().all(|&b| b == 0) { break; }
+        if entry.iter().all(|&b| b == 0) {
+            break;
+        }
         if entry[0..16] == esp_guid {
             esp_found = true;
             esp_lba_512 = u64::from_le_bytes(entry[32..40].try_into().unwrap());
@@ -323,15 +368,21 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
     assert_eq!(bps, 512, "FAT BPB: bytes/sector must be 512");
 
     let spc = bpb[13];
-    assert!(spc >= 1 && spc.is_power_of_two(),
-        "FAT BPB: sectors/cluster ({}) must be >= 1 and power of 2", spc);
+    assert!(
+        spc >= 1 && spc.is_power_of_two(),
+        "FAT BPB: sectors/cluster ({}) must be >= 1 and power of 2",
+        spc
+    );
 
     assert_eq!(bpb[16], 2, "FAT BPB: FAT count must be 2");
 
     let hidden = u32::from_le_bytes(bpb[28..32].try_into().unwrap());
-    assert!(hidden == 0 || hidden == esp_lba_512 as u32,
+    assert!(
+        hidden == 0 || hidden == esp_lba_512 as u32,
         "FAT BPB hidden_sectors ({}) must be 0 or ESP start LBA ({})",
-        hidden, esp_lba_512);
+        hidden,
+        esp_lba_512
+    );
 
     assert_eq!(bpb[21], 0xF8, "FAT BPB: media descriptor must be 0xF8");
 
@@ -339,9 +390,13 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
     // Fixed-length 8-byte field, trimmed. Firmware expects exact values.
     let t54 = String::from_utf8_lossy(&bpb[54..62]);
     let t82 = String::from_utf8_lossy(&bpb[82..90]);
-    let fat_str = if t54.starts_with("FAT") { &t54 }
-                  else if t82.starts_with("FAT") { &t82 }
-                  else { "" };
+    let fat_str = if t54.starts_with("FAT") {
+        &t54
+    } else if t82.starts_with("FAT") {
+        &t82
+    } else {
+        ""
+    };
     assert!(
         fat_str == "FAT12   " || fat_str == "FAT16   " || fat_str == "FAT32   ",
         "FAT BPB type string must be 'FAT12   ', 'FAT16   ', or 'FAT32   ', got '{}'",
@@ -355,8 +410,11 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
     let total_sectors = if ts16 != 0 { ts16 as u64 } else { ts32 as u64 };
 
     // Safety: max 260 MiB (ESP minimum size for FAT32 with 8 sec/clus)
-    assert!(total_sectors <= 532480,
-        "ESP total sectors ({}) exceeds safety limit (532480 = 260 MiB)", total_sectors);
+    assert!(
+        total_sectors <= 532480,
+        "ESP total sectors ({}) exceeds safety limit (532480 = 260 MiB)",
+        total_sectors
+    );
 
     let read_size = ((total_sectors as usize) * 512).min(260 * 1024 * 1024);
     let mut esp_data = vec![0u8; read_size];
@@ -367,12 +425,19 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
         .map_err(|e| io::Error::new(io::ErrorKind::Other, format!("FAT mount failed: {:?}", e)))?;
 
     let root = fs.root_dir();
-    assert!(root.open_file("EFI/BOOT/BOOTX64.EFI").is_ok(),
-        "BOOTX64.EFI not found — firmware would report 'No bootfile found for UEFI!'");
-    assert!(root.open_file("EFI/BOOT/KERNEL.EFI").is_ok(),
-        "KERNEL.EFI not found in ESP");
+    assert!(
+        root.open_file("EFI/BOOT/BOOTX64.EFI").is_ok(),
+        "BOOTX64.EFI not found — firmware would report 'No bootfile found for UEFI!'"
+    );
+    assert!(
+        root.open_file("EFI/BOOT/KERNEL.EFI").is_ok(),
+        "KERNEL.EFI not found in ESP"
+    );
 
-    println!("Firmware-style ESP discovery PASSED (ESP LBA {}, FAT {})", esp_lba_512, fat_str);
+    println!(
+        "Firmware-style ESP discovery PASSED (ESP LBA {}, FAT {})",
+        esp_lba_512, fat_str
+    );
     Ok(())
 }
 
@@ -399,7 +464,11 @@ fn test_ventoy_style_strict_parser() -> io::Result<()> {
     assert_eq!(hdr_sz, 92);
     let mut hdr_c = hdr;
     hdr_c[16..20].copy_from_slice(&[0u8; 4]);
-    let calc_crc = { let mut hasher = crc32fast::Hasher::new(); hasher.update(&hdr_c[..hdr_sz]); hasher.finalize() };
+    let calc_crc = {
+        let mut hasher = crc32fast::Hasher::new();
+        hasher.update(&hdr_c[..hdr_sz]);
+        hasher.finalize()
+    };
     assert_eq!(stored_crc, calc_crc, "GPT header CRC mismatch");
 
     let arr_crc_stored = gpt_u32(&hdr, 88);
@@ -411,8 +480,15 @@ fn test_ventoy_style_strict_parser() -> io::Result<()> {
     iso_file.seek(SeekFrom::Start(pe_lba * 512))?;
     let mut arr = vec![0u8; arr_len];
     iso_file.read_exact(&mut arr)?;
-    let arr_crc = { let mut h = crc32fast::Hasher::new(); h.update(&arr); h.finalize() };
-    assert_eq!(arr_crc_stored, arr_crc, "GPT partition array CRC mismatch — firmware rejects");
+    let arr_crc = {
+        let mut h = crc32fast::Hasher::new();
+        h.update(&arr);
+        h.finalize()
+    };
+    assert_eq!(
+        arr_crc_stored, arr_crc,
+        "GPT partition array CRC mismatch — firmware rejects"
+    );
 
     // ── Overlap check ──
     iso_file.seek(SeekFrom::Start(pe_lba * 512))?;
@@ -425,7 +501,10 @@ fn test_ventoy_style_strict_parser() -> io::Result<()> {
     let iso_e = u64::from_le_bytes(e0[40..48].try_into().unwrap());
     let esp_s = u64::from_le_bytes(e1[32..40].try_into().unwrap());
     let esp_e = u64::from_le_bytes(e1[40..48].try_into().unwrap());
-    assert!(iso_s <= esp_s && iso_e >= esp_e, "ESP must be within ISO9660 partition");
+    assert!(
+        iso_s <= esp_s && iso_e >= esp_e,
+        "ESP must be within ISO9660 partition"
+    );
 
     // ── Backup GPT cross-check + CRC ──
     iso_file.seek(SeekFrom::End(-512))?;
@@ -441,7 +520,11 @@ fn test_ventoy_style_strict_parser() -> io::Result<()> {
     assert_eq!(b_sz, 92);
     let mut b_c = bk;
     b_c[16..20].copy_from_slice(&[0u8; 4]);
-    let b_calc = { let mut h = crc32fast::Hasher::new(); h.update(&b_c[..b_sz]); h.finalize() };
+    let b_calc = {
+        let mut h = crc32fast::Hasher::new();
+        h.update(&b_c[..b_sz]);
+        h.finalize()
+    };
     assert_eq!(b_stored, b_calc, "Backup GPT header CRC mismatch");
 
     // Backup partition array CRC
@@ -450,8 +533,15 @@ fn test_ventoy_style_strict_parser() -> io::Result<()> {
     iso_file.seek(SeekFrom::Start(ba_lba * 512))?;
     let mut ba = vec![0u8; arr_len];
     iso_file.read_exact(&mut ba)?;
-    let ba_calc = { let mut h = crc32fast::Hasher::new(); h.update(&ba); h.finalize() };
-    assert_eq!(ba_stored, ba_calc, "Backup GPT partition array CRC mismatch");
+    let ba_calc = {
+        let mut h = crc32fast::Hasher::new();
+        h.update(&ba);
+        h.finalize()
+    };
+    assert_eq!(
+        ba_stored, ba_calc,
+        "Backup GPT partition array CRC mismatch"
+    );
 
     // ── El Torito catalog (dynamic LBA from BRVD) ──
     let catalog_lba = read_boot_catalog_lba(&mut iso_file)?;
@@ -505,7 +595,12 @@ fn test_linux_loop_partition_recognition() -> io::Result<()> {
 
     let _ = run_command(
         "sudo",
-        &["losetup", "--partscan", &loop_dev, iso_path.to_str().unwrap()],
+        &[
+            "losetup",
+            "--partscan",
+            &loop_dev,
+            iso_path.to_str().unwrap(),
+        ],
     )?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
@@ -513,19 +608,41 @@ fn test_linux_loop_partition_recognition() -> io::Result<()> {
     let part1 = format!("/dev/{}p1", loop_base);
     let part2 = format!("/dev/{}p2", loop_base);
 
-    assert!(Path::new(&part1).exists(), "Partition p1 not found at {}", part1);
-    assert!(Path::new(&part2).exists(), "Partition p2 not found at {}", part2);
+    assert!(
+        Path::new(&part1).exists(),
+        "Partition p1 not found at {}",
+        part1
+    );
+    assert!(
+        Path::new(&part2).exists(),
+        "Partition p2 not found at {}",
+        part2
+    );
 
     let mnt = _temp_dir.path().join("mnt_esp");
     std::fs::create_dir_all(&mnt)?;
 
     let _ = run_command(
         "sudo",
-        &["mount", "-t", "vfat", "-o", "ro,noexec,nosuid,nodev", &part2, mnt.to_str().unwrap()],
+        &[
+            "mount",
+            "-t",
+            "vfat",
+            "-o",
+            "ro,noexec,nosuid,nodev",
+            &part2,
+            mnt.to_str().unwrap(),
+        ],
     )?;
 
-    assert!(mnt.join("EFI/BOOT/BOOTX64.EFI").exists(), "BOOTX64.EFI missing in mounted ESP");
-    assert!(mnt.join("EFI/BOOT/KERNEL.EFI").exists(), "KERNEL.EFI missing in mounted ESP");
+    assert!(
+        mnt.join("EFI/BOOT/BOOTX64.EFI").exists(),
+        "BOOTX64.EFI missing in mounted ESP"
+    );
+    assert!(
+        mnt.join("EFI/BOOT/KERNEL.EFI").exists(),
+        "KERNEL.EFI missing in mounted ESP"
+    );
 
     let _ = run_command("sudo", &["umount", mnt.to_str().unwrap()]);
     // _guard will detach loop device on drop
@@ -552,7 +669,12 @@ fn test_blkid_partition_detection() -> io::Result<()> {
 
     let _ = run_command(
         "sudo",
-        &["losetup", "--partscan", &loop_dev, iso_path.to_str().unwrap()],
+        &[
+            "losetup",
+            "--partscan",
+            &loop_dev,
+            iso_path.to_str().unwrap(),
+        ],
     )?;
     std::thread::sleep(std::time::Duration::from_millis(500));
 
@@ -560,40 +682,56 @@ fn test_blkid_partition_detection() -> io::Result<()> {
     let part2 = format!("/dev/{}p2", loop_base);
 
     // blkid TYPE must be vfat
-    let blkid = run_command("sudo", &["blkid", "-p", "-o", "value", "-s", "TYPE", &part2]);
+    let blkid = run_command(
+        "sudo",
+        &["blkid", "-p", "-o", "value", "-s", "TYPE", &part2],
+    );
     match blkid {
         Ok(ref o) => {
-            assert_eq!(o.trim(), "vfat", "ESP partition must be detected as 'vfat' by blkid, got '{:?}'", o);
+            assert_eq!(
+                o.trim(),
+                "vfat",
+                "ESP partition must be detected as 'vfat' by blkid, got '{:?}'",
+                o
+            );
             println!("blkid ESP TYPE: vfat ✓");
         }
         Err(ref e) => panic!("blkid failed for {}: {}", part2, e),
     }
 
     // PARTLABEL
-    if let Ok(ref o) = run_command("sudo",
-        &["blkid", "-p", "-o", "value", "-s", "PARTLABEL", &part2])
-    {
+    if let Ok(ref o) = run_command(
+        "sudo",
+        &["blkid", "-p", "-o", "value", "-s", "PARTLABEL", &part2],
+    ) {
         assert_eq!(o.trim(), "EFI System Partition", "ESP PARTLABEL mismatch");
         println!("blkid ESP PARTLABEL: '{}' ✓", o.trim());
     }
 
     // PARTUUID
-    if let Ok(ref o) = run_command("sudo",
-        &["blkid", "-p", "-o", "value", "-s", "PARTUUID", &part2])
-    {
+    if let Ok(ref o) = run_command(
+        "sudo",
+        &["blkid", "-p", "-o", "value", "-s", "PARTUUID", &part2],
+    ) {
         assert!(!o.trim().is_empty(), "ESP PARTUUID must not be empty");
         println!("blkid ESP PARTUUID: {} ✓", o.trim());
     }
 
     // sgdisk -v
     if let Ok(ref o) = run_command("sudo", &["sgdisk", "-v", iso_path.to_str().unwrap()]) {
-        let problems: Vec<&str> = o.lines()
+        let problems: Vec<&str> = o
+            .lines()
             .filter(|l| l.contains("Problem:") || l.contains("Warning:"))
             .collect();
-        let critical: Vec<&&str> = problems.iter()
+        let critical: Vec<&&str> = problems
+            .iter()
             .filter(|p| !p.contains("MBR partitions 1 and 2 overlap"))
             .collect();
-        assert!(critical.is_empty(), "sgdisk -v critical problems: {:?}", critical);
+        assert!(
+            critical.is_empty(),
+            "sgdisk -v critical problems: {:?}",
+            critical
+        );
         println!("sgdisk -v PASSED");
     }
 

@@ -26,12 +26,10 @@ impl GptPartitionEntry {
         attributes: u64,
     ) -> Self {
         let partition_type_guid_bytes = uuid_to_gpt_mixed_endian(
-            &Uuid::parse_str(partition_type_guid)
-                .expect("Failed to parse partition type GUID"),
+            &Uuid::parse_str(partition_type_guid).expect("Failed to parse partition type GUID"),
         );
         let unique_partition_guid_bytes = uuid_to_gpt_mixed_endian(
-            &Uuid::parse_str(unique_partition_guid)
-                .expect("Failed to parse unique partition GUID"),
+            &Uuid::parse_str(unique_partition_guid).expect("Failed to parse unique partition GUID"),
         );
 
         let mut name_bytes = [0u16; 36];

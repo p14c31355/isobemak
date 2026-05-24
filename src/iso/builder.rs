@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use crate::fat;
+use crate::iso::constants::disk512_to_iso;
 use crate::iso::disk_layout::DiskLayout;
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
-use crate::iso::constants::disk512_to_iso;
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -16,28 +16,28 @@ use crate::iso::builder_utils::{
     calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
     ensure_directory_path, get_file_metadata, get_file_size_in_iso, get_lba_for_path,
 };
+use crate::iso::constants::BACKUP_GPT_RESERVED_512;
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
+use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
+use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
+use crate::iso::gpt::partition_entry::GptPartitionEntry;
 use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
-use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
-use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
-use crate::iso::gpt::partition_entry::GptPartitionEntry;
-use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
-use crate::iso::constants::BACKUP_GPT_RESERVED_512;
 use crate::iso::mbr::create_mbr_for_gpt_hybrid;
+use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
     volume_id: Option<String>,
     root: IsoDirectory,
     boot_info: Option<BootInfo>,
-    iso_data_lba: u32,     // LBA where ISO9660 filesystem data starts (QEMU/El Torito path)
+    iso_data_lba: u32, // LBA where ISO9660 filesystem data starts (QEMU/El Torito path)
     total_sectors: u32,
     is_isohybrid: bool,
     uefi_catalog_path: Option<String>,
-    esp_lba: Option<u32>,          // LBA of the EFI System Partition image (in ISO 2048-byte sectors)
+    esp_lba: Option<u32>, // LBA of the EFI System Partition image (in ISO 2048-byte sectors)
     esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in ISO sectors
     profile: IsoLayoutProfile,
     /// Disk-centric layout model: partitions (ESP) + ISO9660 region.
@@ -156,9 +156,7 @@ impl IsoBuilder {
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<Vec<BootCatalogEntry>> {
-        use crate::iso::boot_catalog::{
-            BootCatalogEntryType, BOOT_CATALOG_EFI_PLATFORM_ID,
-        };
+        use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntryType};
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
@@ -215,17 +213,15 @@ impl IsoBuilder {
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
         // total_lbas is in 2048-byte ISO sectors → convert to 512-byte sectors
-        let raw_512_sectors = total_lbas
-            .checked_mul(4)
-            .ok_or_else(|| {
-                io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    format!(
-                        "ISO image too large: total_lbas * 4 overflows u64 ({} * 4)",
-                        total_lbas
-                    ),
-                )
-            })?;
+        let raw_512_sectors = total_lbas.checked_mul(4).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "ISO image too large: total_lbas * 4 overflows u64 ({} * 4)",
+                    total_lbas
+                ),
+            )
+        })?;
 
         // Add backup GPT reservation (33 sectors: 1 header + 32 partition entries)
         // so that GPT structures don't overlap ISO 9660 data.
@@ -259,31 +255,33 @@ impl IsoBuilder {
         // Preferred: use file-backed EFI boot image extents (resolved from ISO
         // filesystem tree in build()).  Convert from ISO 2048-byte LBA to 512-byte.
         // Fallback: profile-driven fixed-position placement (legacy DiskLayout).
-        let (esp_start_512, esp_size_512) = if let (Some(iso_lba), Some(iso_sectors)) =
-            (self.esp_lba, self.esp_size_sectors)
-        {
-            // Convert ISO 2048-byte sector units to 512-byte sector units
-            let start_512 = (iso_lba as u64)
-                .checked_mul(4)
-                .and_then(|v| u32::try_from(v).ok());
-            let size_512 = (iso_sectors as u64)
-                .checked_mul(4)
-                .and_then(|v| u32::try_from(v).ok());
-            (start_512, size_512)
-        } else if let Some(ref layout) = self.disk_layout {
-            if let Some(esp) = layout.esp_partition() {
-                (Some(esp.start_lba_512 as u32), Some(esp.size_lba_512 as u32))
+        let (esp_start_512, esp_size_512) =
+            if let (Some(iso_lba), Some(iso_sectors)) = (self.esp_lba, self.esp_size_sectors) {
+                // Convert ISO 2048-byte sector units to 512-byte sector units
+                let start_512 = (iso_lba as u64)
+                    .checked_mul(4)
+                    .and_then(|v| u32::try_from(v).ok());
+                let size_512 = (iso_sectors as u64)
+                    .checked_mul(4)
+                    .and_then(|v| u32::try_from(v).ok());
+                (start_512, size_512)
+            } else if let Some(ref layout) = self.disk_layout {
+                if let Some(esp) = layout.esp_partition() {
+                    (
+                        Some(esp.start_lba_512 as u32),
+                        Some(esp.size_lba_512 as u32),
+                    )
+                } else {
+                    (None, None)
+                }
+            } else if let Some(esp_size_iso) = esp_size_sectors {
+                (
+                    Some(self.profile.esp_alignment_lba_512),
+                    Some(esp_size_iso * 4),
+                )
             } else {
                 (None, None)
-            }
-        } else if let Some(esp_size_iso) = esp_size_sectors {
-            (
-                Some(self.profile.esp_alignment_lba_512),
-                Some(esp_size_iso * 4),
-            )
-        } else {
-            (None, None)
-        };
+            };
 
         // --- MBR (always written) ---
         iso_file.seek(SeekFrom::Start(0))?;
@@ -334,7 +332,6 @@ impl IsoBuilder {
                         esp_attributes,
                     );
                     gpt_partitions.push(esp_partition);
-
                 }
             }
 
@@ -418,7 +415,8 @@ impl IsoBuilder {
             self.iso_data_lba,
         )?;
 
-        let boot_entries = self.prepare_boot_entries(resolved_esp_lba, resolved_esp_size_sectors)?;
+        let boot_entries =
+            self.prepare_boot_entries(resolved_esp_lba, resolved_esp_size_sectors)?;
         write_boot_catalog_to_iso(iso_file, boot_catalog_lba, boot_entries)?;
 
         // Write directory records and copy file contents.
@@ -448,13 +446,12 @@ impl IsoBuilder {
             }
             let final_size = iso_file.seek(SeekFrom::End(0))?;
             let final_total_sectors_u64 = final_size.div_ceil(ISO_SECTOR_SIZE as u64);
-            let final_total_sectors = u32::try_from(final_total_sectors_u64)
-                .map_err(|_| {
-                    io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "ISO image too large after appending GPT backup structures",
-                    )
-                })?;
+            let final_total_sectors = u32::try_from(final_total_sectors_u64).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ISO image too large after appending GPT backup structures",
+                )
+            })?;
             update_total_sectors_in_pvd(iso_file, final_total_sectors)?;
             self.total_sectors = final_total_sectors;
         }
@@ -546,12 +543,8 @@ pub fn build_iso(
             // calculate_lbas() in build().
             // Use relative paths (no leading "/") so that ensure_directory_path
             // creates "boot" under the ISO root, not a literal "/" directory.
-            iso_builder.efi_boot_image_iso_path =
-                Some("boot/efiboot.img".to_string());
-            iso_builder.add_file(
-                "boot/efiboot.img",
-                &path,
-            )?;
+            iso_builder.efi_boot_image_iso_path = Some("boot/efiboot.img".to_string());
+            iso_builder.add_file("boot/efiboot.img", &path)?;
         }
     }
 
