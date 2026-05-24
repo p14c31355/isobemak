@@ -97,13 +97,14 @@ fn write_fat32_bpb(
 }
 
 /// Write the FAT32 FSInfo sector at its designated offset (sector 1).
-fn write_fat32_fsinfo(file: &mut fs::File) -> io::Result<()> {
+fn write_fat32_fsinfo(file: &mut fs::File, total_clusters: u64) -> io::Result<()> {
     file.seek(SeekFrom::Start(1 * SECTOR_SIZE))?;
     let mut sector = [0u8; 512];
     sector[0..4].copy_from_slice(&0x41615252u32.to_le_bytes());   // lead sig
     sector[484..488].copy_from_slice(&0x61417272u32.to_le_bytes()); // struct sig
-    sector[488..492].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // free count
-    sector[492..496].copy_from_slice(&0xFFFFFFFFu32.to_le_bytes()); // next free
+    let free_count = total_clusters - 3; // entries 0,1,2 are used
+    sector[488..492].copy_from_slice(&(free_count as u32).to_le_bytes());
+    sector[492..496].copy_from_slice(&3u32.to_le_bytes()); // next free = 3
     sector[508..512].copy_from_slice(&0xAA550000u32.to_le_bytes()); // trail sig
     file.write_all(&sector)?;
     Ok(())
@@ -197,7 +198,7 @@ pub fn create_fat_image(
     file.seek(SeekFrom::Start(0))?;
     write_fat32_bpb(&mut file, total_sectors, fat_sectors, hidden_sectors)?;
     // FSInfo at sector 1
-    write_fat32_fsinfo(&mut file)?;
+    write_fat32_fsinfo(&mut file, data_sectors / SEC_PER_CLUS)?;
     // Backup BPB at sector 6
     write_backup_bpb(&mut file, total_sectors, fat_sectors, hidden_sectors)?;
     // FAT tables

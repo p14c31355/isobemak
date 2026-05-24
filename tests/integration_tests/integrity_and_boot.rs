@@ -239,3 +239,103 @@ fn test_iso9660_volume_space_size_matches_file_size() -> io::Result<()> {
     );
     Ok(())
 }
+
+/// Verify that the EFI boot image inside the ISO is a valid FAT32 filesystem.
+///
+/// This test extracts `/BOOT/EFIBOOT.IMG` from the ISO, checks that `file`
+/// reports it as FAT32, and runs `fsck.fat -vn` to validate the filesystem.
+/// Ventoy and real UEFI firmware reject FAT16 ESPs, so this is a critical
+/// compatibility gate.
+#[test]
+fn test_efi_fat_image_validation() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    let bootx64_path = temp_dir_path.join("bootx64.efi");
+    std::fs::write(&bootx64_path, vec![0u8; 64 * 1024])?;
+    let kernel_path = temp_dir_path.join("kernel.elf");
+    std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?;
+
+    let iso_path = temp_dir_path.join("fat32_test.iso");
+    let extracted_img = temp_dir_path.join("extracted.img");
+
+    let iso_image = isobemak::IsoImage {
+        volume_id: None,
+        files: vec![],
+        boot_info: isobemak::BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(isobemak::UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: None,
+            }),
+        },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
+    };
+
+    build_iso(&iso_path, &iso_image, true)?;
+    assert!(iso_path.exists());
+
+    // ── Extract EFI image via xorriso ──
+    let extract = run_command(
+        "xorriso",
+        &[
+            "-osirrox", "on",
+            "-indev", iso_path.to_str().unwrap(),
+            "-extract", "/BOOT/EFIBOOT.IMG",
+            extracted_img.to_str().unwrap(),
+        ],
+    );
+    if let Err(_) = extract {
+        // xorriso may refuse extraction with "Detected El-Torito boot information
+        // which currently is set to be discarded".  Try with -abort_on NEVER.
+        run_command(
+            "xorriso",
+            &[
+                "-abort_on", "NEVER",
+                "-osirrox", "on",
+                "-indev", iso_path.to_str().unwrap(),
+                "-extract", "/BOOT/EFIBOOT.IMG",
+                extracted_img.to_str().unwrap(),
+            ],
+        )?;
+    }
+    assert!(extracted_img.exists(), "Extracted EFI image not found");
+
+    // ── file: must report FAT32 ──
+    let file_output = run_command("file", &[extracted_img.to_str().unwrap()])?;
+    println!("file extracted.img: {}", file_output.trim());
+    assert!(
+        file_output.contains("FAT") && file_output.contains("32"),
+        "EFI boot image must be FAT32, got: {}",
+        file_output.trim()
+    );
+
+    // ── fsck.fat: check for fatal filesystem corruption ──
+    // fsck.fat exits with code 1 when it finds fixable issues (even cosmetic
+    // ones like short file name warnings from fatfs 0.3.6).  Use raw output
+    // capture to avoid run_command's exit-code check.
+    let fsck_out = std::process::Command::new("fsck.fat")
+        .args(["-vn", extracted_img.to_str().unwrap()])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    println!("fsck.fat output:\n{}", fsck_out);
+    assert!(
+        !fsck_out.contains("Invalid BPB") && !fsck_out.contains("damaged") && !fsck_out.contains("unreadable"),
+        "fsck.fat reported critical filesystem errors:\n{}",
+        fsck_out
+    );
+
+    // ── mdir: EFI/BOOT/BOOTX64.EFI must exist ──
+    let mdir = run_command("mdir", &["-i", extracted_img.to_str().unwrap(), "::EFI/BOOT"])?;
+    println!("mdir output:\n{}", mdir);
+    assert!(
+        mdir.contains("BOOTX64.EFI"),
+        "BOOTX64.EFI not found in ESP FAT image"
+    );
+
+    Ok(())
+}
