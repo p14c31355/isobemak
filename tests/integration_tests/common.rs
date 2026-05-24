@@ -131,10 +131,11 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     let e1_type = mbr[0x1CE + 4];
     let e1_start = u32::from_le_bytes(mbr[(0x1CE + 8)..(0x1CE + 12)].try_into().unwrap());
     assert_eq!(e1_type, 0xEF, "MBR entry 1 must be type 0xEF (ESP)");
-    // ESP is file-backed, so the LBA depends on filesystem layout.
-    // It should be after GPT reserved area (>=34) and within a reasonable range.
+    // ESP is file-backed (efiboot.img in ISO filesystem).  Its 512-byte LBA
+    // depends on the ISO filesystem layout.  With a ~260 MiB FAT32 image
+    // placed alphabetically after regular files, the ESP start can be far
+    // beyond 4096.  We only assert it comes after the GPT reserved area.
     assert!(e1_start >= 34, "MBR entry 1 (ESP) must start after GPT reserved area (>=34), got {}", e1_start);
-    assert!(e1_start < 4096, "MBR entry 1 (ESP) should be file-backed (<4096), got {}", e1_start);
 
     // Verify CHS fields for entry 1 (ESP) are populated.
     let e1_chs_start = &mbr[0x1CE + 1..0x1CE + 4];
@@ -229,11 +230,12 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
         "GPT partition entry 1 must have ESP type GUID (C12A7328-F81F-11D2-BA4B-00A0C93EC93B)"
     );
 
-    // ESP is file-backed, so the starting LBA depends on filesystem layout.
-    // It should be after GPT reserved area (>=34) and within a reasonable range.
+    // ESP is file-backed (efiboot.img in ISO filesystem).  Its 512-byte LBA
+    // depends on the ISO filesystem layout.  With a ~260 MiB FAT32 image
+    // placed alphabetically after regular files, the ESP start can be far
+    // beyond 4096.  We only assert it comes after the GPT reserved area.
     let esp_start = u64::from_le_bytes(esp_entry_1[32..40].try_into().unwrap());
     assert!(esp_start >= 34, "ESP must start after GPT reserved area (>=34), got {}", esp_start);
-    assert!(esp_start < 4096, "ESP should be file-backed (<4096), got {}", esp_start);
 
     // ESP must have non-zero size and end after start
     let esp_end = u64::from_le_bytes(esp_entry_1[40..48].try_into().unwrap());

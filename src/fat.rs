@@ -11,7 +11,7 @@
 // as zeroes to external tools (fsck.fat / hexdump).
 
 use std::{
-    fs::{self, File, OpenOptions},
+    fs::{File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
     path::Path,
 };
@@ -109,6 +109,10 @@ fn make_directory_entries(
     let mut sfn = [0u8; 32];
     sfn[..11].copy_from_slice(short);
     sfn[11] = attr;
+    // Set valid creation time (00:00:00) and date (2000-01-01 = 0x21 in FAT encoding).
+    // This matches entry_83 and avoids fsck.fat warnings about zero timestamps.
+    sfn[16..18].copy_from_slice(&0x0000u16.to_le_bytes()); // creation time 00:00:00
+    sfn[18..20].copy_from_slice(&0x21u16.to_le_bytes());   // creation date 2000-01-01
     sfn[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
     sfn[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
     sfn[28..32].copy_from_slice(&file_size.to_le_bytes());
@@ -443,6 +447,19 @@ fn write_tree_to_slice(
         }
     }
 
+    // BOOT directory is allocated a single cluster (4 KiB = ~128 dir entries).
+    // Reject images that would exceed this capacity to avoid silent truncation.
+    if boot_ents.len() > CLUSTER_SIZE as usize {
+        return Err(io::Error::new(
+            io::ErrorKind::Other,
+            format!(
+                "BOOT directory entries ({} bytes) exceed single cluster limit ({} bytes): \
+                 too many EFI boot files for this FAT image",
+                boot_ents.len(),
+                CLUSTER_SIZE,
+            ),
+        ));
+    }
     boot_ents.resize(CLUSTER_SIZE as usize, 0);
     write_at(img, alloc.sector_of(boot) * SECTOR_SIZE, &boot_ents);
 
@@ -530,8 +547,8 @@ mod tests {
         let dir = tempdir()?;
         let l = dir.path().join("l.efi");
         let k = dir.path().join("k.elf");
-        fs::write(&l, b"UEFI loader")?;
-        fs::write(&k, b"ELF kernel")?;
+        std::fs::write(&l, b"UEFI loader")?;
+        std::fs::write(&k, b"ELF kernel")?;
         let img = dir.path().join("f.img");
         create_fat_image(&img, &[("BOOTX64.EFI", l.as_path()), ("KERNEL.EFI", k.as_path())], 0)?;
         assert!(img.exists());
@@ -552,7 +569,7 @@ mod tests {
     fn test_hidden() -> io::Result<()> {
         let dir = tempdir()?;
         let l = dir.path().join("b.efi");
-        fs::write(&l, b"BOOT")?;
+        std::fs::write(&l, b"BOOT")?;
         let img = dir.path().join("fh.img");
         create_fat_image(&img, &[("BOOTX64.EFI", l.as_path())], 2048)?;
         let mut bytes = Vec::new();
