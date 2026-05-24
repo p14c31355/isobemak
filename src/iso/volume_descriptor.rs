@@ -1,55 +1,26 @@
-// isobemak/src/iso/volume_descriptor.rs
 use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::dir_record::IsoDirEntry;
 use crate::utils::{ISO_SECTOR_SIZE, seek_to_lba};
 use std::fs::File;
 use std::io::{self, Seek, SeekFrom, Write};
 
-pub const ISO_VOLUME_DESCRIPTOR_TERMINATOR: u8 = 255;
-pub const ISO_VOLUME_DESCRIPTOR_PRIMARY: u8 = 1;
-pub const ISO_VOLUME_DESCRIPTOR_BOOT_RECORD: u8 = 0;
-pub const ISO_ID: &[u8] = b"CD001";
-pub const ISO_VERSION: u8 = 1;
-pub const PVD_VOLUME_ID_OFFSET: usize = 40;
-pub const PVD_TOTAL_SECTORS_OFFSET: usize = 80;
-pub const PVD_ROOT_DIR_RECORD_OFFSET: usize = 156;
-pub const PVD_VOL_SET_SIZE_OFFSET: usize = 120;
-pub const PVD_VOL_SEQ_NUM_OFFSET: usize = 124;
-pub const PVD_LOGICAL_BLOCK_SIZE_OFFSET: usize = 128;
-pub const PVD_PATH_TABLE_SIZE_OFFSET: usize = 132;
+const PVD_VOL_ID: usize = 40;
+const PVD_TOTAL_SEC: usize = 80;
+const PVD_ROOT_DIR: usize = 156;
+const PVD_VOL_SET_SIZE: usize = 120;
+const PVD_VOL_SEQ_NUM: usize = 124;
+const PVD_LOGICAL_BLOCK: usize = 128;
+const PVD_PATH_TABLE: usize = 132;
 
-/// A helper function to update two 4-byte fields at different offsets
-/// within a single ISO sector (2048 bytes).
-fn update_4byte_fields(
-    iso: &mut File,
-    base_lba: u32,
-    offset1: usize,
-    offset2: usize,
-    value: u32,
-) -> io::Result<()> {
-    let base_offset = base_lba as u64 * ISO_SECTOR_SIZE as u64;
-
-    iso.seek(SeekFrom::Start(base_offset + offset1 as u64))?;
-    iso.write_all(&value.to_le_bytes())?;
-
-    iso.seek(SeekFrom::Start(base_offset + offset2 as u64))?;
-    iso.write_all(&value.to_be_bytes())?;
-
-    Ok(())
-}
-
-/// Helper to write a value in both little-endian and big-endian to a buffer at given offset and length.
-fn write_dual_endian(buf: &mut [u8], offset: usize, value: u32, byte_len: usize) {
-    match byte_len {
-        2 => {
-            buf[offset..offset + 2].copy_from_slice(&(value as u16).to_le_bytes());
-            buf[offset + 2..offset + 4].copy_from_slice(&(value as u16).to_be_bytes());
-        }
-        4 => {
-            buf[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
-            buf[offset + 4..offset + 8].copy_from_slice(&value.to_be_bytes());
-        }
-        _ => panic!("Unsupported byte length for dual endian write"),
+fn write_dual(buf: &mut [u8], off: usize, val: u32, len: usize) {
+    let le = val.to_le_bytes();
+    let be = val.to_be_bytes();
+    if len == 2 {
+        buf[off..off + 2].copy_from_slice(&le[..2]);
+        buf[off + 2..off + 4].copy_from_slice(&be[..2]);
+    } else {
+        buf[off..off + 4].copy_from_slice(&le);
+        buf[off + 4..off + 8].copy_from_slice(&be);
     }
 }
 
@@ -61,115 +32,68 @@ pub fn write_primary_volume_descriptor(
 ) -> io::Result<()> {
     seek_to_lba(iso, 16)?;
     let mut pvd = [0u8; ISO_SECTOR_SIZE];
-    pvd[0] = ISO_VOLUME_DESCRIPTOR_PRIMARY;
-    pvd[1..6].copy_from_slice(ISO_ID);
-    pvd[6] = ISO_VERSION;
+    pvd[0] = 1; // primary
+    pvd[1..6].copy_from_slice(b"CD001");
+    pvd[6] = 1;
 
-    let project_name = match volume_id {
-        None => b"ISOBEMAKI",
-        Some(id) => {
-            let bytes = id.as_bytes();
-            &bytes[..bytes.len().min(32)]
-        }
-    };
+    let name = volume_id.map_or(b"ISOBEMAKI" as &[u8], |id| {
+        &id.as_bytes()[..id.len().min(32)]
+    });
+    let mut vol = [b' '; 32];
+    vol[..name.len()].copy_from_slice(name);
+    pvd[PVD_VOL_ID..PVD_VOL_ID + 32].copy_from_slice(&vol);
 
-    let mut volume_id = [b' '; 32];
-    volume_id[..project_name.len()].copy_from_slice(project_name);
-    pvd[PVD_VOLUME_ID_OFFSET..PVD_VOLUME_ID_OFFSET + 32].copy_from_slice(&volume_id);
+    write_dual(&mut pvd, PVD_TOTAL_SEC, total_sectors, 4);
+    write_dual(&mut pvd, PVD_VOL_SET_SIZE, 1, 2);
+    write_dual(&mut pvd, PVD_VOL_SEQ_NUM, 1, 2);
+    write_dual(&mut pvd, PVD_LOGICAL_BLOCK, ISO_SECTOR_SIZE as u32, 2);
+    write_dual(&mut pvd, PVD_PATH_TABLE, 0, 4);
 
-    write_dual_endian(&mut pvd, PVD_TOTAL_SECTORS_OFFSET, total_sectors, 4);
-    write_dual_endian(&mut pvd, PVD_VOL_SET_SIZE_OFFSET, 1, 2);
-    write_dual_endian(&mut pvd, PVD_VOL_SEQ_NUM_OFFSET, 1, 2);
-    write_dual_endian(
-        &mut pvd,
-        PVD_LOGICAL_BLOCK_SIZE_OFFSET,
-        ISO_SECTOR_SIZE as u32,
-        2,
-    );
-    write_dual_endian(&mut pvd, PVD_PATH_TABLE_SIZE_OFFSET, 0, 4);
-
-    let root_entry_bytes = root_entry.to_bytes();
-    pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_entry_bytes.len()]
-        .copy_from_slice(&root_entry_bytes);
-
-    // File Structure Version (ECMA-119 8.4.24): MUST be 1
+    let re = root_entry.to_bytes();
+    pvd[PVD_ROOT_DIR..PVD_ROOT_DIR + re.len()].copy_from_slice(&re);
     pvd[881] = 1;
-
-    // Volume Creation Date/Time (ECMA-119 8.4.26.1, offset 813, 17 bytes)
-    // All-zero is spec-legal but libisofs rejects year=0/month=0 as "damaged".
-    // ISO 9660 uses ASCII digit characters, NOT binary integers.
-    // Format: "2024010100000000" + GMT offset (1 byte signed int, 15-min units).
-    // 2024-01-01 00:00:00.00 GMT+0
-    {
-        let date: [u8; 17] = *b"2024010100000000\x00";
-        pvd[813..830].copy_from_slice(&date);
-    }
-
-    // Volume Modification Date/Time (ECMA-119 8.4.26.2, offset 830, 17 bytes)
-    // Same value as creation date.
-    {
-        let date: [u8; 17] = *b"2024010100000000\x00";
-        pvd[830..847].copy_from_slice(&date);
-    }
-
-    // Application Use area: zero-initialized per spec
-    // bytes 883-1395 are already 0 from `[0u8; ISO_SECTOR_SIZE]` initialization
-
-    iso.write_all(&pvd)?;
-
-    Ok(())
+    pvd[813..830].copy_from_slice(b"2024010100000000\x00");
+    pvd[830..847].copy_from_slice(b"2024010100000000\x00");
+    iso.write_all(&pvd)
 }
 
 pub fn update_total_sectors_in_pvd(iso: &mut File, total_sectors: u32) -> io::Result<()> {
-    update_4byte_fields(
-        iso,
-        16,
-        PVD_TOTAL_SECTORS_OFFSET,
-        PVD_TOTAL_SECTORS_OFFSET + 4,
-        total_sectors,
-    )
+    let base = 16 * ISO_SECTOR_SIZE as u64;
+    iso.seek(SeekFrom::Start(base + PVD_TOTAL_SEC as u64))?;
+    iso.write_all(&total_sectors.to_le_bytes())?;
+    iso.seek(SeekFrom::Start(base + PVD_TOTAL_SEC as u64 + 4))?;
+    iso.write_all(&total_sectors.to_be_bytes())
 }
 
-pub fn write_boot_record_volume_descriptor(
-    iso: &mut File,
-    boot_catalog_lba: u32,
-) -> io::Result<()> {
+fn write_boot_record_vd(iso: &mut File) -> io::Result<()> {
     seek_to_lba(iso, 17)?;
     let mut brvd = [0u8; ISO_SECTOR_SIZE];
-    brvd[0] = ISO_VOLUME_DESCRIPTOR_BOOT_RECORD;
-    brvd[1..6].copy_from_slice(ISO_ID);
-    brvd[6] = ISO_VERSION;
-    let spec_name = b"EL TORITO SPECIFICATION";
-    brvd[7..7 + spec_name.len()].copy_from_slice(spec_name);
-    brvd[71..75].copy_from_slice(&boot_catalog_lba.to_le_bytes());
-    iso.write_all(&brvd)?;
-    Ok(())
+    brvd[0] = 0;
+    brvd[1..6].copy_from_slice(b"CD001");
+    brvd[6] = 1;
+    brvd[7..30].copy_from_slice(b"EL TORITO SPECIFICATION");
+    brvd[71..75].copy_from_slice(&LBA_BOOT_CATALOG.to_le_bytes());
+    iso.write_all(&brvd)
 }
 
-pub fn write_volume_descriptor_terminator(iso: &mut File) -> io::Result<()> {
+fn write_terminator(iso: &mut File) -> io::Result<()> {
     seek_to_lba(iso, 18)?;
-    let mut term = [0u8; ISO_SECTOR_SIZE];
-    term[0] = ISO_VOLUME_DESCRIPTOR_TERMINATOR;
-    term[1..6].copy_from_slice(ISO_ID);
-    term[6] = ISO_VERSION;
-    iso.write_all(&term)?;
-    Ok(())
+    let mut t = [0u8; ISO_SECTOR_SIZE];
+    t[0] = 255;
+    t[1..6].copy_from_slice(b"CD001");
+    t[6] = 1;
+    iso.write_all(&t)
 }
 
-/// A combined function to write all necessary volume descriptors in sequence.
 pub fn write_volume_descriptors(
     iso: &mut File,
     volume_id: Option<&str>,
     total_sectors: u32,
     root_entry: &IsoDirEntry,
 ) -> io::Result<()> {
-    // Primary Volume Descriptor at LBA 16
     write_primary_volume_descriptor(iso, volume_id, total_sectors, root_entry)?;
-    // Boot Record Volume Descriptor at LBA 17, pointing to boot catalog at LBA 19
-    write_boot_record_volume_descriptor(iso, LBA_BOOT_CATALOG)?;
-    // Volume Descriptor Terminator at LBA 18
-    write_volume_descriptor_terminator(iso)?;
-    Ok(())
+    write_boot_record_vd(iso)?;
+    write_terminator(iso)
 }
 
 #[cfg(test)]
@@ -179,128 +103,67 @@ mod tests {
     use tempfile::NamedTempFile;
 
     fn read_sector(file: &mut File, lba: u32) -> io::Result<[u8; ISO_SECTOR_SIZE]> {
-        let mut buffer = [0u8; ISO_SECTOR_SIZE];
+        let mut buf = [0u8; ISO_SECTOR_SIZE];
         file.seek(SeekFrom::Start(lba as u64 * ISO_SECTOR_SIZE as u64))?;
-        file.read_exact(&mut buffer)?;
-        Ok(buffer)
+        file.read_exact(&mut buf)?;
+        Ok(buf)
     }
 
     #[test]
-    fn test_write_pvd() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let root_entry = IsoDirEntry {
+    fn test_pvd() -> io::Result<()> {
+        let mut f = NamedTempFile::new()?;
+        let re = IsoDirEntry {
             lba: 20,
             size: 2048,
             flags: 2,
             name: ".",
         };
-        let total_sectors = 1000;
+        write_primary_volume_descriptor(f.as_file_mut(), None, 1000, &re)?;
+        let s = read_sector(f.as_file_mut(), 16)?;
+        assert_eq!(s[0], 1);
+        assert_eq!(&s[1..6], b"CD001");
+        assert_eq!(&s[PVD_TOTAL_SEC..PVD_TOTAL_SEC + 4], &1000u32.to_le_bytes());
+        let r = re.to_bytes();
+        assert_eq!(&s[PVD_ROOT_DIR..PVD_ROOT_DIR + r.len()], &r);
+        Ok(())
+    }
 
-        write_primary_volume_descriptor(temp_file.as_file_mut(), None, total_sectors, &root_entry)?;
-
-        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
-        assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
-        assert_eq!(&pvd_sector[1..6], ISO_ID);
-        let mut expected_sectors = [0u8; 8];
-        expected_sectors[0..4].copy_from_slice(&total_sectors.to_le_bytes());
-        expected_sectors[4..8].copy_from_slice(&total_sectors.to_be_bytes());
+    #[test]
+    fn test_update_pvd() -> io::Result<()> {
+        let mut f = NamedTempFile::new()?;
+        let re = IsoDirEntry {
+            lba: 20,
+            size: 2048,
+            flags: 2,
+            name: ".",
+        };
+        write_primary_volume_descriptor(f.as_file_mut(), None, 1000, &re)?;
+        update_total_sectors_in_pvd(f.as_file_mut(), 2500)?;
+        let s = read_sector(f.as_file_mut(), 16)?;
         assert_eq!(
-            &pvd_sector[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 8],
-            &expected_sectors
+            u32::from_le_bytes(s[PVD_TOTAL_SEC..PVD_TOTAL_SEC + 4].try_into().unwrap()),
+            2500
         );
-        let root_bytes = root_entry.to_bytes();
         assert_eq!(
-            &pvd_sector[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_bytes.len()],
-            &root_bytes
+            u32::from_be_bytes(s[PVD_TOTAL_SEC + 4..PVD_TOTAL_SEC + 8].try_into().unwrap()),
+            2500
         );
-
         Ok(())
     }
 
     #[test]
-    fn test_update_pvd_sectors() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let root_entry = IsoDirEntry {
+    fn test_all_vds() -> io::Result<()> {
+        let mut f = NamedTempFile::new()?;
+        let re = IsoDirEntry {
             lba: 20,
             size: 2048,
             flags: 2,
             name: ".",
         };
-        write_primary_volume_descriptor(temp_file.as_file_mut(), None, 1000, &root_entry)?;
-
-        let new_total_sectors = 2500;
-        update_total_sectors_in_pvd(temp_file.as_file_mut(), new_total_sectors)?;
-
-        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
-        let read_sectors_le = u32::from_le_bytes(
-            pvd_sector[PVD_TOTAL_SECTORS_OFFSET..PVD_TOTAL_SECTORS_OFFSET + 4]
-                .try_into()
-                .unwrap(),
-        );
-        let read_sectors_be = u32::from_be_bytes(
-            pvd_sector[PVD_TOTAL_SECTORS_OFFSET + 4..PVD_TOTAL_SECTORS_OFFSET + 8]
-                .try_into()
-                .unwrap(),
-        );
-        assert_eq!(read_sectors_le, new_total_sectors);
-        assert_eq!(read_sectors_be, new_total_sectors);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_write_brvd() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let boot_catalog_lba = 99;
-        write_boot_record_volume_descriptor(temp_file.as_file_mut(), boot_catalog_lba)?;
-
-        let brvd_sector = read_sector(temp_file.as_file_mut(), 17)?;
-        assert_eq!(brvd_sector[0], ISO_VOLUME_DESCRIPTOR_BOOT_RECORD);
-        assert_eq!(&brvd_sector[1..6], ISO_ID);
-        assert_eq!(&brvd_sector[7..30], b"EL TORITO SPECIFICATION");
-        assert_eq!(&brvd_sector[71..75], &boot_catalog_lba.to_le_bytes());
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_write_terminator() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        write_volume_descriptor_terminator(temp_file.as_file_mut())?;
-
-        let term_sector = read_sector(temp_file.as_file_mut(), 18)?;
-        assert_eq!(term_sector[0], ISO_VOLUME_DESCRIPTOR_TERMINATOR);
-        assert_eq!(&term_sector[1..6], ISO_ID);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_write_all_descriptors() -> io::Result<()> {
-        let mut temp_file = NamedTempFile::new()?;
-        let root_entry = IsoDirEntry {
-            lba: 20,
-            size: 2048,
-            flags: 2,
-            name: ".",
-        };
-        let total_sectors = 1234;
-
-        write_volume_descriptors(temp_file.as_file_mut(), None, total_sectors, &root_entry)?;
-
-        // Verify PVD
-        let pvd_sector = read_sector(temp_file.as_file_mut(), 16)?;
-        assert_eq!(pvd_sector[0], ISO_VOLUME_DESCRIPTOR_PRIMARY);
-
-        // Verify BRVD
-        let brvd_sector = read_sector(temp_file.as_file_mut(), 17)?;
-        assert_eq!(brvd_sector[0], ISO_VOLUME_DESCRIPTOR_BOOT_RECORD);
-        assert_eq!(&brvd_sector[71..75], &LBA_BOOT_CATALOG.to_le_bytes());
-
-        // Verify Terminator
-        let term_sector = read_sector(temp_file.as_file_mut(), 18)?;
-        assert_eq!(term_sector[0], ISO_VOLUME_DESCRIPTOR_TERMINATOR);
-
+        write_volume_descriptors(f.as_file_mut(), None, 1234, &re)?;
+        assert_eq!(read_sector(f.as_file_mut(), 16)?[0], 1);
+        assert_eq!(read_sector(f.as_file_mut(), 17)?[0], 0);
+        assert_eq!(read_sector(f.as_file_mut(), 18)?[0], 255);
         Ok(())
     }
 }

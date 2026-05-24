@@ -6,312 +6,153 @@ use crate::iso::boot_catalog::{
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
+
 const EL_TORITO_SECTOR_SIZE: u64 = 512;
-/// Enum representing different boot types for cleaner boot entry creation
-#[derive(Clone, Copy)]
-pub enum BootType {
-    Bios,
-    Uefi,
-    UefiEsp,
-}
 
-impl BootType {
-    fn platform_id(self) -> u8 {
-        match self {
-            BootType::Bios => 0x00,
-            BootType::Uefi | BootType::UefiEsp => BOOT_CATALOG_EFI_PLATFORM_ID,
-        }
-    }
-
-    fn description(self) -> &'static str {
-        match self {
-            BootType::Bios => "BIOS boot",
-            BootType::Uefi => "UEFI boot",
-            BootType::UefiEsp => "UEFI ESP",
-        }
-    }
-}
-
-/// Calculates the Logical Block Addresses (LBAs) for all files and directories.
 pub fn calculate_lbas(current_lba: &mut u32, dir: &mut IsoDirectory) -> io::Result<()> {
     dir.lba = *current_lba;
     *current_lba += 1;
-
-    let mut sorted_children: Vec<_> = dir.children.iter_mut().collect();
-    sorted_children.sort_by_key(|(name, _)| *name);
-
-    for (_, node) in sorted_children {
+    let mut sorted: Vec<_> = dir.children.iter_mut().collect();
+    sorted.sort_by_key(|(name, _)| *name);
+    for (_, node) in sorted {
         match node {
             IsoFsNode::File(file) => {
                 file.lba = *current_lba;
-                let sectors = file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
-                *current_lba += sectors;
+                *current_lba += file.size.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
             }
-            IsoFsNode::Directory(subdir) => {
-                calculate_lbas(current_lba, subdir)?;
-            }
+            IsoFsNode::Directory(subdir) => calculate_lbas(current_lba, subdir)?,
         }
     }
     Ok(())
 }
 
-/// Helper to find the LBA for a given path in the ISO filesystem.
-pub fn get_lba_for_path(root: &IsoDirectory, path: &str) -> io::Result<u32> {
-    match get_node_for_path(root, path)? {
-        IsoFsNode::File(file) => Ok(file.lba),
-        IsoFsNode::Directory(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Path is a directory, not a file: {}", path),
-        )),
-    }
-}
-
-/// Helper to find the size for a given path in the ISO filesystem.
-pub fn get_file_size_in_iso(root: &IsoDirectory, path: &str) -> io::Result<u64> {
-    match get_node_for_path(root, path)? {
-        IsoFsNode::File(file) => Ok(file.size),
-        IsoFsNode::Directory(_) => Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("Path is a directory, not a file: {}", path),
-        )),
-    }
-}
-
-/// Context for path operations, avoiding repeated parsing
-struct PathContext<'a> {
-    components: Vec<std::path::Component<'a>>,
-    path_str: &'a str,
-}
-
-impl<'a> PathContext<'a> {
-    fn new(path: &'a str) -> Self {
-        Self {
-            components: Path::new(path).components().collect(),
-            path_str: path,
-        }
-    }
-
-    fn validate_all(&self) -> io::Result<()> {
-        validate_path_components(Path::new(self.path_str))
-    }
-}
-
-/// Helper to find the IsoFsNode for a given path in the ISO filesystem.
 fn get_node_for_path<'a>(root: &'a IsoDirectory, path: &str) -> io::Result<&'a IsoFsNode> {
-    let path_ctx = PathContext::new(path);
-    path_ctx.validate_all()?;
-
-    let mut current_node = root;
-
-    for (i, component) in path_ctx.components.iter().enumerate() {
-        let component_name = ensure_path_component!(component, path_ctx.path_str);
-
-        if i == path_ctx.components.len() - 1 {
-            // Last component, this is the target node
-            return current_node
-                .children
-                .get(component_name)
-                .ok_or_else(|| io_error!(io::ErrorKind::NotFound, "Path not found: {}", path));
-        } else {
-            // Intermediate component, must be a directory
-            match current_node.children.get(component_name) {
-                Some(IsoFsNode::Directory(dir)) => current_node = dir,
-                _ => {
-                    return Err(io_error!(
-                        io::ErrorKind::NotFound,
-                        "Directory not found in path: {}",
-                        path
-                    ));
-                }
+    for c in Path::new(path).components() {
+        c.as_os_str()
+            .to_str()
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path"))?;
+    }
+    let mut current = root;
+    let components: Vec<_> = Path::new(path).components().collect();
+    for (i, comp) in components.iter().enumerate() {
+        let name = comp.as_os_str().to_str().unwrap();
+        if i == components.len() - 1 {
+            return current.children.get(name).ok_or_else(|| {
+                io::Error::new(io::ErrorKind::NotFound, format!("Path not found: {path}"))
+            });
+        }
+        match current.children.get(name) {
+            Some(IsoFsNode::Directory(d)) => current = d,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::NotFound,
+                    format!("Directory not found: {path}"),
+                ));
             }
         }
     }
-    // This part should be unreachable if components is not empty
-    Err(io_error!(
+    Err(io::Error::new(
         io::ErrorKind::NotFound,
-        "Path not found: {}",
-        path
+        format!("Path not found: {path}"),
     ))
 }
 
-/// Calculate the number of sectors needed for a given file size
-pub fn calculate_sectors_from_size(file_size: u64) -> u32 {
-    file_size.div_ceil(ISO_SECTOR_SIZE as u64) as u32
-}
-
-/// Validate that a boot image size is suitable for the boot catalog
-pub fn validate_boot_image_size(size: u64, max_size: u64, image_type: &str) -> io::Result<()> {
-    if size > max_size {
-        return Err(io_error!(
+pub fn get_lba_for_path(root: &IsoDirectory, path: &str) -> io::Result<u32> {
+    match get_node_for_path(root, path)? {
+        IsoFsNode::File(f) => Ok(f.lba),
+        IsoFsNode::Directory(_) => Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            "{} image is too large for the boot catalog ({} > {})",
-            image_type,
-            size,
-            max_size
-        ));
+            format!("Path is a directory: {path}"),
+        )),
     }
-    Ok(())
 }
 
-/// Generic function to create any boot entry type (returns result directly)
-pub fn create_boot_entry_generic(
-    boot_type: BootType,
-    root: &IsoDirectory,
-    destination_path: Option<&str>,
-    esp_lba: Option<u32>,
-    esp_size_sectors: Option<u32>,
-) -> io::Result<BootCatalogEntry> {
-    Ok(BootCatalogEntry {
-        platform_id: boot_type.platform_id(),
-        boot_image_lba: match boot_type {
-            BootType::Bios | BootType::Uefi => {
-                let path = destination_path.ok_or_else(|| {
-                    io_error!(
-                        io::ErrorKind::InvalidInput,
-                        "Path required for {} boot",
-                        boot_type.description()
-                    )
-                })?;
-                get_lba_for_path(root, path)?
-            }
-            BootType::UefiEsp => {
-                let lba = esp_lba.ok_or_else(|| {
-                    io_error!(
-                        io::ErrorKind::InvalidInput,
-                        "ESP LBA required for UEFI ESP boot"
-                    )
-                })?;
-                // El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM).
-                // QEMU/OVMF boots via El Torito on CD-ROM → 2048-byte sector units.
-                // Real USB hardware ignores El Torito and boots via GPT+ESP instead,
-                // so the Load RBA is only relevant for QEMU and stays in ISO sectors.
-                lba
-            }
-        },
-        boot_image_sectors: match boot_type {
-            BootType::Bios | BootType::Uefi => {
-                let path = destination_path.ok_or_else(|| {
-                    io_error!(
-                        io::ErrorKind::InvalidInput,
-                        "Path required for {} boot",
-                        boot_type.description()
-                    )
-                })?;
-                let size = get_file_size_in_iso(root, path)?;
-                let sectors = size.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
-                validate_boot_image_size(sectors, u16::MAX as u64, boot_type.description())?;
-                sectors as u16
-            }
-            BootType::UefiEsp => {
-                // UEFI no-emulation: sector_count is ignored by most firmware
-                // (OVMF, GRUB, xorisso).  Setting it to 0 is the canonical
-                // value for UEFI El Torito no-emulation entries and prevents
-                // strict parsers (Ventoy) from rejecting the image.
-                //
-                // The ESP FAT image is already accessible via the Load RBA
-                // field (entry[8..12]) and the GPT partition table, so
-                // sector_count is not needed for boot.
-                if esp_size_sectors.is_none() {
-                    return Err(io_error!(
-                        io::ErrorKind::InvalidInput,
-                        "ESP size required for UEFI ESP boot"
-                    ));
-                }
-                0u16
-            }
-        },
-        entry_type: BootCatalogEntryType::BootEntry { bootable: true },
-    })
+pub fn get_file_size_in_iso(root: &IsoDirectory, path: &str) -> io::Result<u64> {
+    match get_node_for_path(root, path)? {
+        IsoFsNode::File(f) => Ok(f.size),
+        IsoFsNode::Directory(_) => Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("Path is a directory: {path}"),
+        )),
+    }
 }
 
-/// Create a boot catalog entry for BIOS boot
-pub fn create_bios_boot_entry(
-    root: &IsoDirectory,
-    destination_path: &str,
-) -> io::Result<BootCatalogEntry> {
-    create_boot_entry_generic(BootType::Bios, root, Some(destination_path), None, None)
-}
-
-/// Create a boot catalog entry for UEFI boot
-pub fn create_uefi_boot_entry(
-    root: &IsoDirectory,
-    destination_path: &str,
-) -> io::Result<BootCatalogEntry> {
-    create_boot_entry_generic(BootType::Uefi, root, Some(destination_path), None, None)
-}
-
-/// Create a boot catalog entry for UEFI ESP partition
-/// `esp_lba` is in 2048-byte ISO sector units (the ISO filesystem LBA).
-/// El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
-/// so the LBA stays in ISO sectors. GPT partition table separately records
-/// the ESP with 512-byte sector LBA values in `builder.rs`.
-pub fn create_uefi_esp_boot_entry(
-    esp_lba: u32,
-    esp_size_sectors: u32,
-) -> io::Result<BootCatalogEntry> {
-    create_boot_entry_generic(
-        BootType::UefiEsp,
-        &IsoDirectory::new(),
-        None,
-        Some(esp_lba), // 2048-byte ISO sectors (El Torito uses medium sector size)
-        Some(esp_size_sectors),
-    )
-}
-
-/// Get file metadata with consistent error handling
 pub fn get_file_metadata(path: &Path) -> io::Result<std::fs::Metadata> {
     std::fs::metadata(path).map_err(|e| {
-        io_error!(
+        io::Error::new(
             io::ErrorKind::NotFound,
-            "Failed to get file metadata for {}: {}",
-            path.display(),
-            e
+            format!("Failed to get metadata for {}: {e}", path.display()),
         )
     })
 }
 
-/// Navigate to a directory by path, creating intermediate directories if they don't exist.
 pub fn ensure_directory_path<'a>(
     root: &'a mut IsoDirectory,
     path: &str,
 ) -> io::Result<&'a mut IsoDirectory> {
     let components: Vec<_> = Path::new(path).components().collect();
-    let mut current_dir = root;
-
-    for component in components.iter().take(components.len().saturating_sub(1)) {
-        let component_name = component
+    let mut current = root;
+    for comp in components.iter().take(components.len().saturating_sub(1)) {
+        let name = comp
             .as_os_str()
             .to_str()
-            .ok_or_else(|| io_error!(io::ErrorKind::InvalidInput, "Invalid path component"))?;
-        current_dir = match current_dir
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "Invalid path component"))?;
+        current = match current
             .children
-            .entry(component_name.to_string())
+            .entry(name.to_string())
             .or_insert_with(|| IsoFsNode::Directory(IsoDirectory::new()))
         {
-            IsoFsNode::Directory(dir) => dir,
+            IsoFsNode::Directory(d) => d,
             IsoFsNode::File(_) => {
-                return Err(io_error!(
+                return Err(io::Error::new(
                     io::ErrorKind::AlreadyExists,
-                    "Path component '{}' is a file, expected directory",
-                    component_name
+                    format!("Path component '{name}' is a file"),
                 ));
             }
         };
     }
-
-    Ok(current_dir)
+    Ok(current)
 }
 
-/// Validate path components with consistent error handling
-pub fn validate_path_components(path: &Path) -> io::Result<()> {
-    for component in path.components() {
-        component.as_os_str().to_str().ok_or_else(|| {
-            io_error!(
-                io::ErrorKind::InvalidInput,
-                "Invalid path component: {:?}",
-                component
-            )
-        })?;
+fn mk_boot_entry(platform_id: u8, lba: u32, sectors: u16) -> BootCatalogEntry {
+    BootCatalogEntry {
+        platform_id,
+        boot_image_lba: lba,
+        boot_image_sectors: sectors,
+        entry_type: BootCatalogEntryType::BootEntry { bootable: true },
     }
-    Ok(())
+}
+
+pub fn create_bios_boot_entry(root: &IsoDirectory, path: &str) -> io::Result<BootCatalogEntry> {
+    let lba = get_lba_for_path(root, path)?;
+    let sz = get_file_size_in_iso(root, path)?;
+    let sectors = sz.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+    if sectors > u16::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "BIOS boot image too large",
+        ));
+    }
+    Ok(mk_boot_entry(0x00, lba, sectors as u16))
+}
+
+pub fn create_uefi_boot_entry(root: &IsoDirectory, path: &str) -> io::Result<BootCatalogEntry> {
+    let lba = get_lba_for_path(root, path)?;
+    let sz = get_file_size_in_iso(root, path)?;
+    let sectors = sz.div_ceil(EL_TORITO_SECTOR_SIZE).max(1);
+    if sectors > u16::MAX as u64 {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "UEFI boot image too large",
+        ));
+    }
+    Ok(mk_boot_entry(
+        BOOT_CATALOG_EFI_PLATFORM_ID,
+        lba,
+        sectors as u16,
+    ))
+}
+
+pub fn create_uefi_esp_boot_entry(esp_lba: u32, _esp_size: u32) -> io::Result<BootCatalogEntry> {
+    Ok(mk_boot_entry(BOOT_CATALOG_EFI_PLATFORM_ID, esp_lba, 0))
 }
