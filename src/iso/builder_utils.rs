@@ -1,7 +1,9 @@
 use std::io::{self};
 use std::path::Path;
 
-use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry};
+use crate::iso::boot_catalog::{
+    BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntry, BootCatalogEntryType,
+};
 use crate::iso::fs_node::{IsoDirectory, IsoFsNode};
 use crate::utils::ISO_SECTOR_SIZE;
 const EL_TORITO_SECTOR_SIZE: u64 = 512;
@@ -172,12 +174,19 @@ pub fn create_boot_entry_generic(
                 })?;
                 get_lba_for_path(root, path)?
             }
-            BootType::UefiEsp => esp_lba.ok_or_else(|| {
-                io_error!(
-                    io::ErrorKind::InvalidInput,
-                    "ESP LBA required for UEFI ESP boot"
-                )
-            })?,
+            BootType::UefiEsp => {
+                let lba = esp_lba.ok_or_else(|| {
+                    io_error!(
+                        io::ErrorKind::InvalidInput,
+                        "ESP LBA required for UEFI ESP boot"
+                    )
+                })?;
+                // El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM).
+                // QEMU/OVMF boots via El Torito on CD-ROM → 2048-byte sector units.
+                // Real USB hardware ignores El Torito and boots via GPT+ESP instead,
+                // so the Load RBA is only relevant for QEMU and stays in ISO sectors.
+                lba
+            }
         },
         boot_image_sectors: match boot_type {
             BootType::Bios | BootType::Uefi => {
@@ -194,27 +203,24 @@ pub fn create_boot_entry_generic(
                 sectors as u16
             }
             BootType::UefiEsp => {
-                let sectors = esp_size_sectors.ok_or_else(|| {
-                    io_error!(
+                // UEFI no-emulation: sector_count is ignored by most firmware
+                // (OVMF, GRUB, xorisso).  Setting it to 0 is the canonical
+                // value for UEFI El Torito no-emulation entries and prevents
+                // strict parsers (Ventoy) from rejecting the image.
+                //
+                // The ESP FAT image is already accessible via the Load RBA
+                // field (entry[8..12]) and the GPT partition table, so
+                // sector_count is not needed for boot.
+                if !esp_size_sectors.is_some() {
+                    return Err(io_error!(
                         io::ErrorKind::InvalidInput,
                         "ESP size required for UEFI ESP boot"
-                    )
-                })?;
-                let boot_image_512_sectors = sectors.checked_mul(4).ok_or_else(|| {
-                    io_error!(
-                        io::ErrorKind::InvalidInput,
-                        "UEFI ESP boot image size calculation overflowed"
-                    )
-                })?;
-                validate_boot_image_size(
-                    boot_image_512_sectors as u64,
-                    u16::MAX as u64,
-                    boot_type.description(),
-                )?;
-                boot_image_512_sectors as u16
+                    ));
+                }
+                0u16
             }
         },
-        bootable: true,
+        entry_type: BootCatalogEntryType::BootEntry { bootable: true },
     })
 }
 
@@ -236,9 +242,9 @@ pub fn create_uefi_boot_entry(
 
 /// Create a boot catalog entry for UEFI ESP partition
 /// `esp_lba` is in 2048-byte ISO sector units (the ISO filesystem LBA).
-/// For El Torito on CD-ROM media, the boot catalog LBA is in 2048-byte sectors,
-/// which matches ISO sector layout. GPT partition table separately records the
-/// ESP in 512-byte sector units for real hardware (USB, HDD) access.
+/// El Torito Load RBA uses the medium's sector size (2048 bytes for CD-ROM),
+/// so the LBA stays in ISO sectors. GPT partition table separately records
+/// the ESP with 512-byte sector LBA values in `builder.rs`.
 pub fn create_uefi_esp_boot_entry(
     esp_lba: u32,
     esp_size_sectors: u32,
@@ -247,7 +253,7 @@ pub fn create_uefi_esp_boot_entry(
         BootType::UefiEsp,
         &IsoDirectory::new(),
         None,
-        Some(esp_lba), // Keep in 2048-byte ISO sectors for El Torito (CD-ROM media)
+        Some(esp_lba), // 2048-byte ISO sectors (El Torito uses medium sector size)
         Some(esp_size_sectors),
     )
 }

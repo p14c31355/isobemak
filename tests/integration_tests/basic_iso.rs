@@ -4,7 +4,7 @@ use std::{
     io::{self, Read, Seek, SeekFrom},
 };
 
-use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+use isobemak::{BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
@@ -53,6 +53,7 @@ fn test_create_disk_and_iso() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     // Call the main function with correct arguments
@@ -104,7 +105,9 @@ fn test_create_disk_and_iso() -> io::Result<()> {
         .args(["l", iso_path.to_str().unwrap()])
         .output()?;
     let sevenz_l_output = String::from_utf8_lossy(&sevenz_output.stdout).into_owned();
+    let sevenz_err_output = String::from_utf8_lossy(&sevenz_output.stderr).into_owned();
     println!("7z l output:\n{}", sevenz_l_output);
+    println!("7z l stderr:\n{}", sevenz_err_output);
     assert!(sevenz_l_output.contains("EFI/BOOT/BOOTX64.EFI"));
     assert!(sevenz_l_output.contains("EFI/BOOT/KERNEL.EFI"));
 
@@ -165,6 +168,7 @@ fn test_sets_volume_label() -> io::Result<()> {
             bios_boot: None,
             uefi_boot: None,
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     // Call the main function with correct arguments

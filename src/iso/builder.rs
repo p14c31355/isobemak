@@ -1,11 +1,12 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
-use uuid::Uuid;
 
 use crate::fat;
-use crate::iso::constants::ESP_START_LBA;
+use crate::iso::constants::disk512_to_iso;
+use crate::iso::disk_layout::DiskLayout;
+use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
 use crate::utils::ISO_SECTOR_SIZE;
 
 // Import definitions from new modules
@@ -13,28 +14,42 @@ use crate::iso::boot_catalog::BootCatalogEntry;
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
     calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
-    ensure_directory_path, get_file_metadata,
+    ensure_directory_path, get_file_metadata, get_file_size_in_iso, get_lba_for_path,
 };
+use crate::iso::constants::BACKUP_GPT_RESERVED_512;
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
-use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
+use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
+use crate::iso::gpt::partition_entry::GptPartitionEntry;
 use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
-use crate::iso::mbr::create_mbr_for_gpt_hybrid; // Import specific function
+use crate::iso::mbr::create_mbr_for_gpt_hybrid;
+use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
 
 /// The main builder for creating an ISO 9660 image.
 pub struct IsoBuilder {
     volume_id: Option<String>,
     root: IsoDirectory,
     boot_info: Option<BootInfo>,
-    current_lba: u32,
+    iso_data_lba: u32, // LBA where ISO9660 filesystem data starts (QEMU/El Torito path)
     total_sectors: u32,
-    is_isohybrid: bool, // New field
+    is_isohybrid: bool,
     uefi_catalog_path: Option<String>,
-    esp_lba: Option<u32>,          // LBA of the EFI System Partition image
-    esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in sectors
+    esp_lba: Option<u32>, // LBA of the EFI System Partition image (in ISO 2048-byte sectors)
+    esp_size_sectors: Option<u32>, // Size of the EFI System Partition image in ISO sectors
+    profile: IsoLayoutProfile,
+    /// Disk-centric layout model: partitions (ESP) + ISO9660 region.
+    /// When set, replaces the old "ESP as ISO object" model with the
+    /// xorriso-style "ESP as disk partition" approach.
+    disk_layout: Option<DiskLayout>,
+    /// ISO filesystem path of the FAT boot image (e.g. "/boot/efiboot.img").
+    /// When set, El Torito UEFI ESP boot entry and GPT ESP partition
+    /// both point to this file's extents instead of raw appended sectors.
+    /// This is the Ubuntu/xorriso convention: EFI image is an ISO file,
+    /// not a hidden raw region.
+    efi_boot_image_iso_path: Option<String>,
 }
 
 impl Default for IsoBuilder {
@@ -49,12 +64,15 @@ impl IsoBuilder {
             volume_id: None,
             root: IsoDirectory::new(),
             boot_info: None,
-            current_lba: 0,
+            iso_data_lba: 0,
             total_sectors: 0,
             is_isohybrid: false, // Initialize new field
             uefi_catalog_path: None,
             esp_lba: None,
             esp_size_sectors: None,
+            profile: IsoLayoutProfile::default(),
+            disk_layout: None,
+            efi_boot_image_iso_path: None,
         }
     }
 
@@ -94,26 +112,77 @@ impl IsoBuilder {
         self.boot_info = Some(boot_info);
     }
 
+    /// Sets the ISO layout profile for firmware compatibility.
+    pub fn set_profile(&mut self, profile: IsoLayoutProfile) {
+        self.profile = profile;
+    }
+
     /// Sets whether the ISO should be built as an isohybrid image.
     pub fn set_isohybrid(&mut self, is_isohybrid: bool) {
         self.is_isohybrid = is_isohybrid;
     }
 
+    /// Sets the disk-centric [DiskLayout] model.
+    ///
+    /// When set, the builder treats the ESP as a real disk partition
+    /// (xorriso `-append_partition` style), not an ISO9660 object.
+    pub fn set_disk_layout(&mut self, layout: DiskLayout) {
+        self.disk_layout = Some(layout);
+    }
+
     /// Prepares the list of boot catalog entries based on boot configuration.
+    ///
+    /// El Torito boot catalog layout (matching Ubuntu/xorriso convention):
+    ///
+    ///   Validation Entry (always, 32 bytes)
+    ///     header_id=1, platform_id=0x00, ID="", key=0xAA55
+    ///
+    ///   Initial/Default Boot Entry (offset 32, flag=0x88, No Emulation, system_type=0x00)
+    ///     Points to the BIOS boot image (or ESP FAT image for hybrid).
+    ///     Real UEFI firmware (InsydeH2O, old AMI, Lenovo) ignores this
+    ///     entry and instead looks for the Section Header with platform=0xEF.
+    ///
+    ///   Section Header Entry (offset 64, flag=0x91, platform=0xEF)
+    ///     Marks the start of UEFI-specific boot entries.
+    ///     This is the structure that real firmware recognizes for UEFI boot.
+    ///     Section entries count = 1 (one boot entry follows).
+    ///
+    ///   Section Boot Entry (offset 96, flag=0x88, No Emulation, system_type=0x00)
+    ///     Points to the ESP FAT image.
+    ///     Under a Section Header with platform=0xEF, this entry is
+    ///     interpreted as a UEFI boot target.
     fn prepare_boot_entries(
         &self,
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<Vec<BootCatalogEntry>> {
+        use crate::iso::boot_catalog::{BOOT_CATALOG_EFI_PLATFORM_ID, BootCatalogEntryType};
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // UEFI boot entry
-        if self.is_isohybrid {
-            if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+        // Hybrid path (ESP present): Ubuntu/xorriso-compatible multi-entry layout.
+        if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+            if size > 0 {
+                // Entry 0: Initial/Default Boot Entry
+                // Points to the ESP FAT image (BIOS/legacy path).
+                entries.push(create_uefi_esp_boot_entry(lba, size)?);
+
+                // Entry 1: Final Section Header (flag=0x91, platform=0xEF)
+                // Tells firmware: "the following entry is UEFI".
+                // Real firmware (InsydeH2O, old AMI, Lenovo) requires this.
+                entries.push(BootCatalogEntry {
+                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                    boot_image_lba: 0,
+                    boot_image_sectors: 0,
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
+                });
+
+                // Entry 2: Section Boot Entry (under UEFI section header)
+                // Points to the ESP FAT image.
                 entries.push(create_uefi_esp_boot_entry(lba, size)?);
             }
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
+            // Non-hybrid path (CD-ROM / QEMU only): direct EFI binary entry.
             entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
 
@@ -125,57 +194,153 @@ impl IsoBuilder {
         Ok(entries)
     }
 
-    /// Writes MBR and GPT structures for hybrid ISOs.
+    /// Writes MBR and optionally GPT for hybrid ISOs.
+    ///
+    /// Uses the [DiskLayout] model when available (preferred), falling back
+    /// to profile-driven partition placement from `esp_size_sectors`.
+    ///
+    /// The [DiskLayout] model treats the ESP as a real disk partition,
+    /// producing the xorriso-style layout that boots on real hardware
+    /// (NEC, Insyde, old AMI, Lenovo, Panasonic). See [DiskLayout] docs.
+    ///
+    /// The total disk size passed to GPT includes `BACKUP_GPT_RESERVED_512`
+    /// extra sectors so that backup GPT structures (header + partition array)
+    /// fit at the end of the disk without overlapping ISO 9660 data.
     fn write_hybrid_structures(
         &self,
         iso_file: &mut File,
         total_lbas: u64,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
-        // GPT structures require at least 69 LBAs (in 512-byte units)
-        // total_lbas here is in 2048-byte ISO sectors, convert to 512-byte sectors
-        let total_512_sectors = total_lbas * 4;
-        if total_512_sectors < 69 {
+        // total_lbas is in 2048-byte ISO sectors → convert to 512-byte sectors
+        let raw_512_sectors = total_lbas.checked_mul(4).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::InvalidInput,
+                format!(
+                    "ISO image too large: total_lbas * 4 overflows u64 ({} * 4)",
+                    total_lbas
+                ),
+            )
+        })?;
+
+        // Add backup GPT reservation (33 sectors: 1 header + 32 partition entries)
+        // so that GPT structures don't overlap ISO 9660 data.
+        // Round up to a multiple of 4 (2048-byte ISO sector alignment) so that
+        // the backup GPT header at the last 512-byte LBA leaves the file
+        // 2048-aligned.  raw_512_sectors is always 4-aligned; 33 is 1 mod 4.
+        let total_512_sectors = raw_512_sectors
+            .checked_add(BACKUP_GPT_RESERVED_512)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ISO image + GPT backup too large",
+                )
+            })?;
+        // Round up to next multiple of 4 (preserves 2048-byte ISO sector alignment)
+        let total_512_sectors = (total_512_sectors + 3) & !3u64;
+
+        let total_for_mbr = if total_512_sectors <= u32::MAX as u64 {
+            total_512_sectors as u32
+        } else {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
                 format!(
-                    "ISO image is too small for isohybrid with GPT ({} sectors, requires at least 69)",
+                    "ISO image too large for MBR ({} 512-byte sectors > u32::MAX)",
                     total_512_sectors
                 ),
             ));
-        }
+        };
 
-        // Write MBR (MBR uses 512-byte sector LBA values)
+        // Determine ESP start/size in 512-byte sectors.
+        // Preferred: use file-backed EFI boot image extents (resolved from ISO
+        // filesystem tree in build()).  Convert from ISO 2048-byte LBA to 512-byte.
+        // Fallback: profile-driven fixed-position placement (legacy DiskLayout).
+        let (esp_start_512, esp_size_512) =
+            if let (Some(iso_lba), Some(iso_sectors)) = (self.esp_lba, self.esp_size_sectors) {
+                // Convert ISO 2048-byte sector units to 512-byte sector units
+                let start_512 = (iso_lba as u64)
+                    .checked_mul(4)
+                    .and_then(|v| u32::try_from(v).ok());
+                let size_512 = (iso_sectors as u64)
+                    .checked_mul(4)
+                    .and_then(|v| u32::try_from(v).ok());
+                (start_512, size_512)
+            } else if let Some(ref layout) = self.disk_layout {
+                if let Some(esp) = layout.esp_partition() {
+                    (
+                        Some(esp.start_lba_512 as u32),
+                        Some(esp.size_lba_512 as u32),
+                    )
+                } else {
+                    (None, None)
+                }
+            } else if let Some(esp_size_iso) = esp_size_sectors {
+                (
+                    Some(self.profile.esp_alignment_lba_512),
+                    Some(esp_size_iso * 4),
+                )
+            } else {
+                (None, None)
+            };
+
+        // --- MBR (always written) ---
         iso_file.seek(SeekFrom::Start(0))?;
         let mbr = create_mbr_for_gpt_hybrid(
-            total_512_sectors.min(u32::MAX as u64) as u32,
+            total_for_mbr,
             self.is_isohybrid,
+            esp_start_512,
+            esp_size_512,
         )?;
         mbr.write_to(iso_file)?;
 
-        // Write GPT structures if esp_size_sectors > 0
-        if let Some(esp_size_sectors_val) = esp_size_sectors
-            && esp_size_sectors_val > 0
-        {
-            // Convert ESP position and size from 2048-byte to 512-byte sector units
-            let esp_start_512 = (ESP_START_LBA as u64) * 4;
-            let esp_size_512 = (esp_size_sectors_val as u64) * 4;
-            let esp_partition_end_lba = esp_start_512 + esp_size_512 - 1;
+        // --- GPT (profile-controlled, uses DiskLayout when available) ---
+        if self.profile.use_gpt {
+            let mut gpt_partitions: Vec<GptPartitionEntry> = Vec::new();
 
-            let esp_guid_str = EFI_SYSTEM_PARTITION_GUID;
-            let esp_unique_guid_str = Uuid::new_v4().to_string();
-            let partitions = vec![GptPartitionEntry::new(
-                esp_guid_str,
-                &esp_unique_guid_str,
-                esp_start_512,
-                esp_partition_end_lba,
-                "EFI System Partition",
-                0x0000000000000002, // EFI_PART_SYSTEM_PARTITION_ATTR_PLATFORM_REQUIRED
-            )];
-            write_gpt_structures(iso_file, total_512_sectors, &partitions)?;
-            iso_file.sync_data()?;
+            // GPT partition 1: ISO 9660 data (type 0x0700 = "ISO9660" per Ubuntu/xorriso).
+            // Covers the ISO 9660 data region including ESP in the middle.
+            // This matches Ubuntu's GPT layout where the ISO9660 partition
+            // is the first GPT entry.
+            let iso9660_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
+            let iso9660_uuid = uuid::Uuid::new_v4().to_string();
+            let iso_start: u64 = 34;
+            let iso_end: u64 = total_512_sectors.saturating_sub(34);
+            if iso_end > iso_start {
+                let iso_partition = GptPartitionEntry::new(
+                    iso9660_guid,
+                    &iso9660_uuid,
+                    iso_start,
+                    iso_end,
+                    "ISO9660",
+                    0,
+                );
+                gpt_partitions.push(iso_partition);
+            }
+
+            // GPT partition 2: EFI System Partition
+            if let (Some(start_512), Some(size_512)) = (esp_start_512, esp_size_512) {
+                let esp_end_512 = start_512.saturating_add(size_512).saturating_sub(1);
+                if esp_end_512 > start_512 {
+                    let esp_uuid = uuid::Uuid::new_v4().to_string();
+                    let esp_attributes: u64 = 1; // bit 0: System Partition
+                    let esp_partition = GptPartitionEntry::new(
+                        EFI_SYSTEM_PARTITION_GUID,
+                        &esp_uuid,
+                        start_512 as u64,
+                        esp_end_512 as u64,
+                        "EFI System Partition",
+                        esp_attributes,
+                    );
+                    gpt_partitions.push(esp_partition);
+                }
+            }
+
+            if !gpt_partitions.is_empty() {
+                write_gpt_structures(iso_file, total_512_sectors, &gpt_partitions)?;
+            }
         }
 
+        iso_file.sync_data()?;
         Ok(())
     }
 
@@ -191,49 +356,67 @@ impl IsoBuilder {
         self.esp_size_sectors = esp_size_sectors;
         // iso_file is now passed directly
 
-        // Placeholder for MBR and GPT structures.
-        // We'll write the actual MBR/GPT after the ISO9660 content is written and total_sectors is known.
-        let reserved_sectors = if self.is_isohybrid {
-            ESP_START_LBA
-        } else {
-            16u32
-        };
-        let data_start_lba = reserved_sectors;
+        // Physical layout (ISO 2048-byte sectors) for isohybrid:
+        //
+        //   LBA 0-15:    system area (MBR/GPT written later by write_hybrid_structures)
+        //   LBA 16:      Primary Volume Descriptor (fixed by ISO 9660 spec)
+        //   LBA 17:      Boot Record Volume Descriptor (El Torito)
+        //   LBA 18:      Volume Descriptor Set Terminator
+        //   LBA 19:      El Torito Boot Catalog
+        //   LBA 20-1023: padding / alignment gap (ensures ESP starts at 2 MiB = LBA 1024)
+        //   LBA 1024..1024+esp_size-1: EFI System Partition (FAT image)
+        //   LBA 1024+esp_size..:       ISO9660 directory records and file data
+        //
+        // Volume descriptors and boot catalog are written at fixed LBAs
+        // (16-19), independent of iso_data_lba.
+        // File data starts at iso_data_lba = ESP_START_LBA + esp_size,
+        // ensuring ISO9660 metadata never overlaps with the ESP region.
 
-        // Set current_lba to the start of filesystem data after VDs and catalog
-        // The volume descriptors and boot catalog will occupy sectors starting from data_start_lba.
-        // The actual file data will start after these.
-        // The calculate_lbas function will determine the LBA for the root directory and subsequent files/directories.
-        // We need to ensure that the total size calculation in finalize accounts for all written data.
-
-        // Seek to the start of the ISO9660 data area.
-        // LBA 16-18 for VDs, 19 for boot catalog. Data starts after.
         let boot_catalog_lba = 19;
-        // If hybrid, ISO9660 data starts after reserved sectors (MBR/GPT/ESP)
-        // Otherwise, it starts after VDs and boot catalog.
-        self.current_lba = if self.is_isohybrid {
-            data_start_lba + esp_size_sectors.unwrap_or(0) // ISO filesystem starts after ESP partition
+
+        // iso_data_lba: start of ISO9660 directory records and file contents.
+        // Always begins right after VDs+boot catalog (LBA 20).
+        // The EFI boot image is a regular ISO file (not raw appended sectors),
+        // so no fixed-position ESP reservation is needed.
+        self.iso_data_lba = if let Some(ref layout) = self.disk_layout {
+            layout.iso_region.data_start_lba
         } else {
-            boot_catalog_lba + 1 // Should be 20
+            boot_catalog_lba + 1
         };
         iso_file.seek(SeekFrom::Start(
-            (self.current_lba as u64) * ISO_SECTOR_SIZE as u64,
+            (self.iso_data_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
 
-        // Calculate LBAs for all files and directories. This also updates self.current_lba to the end of the filesystem data.
-        calculate_lbas(&mut self.current_lba, &mut self.root)?;
+        // Calculate LBAs for all files and directories. This also updates self.iso_data_lba to the end of the filesystem data.
+        calculate_lbas(&mut self.iso_data_lba, &mut self.root)?;
 
-        // Write volume descriptors (PVD, BRVD, Terminator). These will be written starting at data_start_lba.
-        // Pass the calculated end of filesystem data as a preliminary total_sectors.
-        // This will be correctly updated by finalize later. The VDs are at fixed locations.
+        // --- Resolve ESP LBA/size from the ISO filesystem tree ---
+        // Preferred: use the file-backed EFI boot image (Ubuntu/xorriso convention).
+        // Fallback: use explicitly provided esp_lba/esp_size_sectors (legacy).
+        let (resolved_esp_lba, resolved_esp_size_sectors) =
+            if let Some(ref iso_path) = self.efi_boot_image_iso_path {
+                let lba = get_lba_for_path(&self.root, iso_path)?;
+                let size_bytes = get_file_size_in_iso(&self.root, iso_path)?;
+                let sectors = size_bytes.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+                (Some(lba), Some(sectors))
+            } else {
+                (esp_lba, esp_size_sectors)
+            };
+        // Store resolved values so write_hybrid_structures can use them
+        self.esp_lba = resolved_esp_lba;
+        self.esp_size_sectors = resolved_esp_size_sectors;
+
+        // Write volume descriptors at fixed ISO 9660 positions
+        // (LBA 16=PVD, 17=BRVD, 18=Terminator).
         write_descriptors(
             iso_file,
             self.volume_id.as_deref(),
             self.root.lba,
-            self.current_lba,
+            self.iso_data_lba,
         )?;
 
-        let boot_entries = self.prepare_boot_entries(esp_lba, esp_size_sectors)?;
+        let boot_entries =
+            self.prepare_boot_entries(resolved_esp_lba, resolved_esp_size_sectors)?;
         write_boot_catalog_to_iso(iso_file, boot_catalog_lba, boot_entries)?;
 
         // Write directory records and copy file contents.
@@ -248,6 +431,29 @@ impl IsoBuilder {
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
         if self.is_isohybrid {
             self.write_hybrid_structures(iso_file, self.total_sectors as u64, esp_size_sectors)?;
+
+            // write_hybrid_structures appended backup GPT (33×512 = 16896 bytes)
+            // to the end of the file.  16896 is not a multiple of 2048, so the
+            // file is now larger than when finalize_iso wrote the PVD and is no
+            // longer 2048-aligned.  Re-pad to 2048, then read the actual file
+            // size and update the PVD so that Ventoy and other tools see correct
+            // ISO9660 metadata.
+            let pos = iso_file.seek(SeekFrom::End(0))?;
+            let remainder = pos % ISO_SECTOR_SIZE as u64;
+            if remainder != 0 {
+                let padding = ISO_SECTOR_SIZE as u64 - remainder;
+                io::copy(&mut io::repeat(0).take(padding), iso_file)?;
+            }
+            let final_size = iso_file.seek(SeekFrom::End(0))?;
+            let final_total_sectors_u64 = final_size.div_ceil(ISO_SECTOR_SIZE as u64);
+            let final_total_sectors = u32::try_from(final_total_sectors_u64).map_err(|_| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ISO image too large after appending GPT backup structures",
+                )
+            })?;
+            update_total_sectors_in_pvd(iso_file, final_total_sectors)?;
+            self.total_sectors = final_total_sectors;
         }
 
         Ok(())
@@ -264,6 +470,7 @@ pub fn build_iso(
 ) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)> {
     // Added Option<u32> for logical_fat_size_512_sectors
     let mut iso_builder = IsoBuilder::new();
+    iso_builder.set_profile(image.layout_profile.clone());
     iso_builder.set_volume_id(image.volume_id.clone());
     iso_builder.set_isohybrid(is_isohybrid);
 
@@ -304,22 +511,40 @@ pub fn build_iso(
             if let Some(ref grub_path) = grub_cfg_path_buf {
                 fat_files.push(("grub.cfg", grub_path));
             }
-            let size_512_sectors = fat::create_fat_image(&path, &fat_files)?;
-            logical_fat_size_512_sectors = Some(size_512_sectors); // Assign here
+            // ESP hidden sectors: profile-controlled (Zero for emulator, PartitionOffset for hardware).
+            let esp_hidden_sectors = match iso_builder.profile.hidden_sectors_mode {
+                HiddenSectorMode::Zero => 0,
+                HiddenSectorMode::PartitionOffset => iso_builder.profile.esp_alignment_lba_512,
+            };
+            let size_512_sectors = fat::create_fat_image(&path, &fat_files, esp_hidden_sectors)?;
+            logical_fat_size_512_sectors = Some(size_512_sectors);
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
-            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 * 512-byte sectors
+            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 × 512-byte sectors
 
-            // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(ESP_START_LBA); // ESP starts at LBA 34 for hybrid ISOs
-            iso_builder.esp_size_sectors = Some(calculated_esp_size_iso_sectors);
+            // Derive ISO-sector ESP LBA from profile alignment.
+            let esp_lba_iso_profile = disk512_to_iso(iso_builder.profile.esp_alignment_lba_512);
 
-            // Copy the FAT image to the ISO file at the designated ESP LBA (34)
-            iso_file.seek(SeekFrom::Start(
-                ESP_START_LBA as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
-            ))?;
-            let mut temp_fat = std::fs::File::open(&path)?;
-            io::copy(&mut temp_fat, &mut iso_file)?;
+            // Construct DiskLayout: ESP is a real disk partition, not an ISO object.
+            // This matches xorriso `-append_partition` behavior and is required
+            // for real hardware UEFI boot (NEC/Insyde/old AMI).
+            let disk_layout = DiskLayout::from_partition_params(
+                iso_builder.profile.esp_alignment_lba_512,
+                Some(size_512_sectors),
+                // ISO data starts at the aligned ESP position.
+                // The ESP image is added as a file and will occupy this space.
+                esp_lba_iso_profile,
+            );
+
+            // Ubuntu/xorriso convention: EFI boot image is a regular ISO file,
+            // not a hidden raw region.  Add the FAT image to the ISO tree so
+            // that El Torito, GPT, and xorriso can discover it as a normal file.
+            // El Torito and GPT will resolve the file's LBA and size after
+            // calculate_lbas() in build().
+            // Use relative paths (no leading "/") so that ensure_directory_path
+            // creates "boot" under the ISO root, not a literal "/" directory.
+            iso_builder.efi_boot_image_iso_path = Some("boot/efiboot.img".to_string());
+            iso_builder.add_file("boot/efiboot.img", &path)?;
         }
     }
 
@@ -449,8 +674,8 @@ mod tests {
         let temp_path = temp_file.path().to_path_buf();
 
         builder.add_file("A/B/C.txt", &temp_path)?;
-        builder.current_lba = 20;
-        calculate_lbas(&mut builder.current_lba, &mut builder.root)?;
+        builder.iso_data_lba = 20;
+        calculate_lbas(&mut builder.iso_data_lba, &mut builder.root)?;
 
         let lba = crate::iso::builder_utils::get_lba_for_path(&builder.root, "A/B/C.txt")?;
         let size = crate::iso::builder_utils::get_file_size_in_iso(&builder.root, "A/B/C.txt")?;

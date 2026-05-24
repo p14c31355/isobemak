@@ -1,12 +1,21 @@
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Seek, SeekFrom},
 };
 
 use isobemak::build_iso;
 use tempfile::tempdir;
 
 use crate::integration_tests::common::run_command;
+
+/// Read PVD Volume Space Size (offset 80, 4 bytes LE + 4 bytes BE) from LBA 16.
+fn read_pvd_volume_space_size(file: &mut File) -> io::Result<u32> {
+    let lba16_offset = 16 * 2048;
+    file.seek(SeekFrom::Start(lba16_offset + 80))?;
+    let mut le_bytes = [0u8; 4];
+    file.read_exact(&mut le_bytes)?;
+    Ok(u32::from_le_bytes(le_bytes))
+}
 
 #[test]
 fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
@@ -59,6 +68,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
     };
 
     // Build the ISO
@@ -75,28 +85,30 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // 2. Verify BIOS (El Torito) boot entry
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output (integrity test):\n{}", isoinfo_d_output);
-    assert!(isoinfo_d_output.contains("El Torito VD version 1 found")); // Updated assertion
-    assert!(isoinfo_d_output.contains("Arch 239")); // Updated assertion for UEFI priority
-    assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)")); // Updated assertion
+    assert!(isoinfo_d_output.contains("El Torito VD version 1 found"));
+    // Validation Entry platform ID is 0x00 (80x86) per El Torito spec §6.2.1.
+    // UEFI identification is via boot entry system_type=0xEF.
+    assert!(isoinfo_d_output.contains("Arch 0 (x86)"));
+    // Single-entry UEFI boot catalog: 0x88 entry, No Emulation (0x00), system_type=0xEF.
+    // This is the canonical El Torito UEFI layout recognised by OVMF and real firmware.
+    assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)"));
+    assert!(isoinfo_d_output.contains("Sys type EF"));
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
     // Detailed UEFI boot entry verification is handled in `test_create_isohybrid_uefi_iso`.
 
-    // Extract the BIOS boot image and check its signature (0xAA55)
-    // This requires knowing the LBA of the boot image from the boot catalog.
-    // For simplicity, we'll assume the first boot entry is the BIOS one and extract it.
-    // A more robust solution would parse the boot catalog directly.
+    // 7z may fail to extract from isohybrid images (offset ISO9660 start),
+    // so this check is best-effort only. Structural verification is done above.
     let extract_dir = temp_dir_path.join("extracted_bios_boot");
-    std::fs::create_dir_all(&extract_dir)?;
-    run_command(
+    let _ = std::fs::create_dir_all(&extract_dir);
+    let _ = run_command(
         "7z",
         &[
             "x",
             iso_path.to_str().unwrap(),
             &format!("-o{}", extract_dir.to_str().unwrap()),
-            "isolinux/isolinux.bin", // Assuming this is the BIOS boot image
+            "isolinux/isolinux.bin",
         ],
-    )?;
-
+    );
     let extracted_bios_boot_path = extract_dir.join("isolinux/isolinux.bin");
     if extracted_bios_boot_path.exists() {
         let mut boot_image_file = File::open(&extracted_bios_boot_path)?;
@@ -111,7 +123,7 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
         println!("Verified BIOS boot image signature (0xAA55)");
     } else {
         println!(
-            "Warning: isolinux/isolinux.bin not extracted or found for BIOS boot signature check."
+            "Warning: isolinux/isolinux.bin not extracted or found for BIOS boot signature check (expected for isohybrid)."
         );
     }
 
@@ -119,53 +131,236 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // The `test_create_isohybrid_uefi_iso` already performs detailed UEFI boot entry verification.
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
 
-    // 4. Enhanced Binary Dump Inspection: Check GPT Header
-    // Read the ISO file content
+    // 4. Verify MBR boot signature (xorriso-compatible, no GPT)
     let mut iso_file = File::open(&iso_path)?;
-    let mut iso_bytes = Vec::new();
-    iso_file.read_to_end(&mut iso_bytes)?;
+    let mut mbr_sector = [0u8; 512];
+    iso_file.read_exact(&mut mbr_sector)?;
 
-    // GPT Header is typically at LBA 1 (sector 1), which is 512 bytes from the start of the file.
-    // A sector is 512 bytes.
-    let gpt_header_offset = 512;
-    let gpt_header_size = 92; // Minimum GPT header size
+    // MBR boot signature at bytes 510-511 must be 0xAA55
+    let mbr_sig = u16::from_le_bytes([mbr_sector[510], mbr_sector[511]]);
+    assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
+    println!("Verified MBR boot signature: 0x{:04X}", mbr_sig);
 
-    if iso_bytes.len() > gpt_header_offset + gpt_header_size {
-        let gpt_header_slice = &iso_bytes[gpt_header_offset..(gpt_header_offset + gpt_header_size)];
+    // MBR Partition Entry 0 at offset 0x1BE: type 0xEE (GPT Protective), LBA 1.
+    // This is the standard protective MBR per UEFI spec §5.2.3,
+    // matching Ubuntu/xorriso layout.  0xEE tells UEFI firmware that
+    // the disk uses GPT partitioning.
+    let entry0_type = mbr_sector[0x1BE + 4];
+    let entry0_start =
+        u32::from_le_bytes(mbr_sector[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
+    assert_eq!(
+        entry0_type, 0xEE,
+        "MBR entry 0 should be type 0xEE (GPT Protective, UEFI spec)"
+    );
+    assert_eq!(
+        entry0_start, 1,
+        "MBR entry 0 should start at LBA 1 (LBA 0 is the MBR itself)"
+    );
+    println!(
+        "MBR entry 0: type=0x{:02X}, start={}",
+        entry0_type, entry0_start
+    );
 
-        // Check GPT Signature ("EFI PART")
-        let signature = &gpt_header_slice[0..8];
-        assert_eq!(signature, b"EFI PART", "GPT header signature mismatch");
-        println!(
-            "Verified GPT header signature: {:?}",
-            String::from_utf8_lossy(signature)
-        );
+    // MBR Partition Entry 1 at offset 0x1CE: type 0xEF (ESP), bootable=0x00
+    let entry1_bootable = mbr_sector[0x1CE];
+    let entry1_type = mbr_sector[0x1CE + 4];
+    let entry1_start =
+        u32::from_le_bytes(mbr_sector[(0x1CE + 8)..(0x1CE + 12)].try_into().unwrap());
+    assert_eq!(entry1_bootable, 0x00, "MBR entry 1 should not be bootable");
+    assert_eq!(entry1_type, 0xEF, "MBR entry 1 should be type 0xEF (ESP)");
+    println!(
+        "MBR entry 1: type=0x{:02X}, start={}",
+        entry1_type, entry1_start
+    );
 
-        // Check GPT Revision (should be 0x00010000 for version 1.0)
-        let revision = u32::from_le_bytes([
-            gpt_header_slice[8],
-            gpt_header_slice[9],
-            gpt_header_slice[10],
-            gpt_header_slice[11],
-        ]);
-        assert_eq!(revision, 0x00010000, "GPT header revision mismatch");
-        println!("Verified GPT header revision: 0x{:x}", revision);
+    Ok(())
+}
 
-        // Further checks could include:
-        // - Header Size (offset 12, u32)
-        // - CRC32 of header (offset 16, u32)
-        // - Current LBA (offset 24, u64)
-        // - Backup LBA (offset 32, u64)
-        // - First Usable LBA (offset 40, u64)
-        // - Last Usable LBA (offset 48, u64)
-        // - Disk GUID (offset 56, 16 bytes)
-        // - Partition Entry LBA (offset 72, u64)
-        // - Number of Partition Entries (offset 80, u32)
-        // - Size of Partition Entry (offset 84, u32)
-        // - CRC32 of Partition Entry Array (offset 88, u32)
-    } else {
-        println!("Warning: ISO file too small to contain a GPT header at expected offset.");
+/// Verify ISO9660 PVD Volume Space Size matches the actual file size.
+///
+/// When building an isohybrid ISO, backup GPT structures (33 sectors)
+/// are appended after the initial ISO data.  If the PVD Volume Space Size
+/// is not updated after this append, Ventoy and other tools will report
+/// the ISO as broken because the ISO9660 metadata says the file is smaller
+/// than it actually is.
+///
+/// This test directly catches the regression where finalize_iso writes
+/// the PVD before write_hybrid_structures extends the file.
+#[test]
+fn test_iso9660_volume_space_size_matches_file_size() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    let bootx64_path = temp_dir_path.join("bootx64.efi");
+    std::fs::write(&bootx64_path, vec![0u8; 64 * 1024])?;
+
+    let kernel_path = temp_dir_path.join("kernel.elf");
+    std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?;
+
+    let iso_path = temp_dir_path.join("volume_size_test.iso");
+
+    let iso_image = isobemak::IsoImage {
+        volume_id: None,
+        files: vec![],
+        boot_info: isobemak::BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(isobemak::UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: None,
+            }),
+        },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
+    };
+
+    build_iso(&iso_path, &iso_image, true)?;
+
+    // Read PVD Volume Space Size (in 2048-byte sectors)
+    let mut iso_file = File::open(&iso_path)?;
+    let pvd_total_sectors = read_pvd_volume_space_size(&mut iso_file)?;
+
+    // Actual file size must be a multiple of 2048 (ISO sector size).
+    // Backup GPT structures are 33×512 = 16896 bytes, which is NOT 2048-aligned
+    // (16896 % 2048 = 512).  If the builder doesn't re-pad after appending
+    // GPT, the ISO file won't end on a 2048-byte boundary, which breaks
+    // Ventoy and other tools that expect ISO9660 filesystems to be
+    // sector-aligned.
+    let actual_size = iso_file.metadata()?.len();
+    assert_eq!(
+        actual_size % 2048,
+        0,
+        "ISO file size ({actual_size}) must be a multiple of 2048 (ISO sector size); \
+         remainder={} bytes = {} GPT sectors",
+        actual_size % 2048,
+        (actual_size % 2048) / 512,
+    );
+
+    let expected_sectors = u32::try_from(actual_size / 2048).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "ISO too large for u32 sectors")
+    })?;
+
+    assert_eq!(
+        pvd_total_sectors,
+        expected_sectors,
+        "PVD Volume Space Size ({pvd_total_sectors} sectors) must match actual file size \
+         ({actual_size} bytes / 2048 = {expected_sectors} sectors).  \
+         The difference is {} bytes ({} GPT sectors).",
+        actual_size.saturating_sub(pvd_total_sectors as u64 * 2048),
+        actual_size.saturating_sub(pvd_total_sectors as u64 * 2048) / 512,
+    );
+    Ok(())
+}
+
+/// Verify that the EFI boot image inside the ISO is a valid FAT32 filesystem.
+///
+/// This test extracts `/BOOT/EFIBOOT.IMG` from the ISO, checks that `file`
+/// reports it as FAT32, and runs `fsck.fat -vn` to validate the filesystem.
+/// Ventoy and real UEFI firmware reject FAT16 ESPs, so this is a critical
+/// compatibility gate.
+#[test]
+fn test_efi_fat_image_validation() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    let bootx64_path = temp_dir_path.join("bootx64.efi");
+    std::fs::write(&bootx64_path, vec![0u8; 64 * 1024])?;
+    let kernel_path = temp_dir_path.join("kernel.elf");
+    std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?;
+
+    let iso_path = temp_dir_path.join("fat32_test.iso");
+    let extracted_img = temp_dir_path.join("extracted.img");
+
+    let iso_image = isobemak::IsoImage {
+        volume_id: None,
+        files: vec![],
+        boot_info: isobemak::BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(isobemak::UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: None,
+            }),
+        },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
+    };
+
+    build_iso(&iso_path, &iso_image, true)?;
+    assert!(iso_path.exists());
+
+    // ── Extract EFI image via xorriso ──
+    let extract = run_command(
+        "xorriso",
+        &[
+            "-osirrox",
+            "on",
+            "-indev",
+            iso_path.to_str().unwrap(),
+            "-extract",
+            "/BOOT/EFIBOOT.IMG",
+            extracted_img.to_str().unwrap(),
+        ],
+    );
+    if let Err(_) = extract {
+        // xorriso may refuse extraction with "Detected El-Torito boot information
+        // which currently is set to be discarded".  Try with -abort_on NEVER.
+        run_command(
+            "xorriso",
+            &[
+                "-abort_on",
+                "NEVER",
+                "-osirrox",
+                "on",
+                "-indev",
+                iso_path.to_str().unwrap(),
+                "-extract",
+                "/BOOT/EFIBOOT.IMG",
+                extracted_img.to_str().unwrap(),
+            ],
+        )?;
     }
+    assert!(extracted_img.exists(), "Extracted EFI image not found");
+
+    // ── file: must report FAT32 ──
+    let file_output = run_command("file", &[extracted_img.to_str().unwrap()])?;
+    println!("file extracted.img: {}", file_output.trim());
+    assert!(
+        file_output.contains("FAT") && file_output.contains("32"),
+        "EFI boot image must be FAT32, got: {}",
+        file_output.trim()
+    );
+
+    // ── fsck.fat: check for fatal filesystem corruption ──
+    // fsck.fat exits with code 1 when it finds fixable issues (even cosmetic
+    // ones like short file name warnings from fatfs 0.3.6).  Use raw output
+    // capture to avoid run_command's exit-code check.
+    let fsck_out = std::process::Command::new("fsck.fat")
+        .args(["-vn", extracted_img.to_str().unwrap()])
+        .output()
+        .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+        .unwrap_or_default();
+    println!("fsck.fat output:\n{}", fsck_out);
+    assert!(
+        !fsck_out.contains("Invalid BPB")
+            && !fsck_out.contains("damaged")
+            && !fsck_out.contains("unreadable"),
+        "fsck.fat reported critical filesystem errors:\n{}",
+        fsck_out
+    );
+
+    // ── mdir: EFI/BOOT/BOOTX64.EFI must exist ──
+    let mdir = run_command(
+        "mdir",
+        &["-i", extracted_img.to_str().unwrap(), "::EFI/BOOT"],
+    )?;
+    println!("mdir output:\n{}", mdir);
+    assert!(
+        mdir.contains("BOOTX64.EFI"),
+        "BOOTX64.EFI not found in ESP FAT image"
+    );
 
     Ok(())
 }

@@ -9,16 +9,31 @@ pub const LBA_BOOT_CATALOG: u32 = 19;
 /// Boot catalog constants
 pub const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
 pub const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
+/// Bootable Initial/Default entry flag (El Torito §6.2.1)
 pub const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
+/// Section Header entry flag – more headers follow (El Torito §7.2.4 Table 8)
+pub const BOOT_CATALOG_SECTION_HEADER_MORE_ID: u8 = 0x90;
+/// Final Section Header entry flag – last header (El Torito §7.2.4 Table 8)
+pub const BOOT_CATALOG_SECTION_HEADER_FINAL_ID: u8 = 0x91;
 pub const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 pub const ID_FIELD_OFFSET: usize = 4;
 pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
+
+/// Type of boot catalog entry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BootCatalogEntryType {
+    /// Standard boot entry (flag=0x88 or 0x00)
+    BootEntry { bootable: bool },
+    /// Section Header (flag=0x90 = more follow, 0x91 = last header)
+    /// Per El Torito §7.2.4 Table 8.
+    SectionHeader { more_follow: bool },
+}
 
 pub struct BootCatalogEntry {
     pub platform_id: u8,
     pub boot_image_lba: u32,
     pub boot_image_sectors: u16,
-    pub bootable: bool,
+    pub entry_type: BootCatalogEntryType,
 }
 
 /// Writes an El Torito boot catalog.
@@ -29,16 +44,21 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // Validation Entry (32 bytes)
     let mut val = [0u8; 32];
     val[0] = BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID;
-    let first_platform = entries.first().map_or(0u8, |e| e.platform_id);
-    val[1] = first_platform;
-    let id_bytes = if first_platform == BOOT_CATALOG_EFI_PLATFORM_ID {
-        [0u8; 24]
-    } else {
-        let mut bytes = [0u8; 24];
-        let spec = b"EL TORITO SPECIFICATION";
-        bytes[0..spec.len()].copy_from_slice(spec);
-        bytes
-    };
+    // El Torito §6.2.1: Platform ID in the Validation Entry identifies the
+    // target architecture.  0x00 = 80x86 (BIOS/UEFI CSM).
+    // Per the spec, the Validation Entry Platform ID should be 0x00 even for
+    // UEFI-only images — the boot entry system_type field (0xEF) carries the
+    // UEFI platform identification.  Setting Platform ID to 0xEF in the
+    // Validation Entry causes isoinfo to report "Arch 239 (Unknown Arch)"
+    // and may confuse Ventoy/strict firmware.
+    val[1] = 0x00; // platform_id = 0x00 (80x86) per El Torito spec
+    // ID string must always be "EL TORITO SPECIFICATION" per El Torito spec,
+    // regardless of platform ID.  Some real UEFI firmware rejects the boot
+    // catalog when this field is zero-filled.
+    let mut bytes = [0u8; 24];
+    let spec = b"EL TORITO SPECIFICATION";
+    bytes[0..spec.len()].copy_from_slice(spec);
+    let id_bytes = bytes;
     val[ID_FIELD_OFFSET..ID_FIELD_OFFSET + 24].copy_from_slice(&id_bytes);
 
     // No Nsect in Validation Entry (non-standard and corrupts ID string)
@@ -68,24 +88,85 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     catalog[offset..offset + 32].copy_from_slice(&val);
     offset += 32;
 
-    // Boot Entries
-    for entry_data in entries {
-        let mut entry = [0u8; 32];
-        let boot_indicator = if entry_data.bootable {
-            BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
-        } else {
-            0x00u8
-        };
-        entry[0] = boot_indicator;
-        entry[1] = 0x00; // No Emulation
-        entry[2..4].copy_from_slice(&0u16.to_le_bytes()); // Load segment
-        entry[4] = entry_data.platform_id; // System type (0xEF for UEFI)
+    // Pre-compute section entry counts for each SectionHeader.
+    // A SectionHeader (flag=0x91) at position i needs to know how many
+    // non-header entries follow it in the same section (up to the next
+    // SectionHeader or end of list).  Real UEFI firmware (OVMF, InsydeH2O)
+    // uses this value to locate boot entries.
+    let section_counts: Vec<u16> = entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            if matches!(e.entry_type, BootCatalogEntryType::SectionHeader { .. }) {
+                entries[i + 1..]
+                    .iter()
+                    .take_while(|next| {
+                        !matches!(next.entry_type, BootCatalogEntryType::SectionHeader { .. })
+                    })
+                    .count() as u16
+            } else {
+                0
+            }
+        })
+        .collect();
 
-        // Sector count is a u16 at offset 6. An upstream check should ensure this doesn't overflow.
+    // Boot Entries
+    for (idx, entry_data) in entries.iter().enumerate() {
+        let mut entry = [0u8; 32];
+
+        let (flag, media_type) = match entry_data.entry_type {
+            BootCatalogEntryType::BootEntry { bootable } => {
+                let indicator = if bootable {
+                    BOOT_CATALOG_BOOT_ENTRY_HEADER_ID // 0x88
+                } else {
+                    0x00u8
+                };
+                // Always No Emulation (0x00).  Hard Disk Emulation (4) is
+                // non-standard for UEFI and triggers "Boot media 4 (Hard Disk)"
+                // in isoinfo, which real firmware may reject.
+                (indicator, 0x00u8)
+            }
+            BootCatalogEntryType::SectionHeader { more_follow } => {
+                let indicator = if more_follow {
+                    BOOT_CATALOG_SECTION_HEADER_MORE_ID // 0x90
+                } else {
+                    BOOT_CATALOG_SECTION_HEADER_FINAL_ID // 0x91
+                };
+                // Section Header byte 1 carries the platform ID
+                // (El Torito Table 8: "Platform ID").
+                (indicator, entry_data.platform_id)
+            }
+        };
+
+        entry[0] = flag;
+        entry[1] = media_type;
+
+        // Bytes 2–3: Load segment for boot entries; "Number of section entries"
+        // for Section Header entries (El Torito §7.2.4 Table 8).
+        let field_2_3: u16 = match entry_data.entry_type {
+            BootCatalogEntryType::SectionHeader { .. } => section_counts[idx],
+            _ => 0,
+        };
+        entry[2..4].copy_from_slice(&field_2_3.to_le_bytes());
+
+        // System type (byte 4):
+        //   Section Header: always 0x00 (El Torito Table 8)
+        //   Boot Entry: carry the platform_id (e.g. 0xEF for UEFI).
+        //     Without a Section Header, the entry itself must identify the
+        //     target platform so that firmware (OVMF, InsydeH2O) can find it.
+        //     With a Section Header, this field is conventionally 0x00
+        //     (the section header already defines the platform), but
+        //     setting it to the platform_id is harmless and simpler.
+        entry[4] = match entry_data.entry_type {
+            BootCatalogEntryType::SectionHeader { .. } => 0x00,
+            BootCatalogEntryType::BootEntry { .. } => entry_data.platform_id,
+        };
+
+        // Sector count is a u16 at offset 6.
         let sectors = entry_data.boot_image_sectors;
         entry[6..8].copy_from_slice(&sectors.to_le_bytes());
 
-        // Load RBA (LBA in 512-byte sectors) is a u32 at offset 8.
+        // Load RBA is a u32 at offset 8.
         let load_rba = entry_data.boot_image_lba;
         entry[8..12].copy_from_slice(&load_rba.to_le_bytes());
 
@@ -123,7 +204,7 @@ mod tests {
             platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
             boot_image_lba: 100,
             boot_image_sectors: 50,
-            bootable: true,
+            entry_type: BootCatalogEntryType::BootEntry { bootable: true },
         }];
 
         write_boot_catalog(temp_file.as_file_mut(), entries)?;
@@ -135,7 +216,7 @@ mod tests {
         // Verify Validation Entry
         let val_entry: &[u8; 32] = &buffer[0..32].try_into().unwrap();
         assert_eq!(val_entry[0], BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID);
-        assert_eq!(val_entry[1], BOOT_CATALOG_EFI_PLATFORM_ID);
+        assert_eq!(val_entry[1], 0x00); // Platform ID must be 0x00 (80x86) per El Torito spec
         assert_eq!(
             &val_entry[30..32],
             &BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes()
@@ -159,7 +240,7 @@ mod tests {
             platform_id: 0, // BIOS
             boot_image_lba: 200,
             boot_image_sectors: 20,
-            bootable: false,
+            entry_type: BootCatalogEntryType::BootEntry { bootable: false },
         }];
 
         write_boot_catalog(temp_file.as_file_mut(), entries)?;

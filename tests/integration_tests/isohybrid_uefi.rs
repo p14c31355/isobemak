@@ -4,11 +4,11 @@ use std::{
 };
 
 use fatfs::{FileSystem, FsOptions};
-use isobemak::{BootInfo, IsoImage, IsoImageFile, UefiBootInfo, build_iso};
+use isobemak::{BootInfo, IsoImage, IsoImageFile, IsoLayoutProfile, UefiBootInfo, build_iso};
 use tempfile::tempdir;
 
 use crate::integration_tests::common::{
-    run_command, setup_integration_test_files, verify_iso_binary_structures,
+    run_command, setup_integration_test_files, verify_gpt_and_mbr_chs, verify_iso_binary_structures,
 };
 
 fn verify_fat_image_has_file(fat_img_path: &std::path::Path, fat_path: &str) -> io::Result<()> {
@@ -57,15 +57,20 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
-    // Call the main function with is_isohybrid set to true
-    let (fat_image_path, _temp_fat_file_holder, _iso_file, logical_fat_size_512_sectors) =
-        build_iso(&iso_path, &iso_image, true)?;
+    // Call the main function with is_isohybrid set to true.
+    // Scope the returned handles so they are dropped before we open the ISO
+    // read-only — this guarantees OS-level flush of all buffered writes
+    // (especially the GPT structures) before verification.
+    {
+        // Drop returned handles before verification so the OS flushes
+        // GPT/MBR structures written via write_hybrid_structures.
+        let (_fat_image_path, _temp_fat, _iso_file, _logical_size) =
+            build_iso(&iso_path, &iso_image, true)?;
+    }
     assert!(iso_path.exists());
-    assert!(fat_image_path.exists());
-    // _iso_file is kept in scope to ensure the ISO file remains open for verification
-    // _temp_fat_file_holder is kept in scope to prevent the temporary file from being deleted
 
     // Verify ISO content using isoinfo -d
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
@@ -81,47 +86,142 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
     iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
 
-    // Verify Validation Entry's platform ID
+    // Platform ID 0x00 (80x86) in the Validation Entry is the standard
+    // per El Torito spec §6.2.1.  The boot entry system_type=0xEF carries
+    // the UEFI platform identification.
     assert_eq!(
-        boot_catalog_sector[1],
-        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
-        "Validation entry platform ID is not EFI"
+        boot_catalog_sector[1], 0x00,
+        "Validation entry platform ID must be 0x00 (80x86) per El Torito spec"
     );
 
-    // Verify the first Boot Entry (which should be the UEFI one in this test case)
-    let boot_entry_offset = 32; // After the 32-byte validation entry
-    let boot_entry_bytes = &boot_catalog_sector[boot_entry_offset..boot_entry_offset + 32];
-
-    let uefi_boot_indicator = boot_entry_bytes[0];
-    let uefi_boot_sectors = u16::from_le_bytes(boot_entry_bytes[6..8].try_into().unwrap());
-    let uefi_boot_lba = u32::from_le_bytes(boot_entry_bytes[8..12].try_into().unwrap());
+    // Ubuntu/xorriso-compatible multi-entry UEFI boot catalog:
+    //
+    //   Validation Entry    (offset 0,  32 bytes): header_id=1, platform=0x00
+    //   Boot Entry 0        (offset 32, 32 bytes): flag=0x88, NoEmul, system_type=0xEF, LBA→ESP
+    //   Section Header      (offset 64, 32 bytes): flag=0x91, platform=0xEF, entries=1
+    //   Section Boot Entry  (offset 96, 32 bytes): flag=0x88, NoEmul, system_type=0x00, LBA→ESP
+    //
+    // This is the xorriso/Ubuntu El Torito UEFI layout.  Real UEFI firmware
+    // (InsydeH2O, old AMI, Lenovo, Panasonic) requires the Section Header
+    // with Platform ID 0xEF to discover the UEFI boot entry.
+    //
+    // --- Boot Entry 0 (Initial/Default, offset 32) ---
+    let boot0_offset = 32;
+    let boot0_bytes = &boot_catalog_sector[boot0_offset..boot0_offset + 32];
+    let boot0_indicator = boot0_bytes[0];
+    let boot0_media = boot0_bytes[1];
+    let boot0_sys = boot0_bytes[4];
+    let boot0_lba = u32::from_le_bytes(boot0_bytes[8..12].try_into().unwrap());
+    let boot0_sectors = u16::from_le_bytes(boot0_bytes[6..8].try_into().unwrap());
 
     assert_eq!(
-        uefi_boot_indicator,
+        boot0_indicator,
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
-        "UEFI boot entry is not marked bootable"
+        "Boot Entry 0 must be bootable (0x88), got {:#x}",
+        boot0_indicator
     );
-    // El Torito boot catalog on CD-ROM media uses 2048-byte ISO sector LBA values.
     assert_eq!(
-        uefi_boot_lba,
-        isobemak::ESP_START_LBA,
-        "UEFI boot LBA in boot catalog is incorrect"
+        boot0_media, 0x00,
+        "Boot Entry 0 must use No Emulation (0x00), got {:#x}",
+        boot0_media
+    );
+    assert_eq!(
+        boot0_sys,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
+        "Boot Entry 0 system_type must be 0xEF for UEFI, got {:#x}",
+        boot0_sys
+    );
+    // efiboot.img is a large file (~260 MiB FAT32 minimum) placed after
+    // regular files in the ISO filesystem (alphabetical sort order).
+    // Its LBA depends on the file layout and is expected to be > 20
+    // but may be large due to the FAT32 minimum size constraint.
+    assert!(
+        boot0_lba > 19,
+        "Boot Entry 0 Load RBA ({}) should be after volume descriptors (>=20), got {}",
+        boot0_lba,
+        boot0_lba
+    );
+    assert_eq!(
+        boot0_sectors, 0,
+        "Boot Entry 0 no-emulation sector_count must be 0, got {}",
+        boot0_sectors
     );
 
-    // The expected number of sectors in the boot catalog is the logical FAT size in 512-byte sectors,
-    // rounded up to the nearest multiple of 4 (to match the ISO sector alignment of the ESP).
-    let expected_esp_sectors = logical_fat_size_512_sectors.unwrap().div_ceil(4) * 4;
+    // --- Section Header (offset 64) ---
+    let sec_offset = 64;
+    let sec_bytes = &boot_catalog_sector[sec_offset..sec_offset + 32];
+    let sec_flag = sec_bytes[0];
+    let sec_platform = sec_bytes[1];
+    let sec_count = u16::from_le_bytes(sec_bytes[2..4].try_into().unwrap());
+    let sec_sys = sec_bytes[4];
 
     assert_eq!(
-        uefi_boot_sectors, expected_esp_sectors as u16,
-        "UEFI boot sectors in boot catalog is incorrect"
+        sec_flag,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_SECTION_HEADER_FINAL_ID,
+        "Section Header must be final (0x91), got {:#x}",
+        sec_flag
     );
+    assert_eq!(
+        sec_platform,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
+        "Section Header platform must be 0xEF, got {:#x}",
+        sec_platform
+    );
+    assert_eq!(
+        sec_count, 1,
+        "Section Header entries must be 1, got {}",
+        sec_count
+    );
+    assert_eq!(
+        sec_sys, 0x00,
+        "Section Header system_type must be 0x00, got {:#x}",
+        sec_sys
+    );
+
+    // --- Section Boot Entry (offset 96) ---
+    let sentry_offset = 96;
+    let sentry_bytes = &boot_catalog_sector[sentry_offset..sentry_offset + 32];
+    let sentry_indicator = sentry_bytes[0];
+    let sentry_media = sentry_bytes[1];
+    let sentry_sys = sentry_bytes[4];
+    let sentry_lba = u32::from_le_bytes(sentry_bytes[8..12].try_into().unwrap());
+    let sentry_sectors = u16::from_le_bytes(sentry_bytes[6..8].try_into().unwrap());
+
+    assert_eq!(
+        sentry_indicator,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
+        "Section Boot Entry must be bootable (0x88), got {:#x}",
+        sentry_indicator
+    );
+    assert_eq!(
+        sentry_media, 0x00,
+        "Section Boot Entry must use No Emulation (0x00), got {:#x}",
+        sentry_media
+    );
+    // Under Section Header, system_type is conventionally 0x00
+    // (the section header's platform_id already identifies the target as EFI).
+    // OVMF and real firmware look at the Section Header platform, not this field.
+    assert_eq!(
+        sentry_sectors, 0,
+        "Section Boot Entry no-emulation sector_count must be 0, got {}",
+        sentry_sectors
+    );
+    assert_eq!(
+        sentry_lba, boot0_lba,
+        "Section Boot Entry LBA must match Boot Entry 0 LBA (both point to ESP)"
+    );
+
     println!(
-        "Verified UEFI boot entry: LBA={} (expected: {}), Sectors={} (expected: {})",
-        uefi_boot_lba,
-        isobemak::ESP_START_LBA * 4,
-        uefi_boot_sectors,
-        expected_esp_sectors
+        "Verified multi-entry UEFI catalog:\n  Boot Entry 0: flag=0x88, sys_type=0xEF, LBA={}, Sectors=0\n  Section Header: flag=0x91, platform=0xEF, entries=1\n  Section Boot Entry: flag=0x88, sys_type=0x{:02x}, LBA={}, Sectors=0",
+        boot0_lba, sentry_sys, sentry_lba
+    );
+
+    // Verify Section Header is followed by exactly one boot entry
+    let rest_start = sentry_offset + 32;
+    let rest = &boot_catalog_sector[rest_start..rest_start + 32];
+    assert!(
+        rest.iter().all(|&b| b == 0),
+        "Bytes after Section Boot Entry must be zero"
     );
 
     // Verify ISO content using isoinfo -l
@@ -147,6 +247,12 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
 
     // Perform deeper binary verification of ISO structures
     verify_iso_binary_structures(&mut iso_file)?;
+
+    // Verify GPT structures (CRC, ESP attributes) and MBR CHS fields —
+    // these are the structures real UEFI firmware uses, and bugs here
+    // cause "No bootfile found for UEFI!" on hardware.
+    iso_file.seek(SeekFrom::Start(0))?;
+    verify_gpt_and_mbr_chs(&mut iso_file)?;
 
     Ok(())
 }
@@ -185,6 +291,7 @@ fn test_create_isohybrid_with_additional_efi_files() -> io::Result<()> {
                 grub_cfg_content: None,
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;
@@ -251,6 +358,7 @@ menuentry "Kernel" {
                 grub_cfg_content: Some(grub_config.to_string()),
             }),
         },
+        layout_profile: IsoLayoutProfile::default(),
     };
 
     let (_iso_path_buf, temp_holder, _iso_file, _) = build_iso(&iso_path, &iso_image, true)?;
