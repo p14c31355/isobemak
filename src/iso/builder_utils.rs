@@ -153,6 +153,16 @@ pub fn create_uefi_boot_entry(root: &IsoDirectory, path: &str) -> io::Result<Boo
     ))
 }
 
-pub fn create_uefi_esp_boot_entry(esp_lba: u32, _esp_size: u32) -> io::Result<BootCatalogEntry> {
-    Ok(mk_boot_entry(BOOT_CATALOG_EFI_PLATFORM_ID, esp_lba, 0))
+pub fn create_uefi_esp_boot_entry(esp_lba: u32, esp_size: u32) -> io::Result<BootCatalogEntry> {
+    let sectors_512: u64 = esp_size as u64 * 4;
+    let sectors: u16 = if sectors_512 > u16::MAX as u64 {
+        0
+    } else {
+        sectors_512 as u16
+    };
+    Ok(mk_boot_entry(
+        BOOT_CATALOG_EFI_PLATFORM_ID,
+        esp_lba,
+        sectors,
+    ))
 }
