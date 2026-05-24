@@ -58,7 +58,7 @@ fn write_fat32_bpb(
     let mut bpb = [0u8; 90];
 
     bpb[0..3].copy_from_slice(&[0xEB, 0x58, 0x90]);
-    bpb[3..11].copy_from_slice(b"isobemak");
+    bpb[3..11].copy_from_slice(b"MSWIN4.1");
     bpb[11..13].copy_from_slice(&512u16.to_le_bytes());
 
     bpb[13] = SEC_PER_CLUS as u8;
@@ -80,9 +80,9 @@ fn write_fat32_bpb(
 
     bpb[64] = 0x80;   // drive number
     bpb[66] = 0x29;   // extended boot signature
-    let serial = 0x12345678u32;
+    let serial: u32 = rand::random();
     bpb[67..71].copy_from_slice(&serial.to_le_bytes());
-    bpb[71..82].copy_from_slice(b"NO NAME    ");
+    bpb[71..82].copy_from_slice(b"EFI        ");
     bpb[82..90].copy_from_slice(b"FAT32   ");
 
     // Write BPB fields (bytes 0-89) at current position
@@ -135,6 +135,54 @@ fn init_fat_tables(file: &mut fs::File, fat_sectors: u64) -> io::Result<()> {
     file.read_exact(&mut fat0)?;
     file.seek(SeekFrom::Start((fat_start + fat_sectors) * SECTOR_SIZE))?;
     file.write_all(&fat0)?;
+    Ok(())
+}
+
+/// After fatfs has written all files, scan the actual FAT to determine the
+/// real free-cluster count and update both FSInfo sector 1 and backup FSInfo
+/// sector 7.  UEFI firmware (including Ventoy) often validates FSInfo
+/// rigorously; a stale free-count from before file creation causes rejection.
+fn update_fsinfo_after_write(fat_img_path: &Path, fat_sectors: u64) -> io::Result<()> {
+    let mut file = OpenOptions::new().read(true).write(true).open(fat_img_path)?;
+    let mut fat = vec![0u8; fat_sectors as usize * 512];
+    file.seek(SeekFrom::Start(RESERVED_SECTORS * SECTOR_SIZE))?;
+    file.read_exact(&mut fat)?;
+
+    let total_entries = fat.len() / 4;
+    let mut used = 0u64;
+    for i in 2..total_entries {
+        let v = u32::from_le_bytes([fat[i * 4], fat[i * 4 + 1], fat[i * 4 + 2], fat[i * 4 + 3]]);
+        if v != 0x0000_0000 {
+            used += 1;
+        }
+    }
+    let total_clusters = (total_entries - 2) as u64;
+    let free_count = total_clusters.saturating_sub(used);
+
+    // Find next free cluster
+    let mut next_free = 2u32;
+    for i in 2..total_entries {
+        let v = u32::from_le_bytes([fat[i * 4], fat[i * 4 + 1], fat[i * 4 + 2], fat[i * 4 + 3]]);
+        if v == 0x0000_0000 {
+            next_free = i as u32;
+            break;
+        }
+    }
+
+    // Write FSInfo sector 1
+    let mut sector = [0u8; 512];
+    sector[0..4].copy_from_slice(&0x41615252u32.to_le_bytes());
+    sector[484..488].copy_from_slice(&0x61417272u32.to_le_bytes());
+    sector[488..492].copy_from_slice(&(free_count as u32).to_le_bytes());
+    sector[492..496].copy_from_slice(&next_free.to_le_bytes());
+    sector[508..512].copy_from_slice(&0xAA550000u32.to_le_bytes());
+    file.seek(SeekFrom::Start(1 * SECTOR_SIZE))?;
+    file.write_all(&sector)?;
+
+    // Write backup FSInfo sector 7
+    file.seek(SeekFrom::Start(7 * SECTOR_SIZE))?;
+    file.write_all(&sector)?;
+
     Ok(())
 }
 
@@ -205,14 +253,24 @@ pub fn create_fat_image(
     init_fat_tables(&mut file, fat_sectors as u64)?;
 
     // ── Use fatfs for directory / file population ──
-    file.seek(SeekFrom::Start(0))?;
-    let fs = FileSystem::new(file, FsOptions::new())?;
-    let root_dir = fs.root_dir();
-    let efi_dir = root_dir.create_dir("EFI")?;
-    let boot_dir = efi_dir.create_dir("BOOT")?;
-    for (dest_name, source_path) in files {
-        copy_to_fat(&boot_dir, source_path, dest_name)?;
+    {
+        file.seek(SeekFrom::Start(0))?;
+        let fs = FileSystem::new(file, FsOptions::new())?;
+        let root_dir = fs.root_dir();
+        let efi_dir = root_dir.create_dir("EFI")?;
+        let boot_dir = efi_dir.create_dir("BOOT")?;
+        for (dest_name, source_path) in files {
+            copy_to_fat(&boot_dir, source_path, dest_name)?;
+        }
+        // fs and all borrowed handles go out of scope here, commits + closes
     }
+
+    // fatfs writes are now committed; the file handle was moved into
+    // FileSystem and dropped at the end of the scope above.  Re-open and
+    // update FSInfo with the *actual* free-cluster count (the earlier
+    // write_fat32_fsinfo call happened before any files existed, so its
+    // free-count was stale — UEFI firmware/Ventoy may reject the volume).
+    update_fsinfo_after_write(fat_img_path, fat_sectors as u64)?;
 
     Ok((total_size / SECTOR_SIZE) as u32)
 }
