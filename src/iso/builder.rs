@@ -280,18 +280,13 @@ impl IsoBuilder {
             // This matches Ubuntu's GPT layout where the ISO9660 partition
             // is the first GPT entry.
             let iso9660_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
-            let iso9660_uuid = "94BC9F38-B638-4D1A-8964-87488DB3D5A5";
-            // ISO9660 partition starts at the first usable LBA (34) and extends
-            // to last_usable_lba (total_512_sectors - 34), matching Ubuntu/xorriso
-            // convention.  This ensures parser compatibility with tools (Ventoy,
-            // xorriso libisofs) that expect the ISO partition to cover the full
-            // usable GPT range rather than ending at the raw ISO data boundary.
+            let iso9660_uuid = uuid::Uuid::new_v4().to_string();
             let iso_start: u64 = 34;
             let iso_end: u64 = total_512_sectors.saturating_sub(34);
             if iso_end > iso_start {
                 let iso_partition = GptPartitionEntry::new(
                     iso9660_guid,
-                    iso9660_uuid,
+                    &iso9660_uuid,
                     iso_start,
                     iso_end,
                     "ISO9660",
@@ -304,11 +299,11 @@ impl IsoBuilder {
             if let (Some(start_512), Some(size_512)) = (esp_start_512, esp_size_512) {
                 let esp_end_512 = start_512.saturating_add(size_512).saturating_sub(1);
                 if esp_end_512 > start_512 {
-                    let uuid_str = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
+                    let esp_uuid = uuid::Uuid::new_v4().to_string();
                     let esp_attributes: u64 = 1; // bit 0: System Partition
                     let esp_partition = GptPartitionEntry::new(
                         EFI_SYSTEM_PARTITION_GUID,
-                        uuid_str,
+                        &esp_uuid,
                         start_512 as u64,
                         esp_end_512 as u64,
                         "EFI System Partition",

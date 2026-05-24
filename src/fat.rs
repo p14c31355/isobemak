@@ -46,11 +46,11 @@ pub fn create_fat_image(
         ));
     }
 
-    // Add overhead and enforce a minimum size.
-    // Keep well under 32768 512-byte sectors to avoid Nsect exceeding i16::MAX
-    // (the boot catalog stores sector count as u16, but some UEFI firmware treats it as signed).
-    const MIN_FAT_SIZE: u64 = 8 * 1024 * 1024; // 8MB = 16384 sectors. Enough for UEFI boot files.
-    const FAT_OVERHEAD: u64 = 2 * 1024 * 1024; // 2MB. Overhead for filesystem structures.
+    // FAT32 is required for maximum Ventoy/UEFI firmware compatibility.
+    // FAT12/16 ESPs are rejected by some firmware implementations.
+    // Minimum 32 MiB ensures enough clusters for FAT32 structure.
+    const MIN_FAT_SIZE: u64 = 32 * 1024 * 1024; // 32 MiB — FAT32 minimum for Ventoy/UEFI compat
+    const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;   // 2 MiB overhead for filesystem structures
     const SECTOR_SIZE: u64 = 512;
 
     // Calculate the logical size based on content + overhead, rounded up to sector size.
@@ -60,15 +60,9 @@ pub fn create_fat_image(
         logical_size = SECTOR_SIZE;
     }
 
-    // The actual total size of the FAT image file, ensuring it meets minimum requirements for FAT16.
+    // Enforce minimum size and force FAT32 unconditionally.
     let total_size = std::cmp::max(logical_size, MIN_FAT_SIZE);
-
-    // Determine FAT type based on total_size
-    let fat_type = if total_size <= 268_435_456 {
-        FatType::Fat16
-    } else {
-        FatType::Fat32
-    };
+    let fat_type = FatType::Fat32;
 
     // Create the file, set length, and zero-fill.
     // `set_len` on some filesystems creates a sparse file with stale disk data,
