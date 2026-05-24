@@ -21,6 +21,7 @@ use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
+use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
 use crate::iso::gpt::partition_entry::GptPartitionEntry;
 use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
@@ -415,6 +416,22 @@ impl IsoBuilder {
         // Now that total_sectors is known, write MBR and GPT structures if hybrid
         if self.is_isohybrid {
             self.write_hybrid_structures(iso_file, self.total_sectors as u64, esp_size_sectors)?;
+
+            // write_hybrid_structures appended backup GPT (33 sectors) to the end
+            // of the file, so the file is now larger than when finalize_iso wrote
+            // the PVD Volume Space Size.  Re-read the actual file size and update
+            // the PVD so that Ventoy and other tools see correct ISO9660 metadata.
+            let final_size = iso_file.seek(SeekFrom::End(0))?;
+            let final_total_sectors_u64 = final_size.div_ceil(ISO_SECTOR_SIZE as u64);
+            let final_total_sectors = u32::try_from(final_total_sectors_u64)
+                .map_err(|_| {
+                    io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "ISO image too large after appending GPT backup structures",
+                    )
+                })?;
+            update_total_sectors_in_pvd(iso_file, final_total_sectors)?;
+            self.total_sectors = final_total_sectors;
         }
 
         Ok(())

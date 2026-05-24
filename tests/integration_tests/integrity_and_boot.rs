@@ -1,12 +1,21 @@
 use std::{
     fs::File,
-    io::{self, Read},
+    io::{self, Read, Seek, SeekFrom},
 };
 
 use isobemak::build_iso;
 use tempfile::tempdir;
 
 use crate::integration_tests::common::run_command;
+
+/// Read PVD Volume Space Size (offset 80, 4 bytes LE + 4 bytes BE) from LBA 16.
+fn read_pvd_volume_space_size(file: &mut File) -> io::Result<u32> {
+    let lba16_offset = 16 * 2048;
+    file.seek(SeekFrom::Start(lba16_offset + 80))?;
+    let mut le_bytes = [0u8; 4];
+    file.read_exact(&mut le_bytes)?;
+    Ok(u32::from_le_bytes(le_bytes))
+}
 
 #[test]
 fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
@@ -152,5 +161,69 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     assert_eq!(entry1_type, 0xEF, "MBR entry 1 should be type 0xEF (ESP)");
     println!("MBR entry 1: type=0x{:02X}, start={}", entry1_type, entry1_start);
 
+    Ok(())
+}
+
+/// Verify ISO9660 PVD Volume Space Size matches the actual file size.
+///
+/// When building an isohybrid ISO, backup GPT structures (33 sectors)
+/// are appended after the initial ISO data.  If the PVD Volume Space Size
+/// is not updated after this append, Ventoy and other tools will report
+/// the ISO as broken because the ISO9660 metadata says the file is smaller
+/// than it actually is.
+///
+/// This test directly catches the regression where finalize_iso writes
+/// the PVD before write_hybrid_structures extends the file.
+#[test]
+fn test_iso9660_volume_space_size_matches_file_size() -> io::Result<()> {
+    let temp_dir = tempdir()?;
+    let temp_dir_path = temp_dir.path();
+
+    let bootx64_path = temp_dir_path.join("bootx64.efi");
+    std::fs::write(&bootx64_path, vec![0u8; 64 * 1024])?;
+
+    let kernel_path = temp_dir_path.join("kernel.elf");
+    std::fs::write(&kernel_path, vec![0u8; 16 * 1024])?;
+
+    let iso_path = temp_dir_path.join("volume_size_test.iso");
+
+    let iso_image = isobemak::IsoImage {
+        volume_id: None,
+        files: vec![],
+        boot_info: isobemak::BootInfo {
+            bios_boot: None,
+            uefi_boot: Some(isobemak::UefiBootInfo {
+                boot_image: bootx64_path.clone(),
+                kernel_image: kernel_path.clone(),
+                destination_in_iso: "EFI/BOOT/BOOTX64.EFI".to_string(),
+                additional_efi_boot_files: Vec::new(),
+                grub_cfg_content: None,
+            }),
+        },
+        layout_profile: isobemak::IsoLayoutProfile::default(),
+    };
+
+    build_iso(&iso_path, &iso_image, true)?;
+
+    // Read PVD Volume Space Size (in 2048-byte sectors)
+    let mut iso_file = File::open(&iso_path)?;
+    let pvd_total_sectors = read_pvd_volume_space_size(&mut iso_file)?;
+
+    // Actual file size in 2048-byte sectors (ceiling division)
+    let actual_size = iso_file.metadata()?.len();
+    let actual_sectors = u32::try_from(actual_size.div_ceil(2048)).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "ISO too large for u32 sectors",
+        )
+    })?;
+
+    assert_eq!(
+        pvd_total_sectors, actual_sectors,
+        "PVD Volume Space Size ({pvd_total_sectors} sectors) must match actual file size
+         ({actual_size} bytes = {actual_sectors} sectors).  The difference is {} bytes ({} GPT sectors).",
+        actual_size.saturating_sub(pvd_total_sectors as u64 * 2048),
+        actual_size.saturating_sub(pvd_total_sectors as u64 * 2048) / 512,
+    );
     Ok(())
 }
