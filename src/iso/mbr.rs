@@ -169,7 +169,7 @@ pub fn create_mbr_for_gpt_hybrid(
         if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba) {
             if size > 0 {
                 let esp_start = start;
-                let esp_size = (size as u64).min(0xFFFF_FFFF) as u32;
+                let esp_size = size;
                 mbr.partition_table[1].bootable = 0x00;
                 mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
                 mbr.partition_table[1].starting_lba = esp_start;
