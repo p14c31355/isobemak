@@ -24,6 +24,7 @@ use crate::iso::iso_writer::{
 use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
 use crate::iso::gpt::partition_entry::GptPartitionEntry;
 use crate::iso::gpt::partition_entry::EFI_SYSTEM_PARTITION_GUID;
+use crate::iso::constants::BACKUP_GPT_RESERVED_512;
 use crate::iso::mbr::create_mbr_for_gpt_hybrid;
 
 /// The main builder for creating an ISO 9660 image.
@@ -144,22 +145,28 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // Hybrid path (ESP present): xorriso-compatible 3-entry pattern
-        //   Entry 0: Boot Entry (0x88, NoEmul) → direct EFI binary in ISO9660
-        //            (for QEMU/OVMF CD-ROM emulation)
+        // Hybrid path (ESP present): xorriso-compatible 3-entry pattern:
+        //   Entry 0: Initial/Default (0x90, media=HDD, platform=0xEF)
         //   Entry 1: Section Header (0x91, platform=0xEF)
-        //   Entry 2: Boot Entry (0x88) → ESP FAT image (for USB hardware)
+        //   Entry 2: Boot Entry (0x88) → ESP FAT image
+        //
+        // The Initial/Default entry is required by isoinfo and some
+        // firmware (OVMF, InsydeH2O) to identify the catalog as valid.
+        // Without it, isoinfo reports "Bootid 0 (not bootable)" and
+        // the DefaultBoot entry shows the first 0x88 entry instead.
         if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
             && size > 0
         {
-            // Entry 0: Direct EFI binary boot entry for QEMU/CD-ROM emulation.
-            // Points to BOOTX64.EFI inside the ISO9660 filesystem, matching
-            // Ubuntu/xorriso layout.  Real UEFI firmware ignores El Torito
-            // entirely and boots via MBR→GPT→ESP, so this entry only matters
-            // for QEMU/OVMF.
-            if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-                entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
-            }
+            // Entry 0: Initial/Default (flag=0x90, media=HDD, sys=0xEF).
+            // Marks the catalog as a valid El Torito HDD boot catalog.
+            // The platform_id in the Initial/Default indicates the default
+            // platform (0xEF for UEFI).
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID, // 0xEF
+                boot_image_lba: 0,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::InitialDefault,
+            });
 
             // Entry 1: Section Header for UEFI platform
             entries.push(BootCatalogEntry {
@@ -170,6 +177,7 @@ impl IsoBuilder {
             });
 
             // Entry 2: Boot entry pointing to the ESP FAT image
+            // This is the actual bootable entry that QEMU/OVMF uses.
             entries.push(create_uefi_esp_boot_entry(lba, size)?);
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
             // Non-hybrid path (CD-ROM / QEMU only): direct EFI binary entry.
@@ -193,6 +201,10 @@ impl IsoBuilder {
     /// The [DiskLayout] model treats the ESP as a real disk partition,
     /// producing the xorriso-style layout that boots on real hardware
     /// (NEC, Insyde, old AMI, Lenovo, Panasonic). See [DiskLayout] docs.
+    ///
+    /// The total disk size passed to GPT includes `BACKUP_GPT_RESERVED_512`
+    /// extra sectors so that backup GPT structures (header + partition array)
+    /// fit at the end of the disk without overlapping ISO 9660 data.
     fn write_hybrid_structures(
         &self,
         iso_file: &mut File,
@@ -200,7 +212,7 @@ impl IsoBuilder {
         esp_size_sectors: Option<u32>,
     ) -> io::Result<()> {
         // total_lbas is in 2048-byte ISO sectors → convert to 512-byte sectors
-        let total_512_sectors = total_lbas
+        let raw_512_sectors = total_lbas
             .checked_mul(4)
             .ok_or_else(|| {
                 io::Error::new(
@@ -209,6 +221,17 @@ impl IsoBuilder {
                         "ISO image too large: total_lbas * 4 overflows u64 ({} * 4)",
                         total_lbas
                     ),
+                )
+            })?;
+
+        // Add backup GPT reservation (33 sectors: 1 header + 32 partition entries)
+        // so that GPT structures don't overlap ISO 9660 data.
+        let total_512_sectors = raw_512_sectors
+            .checked_add(BACKUP_GPT_RESERVED_512)
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "ISO image + GPT backup too large",
                 )
             })?;
 
@@ -225,8 +248,6 @@ impl IsoBuilder {
         };
 
         // Determine ESP start/size in 512-byte sectors.
-        // Prefer DiskLayout when available (it models the ESP as a real
-        // partition), falling back to profile-driven calculation.
         let (esp_start_512, esp_size_512) = if let Some(ref layout) = self.disk_layout {
             if let Some(esp) = layout.esp_partition() {
                 (Some(esp.start_lba_512 as u32), Some(esp.size_lba_512 as u32))
@@ -254,15 +275,35 @@ impl IsoBuilder {
 
         // --- GPT (profile-controlled, uses DiskLayout when available) ---
         if self.profile.use_gpt {
+            let mut gpt_partitions: Vec<GptPartitionEntry> = Vec::new();
+
+            // GPT partition 1: ISO 9660 data (type 0x0700 = "ISO9660" per Ubuntu/xorriso).
+            // Covers the ISO 9660 data region including ESP in the middle.
+            // This matches Ubuntu's GPT layout where the ISO9660 partition
+            // is the first GPT entry.
+            let iso9660_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
+            let iso9660_uuid = "94BC9F38-B638-4D1A-8964-87488DB3D5A5";
+            // ISO9660 partition starts at the first usable LBA (34) and covers
+            // up to the end of raw ISO data.
+            let iso_start: u64 = 34;
+            let iso_end: u64 = raw_512_sectors.saturating_sub(1);
+            if iso_end > iso_start {
+                let iso_partition = GptPartitionEntry::new(
+                    iso9660_guid,
+                    iso9660_uuid,
+                    iso_start,
+                    iso_end,
+                    "ISO9660",
+                    0,
+                );
+                gpt_partitions.push(iso_partition);
+            }
+
+            // GPT partition 2: EFI System Partition
             if let (Some(start_512), Some(size_512)) = (esp_start_512, esp_size_512) {
                 let esp_end_512 = start_512.saturating_add(size_512).saturating_sub(1);
                 if esp_end_512 > start_512 {
                     let uuid_str = "A2A0D0D0-039B-42A0-BA42-A0D0D0D0D0A0";
-                    // GPT attribute bit 0 (System Partition) MUST be set for ESP
-                    // per UEFI specification §5.3.3.  Firmware such as InsydeH2O and
-                    // older AMI rejects the partition as a valid ESP when this bit
-                    // is missing, resulting in "No bootfile found for UEFI!" on
-                    // real hardware even though QEMU/OVMF accepts it.
                     let esp_attributes: u64 = 1; // bit 0: System Partition
                     let esp_partition = GptPartitionEntry::new(
                         EFI_SYSTEM_PARTITION_GUID,
@@ -272,8 +313,30 @@ impl IsoBuilder {
                         "EFI System Partition",
                         esp_attributes,
                     );
-                    write_gpt_structures(iso_file, total_512_sectors, &[esp_partition])?;
+                    gpt_partitions.push(esp_partition);
+
+                    // GPT partition 3: Gap1 (padding between IS09660 and backup GPT).
+                    // This matches Ubuntu/xorriso layout for GPT structural integrity.
+                    let gap_end = total_512_sectors.saturating_sub(1).saturating_sub(BACKUP_GPT_RESERVED_512);
+                    let gap_start = raw_512_sectors; // starts right after raw ISO data
+                    let gap_guid = "EBD0A0A2-B9E5-4433-87C0-68B6B72699C7";
+                    let gap_uuid = "94BC9F38-B638-4D1A-8966-87488DB3D5A5";
+                    if gap_end > gap_start {
+                        let gap_partition = GptPartitionEntry::new(
+                            gap_guid,
+                            gap_uuid,
+                            gap_start,
+                            gap_end,
+                            "Gap1",
+                            0,
+                        );
+                        gpt_partitions.push(gap_partition);
+                    }
                 }
+            }
+
+            if !gpt_partitions.is_empty() {
+                write_gpt_structures(iso_file, total_512_sectors, &gpt_partitions)?;
             }
         }
 

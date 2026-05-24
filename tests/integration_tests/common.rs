@@ -101,26 +101,25 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     let mbr_sig = u16::from_le_bytes([mbr[510], mbr[511]]);
     assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
 
-    // --- Entry 0 (offset 0x1BE): type 0x83 (Linux native), LBA 0 ---
-    // xorriso-compatible MBR puts type 0x83 (Linux native) covering the whole disk
-    // from LBA 0.  This provides a fallback ESP discovery path for firmware
-    // (NEC/Insyde/old AMI) that cannot parse GPT when type 0xEE is present.
+    // --- Entry 0 (offset 0x1BE): type 0xEE (GPT Protective), LBA 1 ---
+    // Per UEFI spec §5.2.3, the protective MBR must have type 0xEE covering
+    // the entire disk from LBA 1.  This tells firmware the disk uses GPT.
     let e0_type = mbr[0x1BE + 4];
     let e0_start = u32::from_le_bytes(mbr[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(e0_type, 0x83, "MBR entry 0 must be type 0x83 (Linux native, xorriso-compatible)");
-    assert_eq!(e0_start, 0, "MBR entry 0 must start at LBA 0 (whole-disk)");
+    assert_eq!(e0_type, 0xEE, "MBR entry 0 must be type 0xEE (GPT Protective, UEFI spec)");
+    assert_eq!(e0_start, 1, "MBR entry 0 must start at LBA 1 (LBA 0 is MBR itself)");
 
     // Verify CHS fields for entry 0 are populated.
-    // LBA=0 is below CHS-addressable minimum (sector >= 1), so CHS is saturated to max.
+    // LBA=1: with H=64, SPT=32 → cylinder=0, head=0, sector=2
     let e0_chs_start = &mbr[0x1BE + 1..0x1BE + 4];
     assert_ne!(
         e0_chs_start, &[0, 0, 0],
         "MBR entry 0 starting CHS must not be zero"
     );
-    // LBA=0 → saturated CHS: head=255, sector=63|cyl_hi=3, cyl_lo=255
-    assert_eq!(e0_chs_start[0], 0xFF, "MBR entry 0 start head must be 255 (LBA=0 saturated)");
-    assert_eq!(e0_chs_start[1], 0xFF, "MBR entry 0 start sector/cyl_hi must be 0xFF");
-    assert_eq!(e0_chs_start[2], 0xFF, "MBR entry 0 start cyl_lo must be 0xFF");
+    // LBA=1 with H=64, SPT=32: C=0, H=0, S=2
+    assert_eq!(e0_chs_start[0], 0x00, "MBR entry 0 start head must be 0 (LBA=1)");
+    assert_eq!(e0_chs_start[1], 0x02, "MBR entry 0 start sector must be 2 (LBA=1)");
+    assert_eq!(e0_chs_start[2], 0x00, "MBR entry 0 start cylinder lo must be 0 (LBA=1)");
 
     let e0_chs_end = &mbr[0x1BE + 5..0x1BE + 8];
     assert_ne!(
@@ -194,27 +193,47 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     // partition entry content instead (the fields that real firmware
     // inspects when deciding whether to treat this as a valid ESP).
 
-    // ── Verify ESP partition entry (entry 0) content ──
-    // Partition entry format (128 bytes):
+    // ── Verify GPT partition entry layout ──
+    // Partition entry format (128 bytes each):
     //   offset 0:  type GUID (16 bytes)
     //   offset 16: unique GUID (16 bytes)
     //   offset 32: starting LBA (u64 LE)
     //   offset 40: ending LBA (u64 LE)
     //   offset 48: attributes (u64 LE)
     //   offset 56: partition name (36 UTF-16LE code units = 72 bytes)
+    //
+    // GPT layout (3 entries, matching Ubuntu/xorriso):
+    //   Entry 0: ISO9660 (type = EBD0A0A2-B9E5-4433-87C0-68B6B72699C7)
+    //   Entry 1: EFI System Partition (type = C12A7328-F81F-11D2-BA4B-00A0C93EC93B)
+    //   Entry 2: Gap1 (padding)
+
+    // Verify entry 0 is ISO9660 partition
+    let expected_iso_guid: [u8; 16] = [
+        0xA2, 0xA0, 0xD0, 0xEB, 0xE5, 0xB9, 0x33, 0x44,
+        0x87, 0xC0, 0x68, 0xB6, 0xB7, 0x26, 0x99, 0xC7,
+    ];
+    assert_eq!(
+        &esp_entry[0..16], &expected_iso_guid,
+        "GPT partition entry 0 must have ISO9660 type GUID"
+    );
+
+    // Read entry 1 (ESP) at offset 128 within the partition array
+    iso_file.seek(SeekFrom::Start(2 * 512 + 128))?;
+    let mut esp_entry_1 = [0u8; 128];
+    iso_file.read_exact(&mut esp_entry_1)?;
 
     // Verify type GUID is ESP: C12A7328-F81F-11D2-BA4B-00A0C93EC93B
-    let expected_type_guid: [u8; 16] = [
+    let expected_esp_guid: [u8; 16] = [
         0x28, 0x73, 0x2A, 0xC1, 0x1F, 0xF8, 0xD2, 0x11,
         0xBA, 0x4B, 0x00, 0xA0, 0xC9, 0x3E, 0xC9, 0x3B,
     ];
     assert_eq!(
-        &esp_entry[0..16], &expected_type_guid,
-        "GPT partition entry 0 must have ESP type GUID (C12A7328-F81F-11D2-BA4B-00A0C93EC93B)"
+        &esp_entry_1[0..16], &expected_esp_guid,
+        "GPT partition entry 1 must have ESP type GUID (C12A7328-F81F-11D2-BA4B-00A0C93EC93B)"
     );
 
     // ESP starts at LBA 4096 (2 MiB alignment)
-    let esp_start = u64::from_le_bytes(esp_entry[32..40].try_into().unwrap());
+    let esp_start = u64::from_le_bytes(esp_entry_1[32..40].try_into().unwrap());
     assert_eq!(
         esp_start, 4096,
         "ESP partition starting LBA must be 4096 (2 MiB), got {}",
@@ -222,7 +241,7 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     );
 
     // ESP must have non-zero size and end after start
-    let esp_end = u64::from_le_bytes(esp_entry[40..48].try_into().unwrap());
+    let esp_end = u64::from_le_bytes(esp_entry_1[40..48].try_into().unwrap());
     assert!(
         esp_end > esp_start,
         "ESP partition ending LBA ({}) must be greater than starting LBA ({})",
@@ -230,7 +249,7 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     );
 
     // ESP attributes bit 0 (System Partition) must be set
-    let esp_attrs = u64::from_le_bytes(esp_entry[48..56].try_into().unwrap());
+    let esp_attrs = u64::from_le_bytes(esp_entry_1[48..56].try_into().unwrap());
     assert_ne!(
         esp_attrs & 1, 0,
         "ESP partition attributes bit 0 (System Partition) must be set, got {:#x}",
@@ -238,7 +257,7 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     );
 
     // Partition name should be "EFI System Partition" (UTF-16LE)
-    let name_bytes = &esp_entry[56..128];
+    let name_bytes = &esp_entry_1[56..128];
     let name_u16: Vec<u16> = name_bytes
         .chunks_exact(2)
         .take(36) // max 36 UTF-16LE code units

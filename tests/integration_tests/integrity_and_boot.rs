@@ -77,7 +77,10 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output (integrity test):\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("El Torito VD version 1 found"));
-    assert!(isoinfo_d_output.contains("Arch 239"));
+    // Validation Entry platform ID is 0x00 (80x86) per El Torito spec §6.2.1,
+    // not 0xEF.  This matches Ubuntu/xorriso behaviour; setting 0xEF in the
+    // validation entry causes some firmware to reject the boot catalog.
+    assert!(isoinfo_d_output.contains("Arch 0 (x86)"));
     // With the 3-entry UEFI catalog, isoinfo -d shows the Initial/Default entry
     // (media=4, HDD emulation) as the defaultboot header.
     assert!(isoinfo_d_output.contains("Boot media 4 (Hard Disk Emulation)"));
@@ -129,13 +132,15 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     assert_eq!(mbr_sig, 0xAA55, "MBR boot signature mismatch");
     println!("Verified MBR boot signature: 0x{:04X}", mbr_sig);
 
-    // MBR Partition Entry 0 at offset 0x1BE: type 0x83 (Linux native), LBA 0
-    // xorriso-compatible MBR layout for real hardware UEFI boot.
+    // MBR Partition Entry 0 at offset 0x1BE: type 0xEE (GPT Protective), LBA 1.
+    // This is the standard protective MBR per UEFI spec §5.2.3,
+    // matching Ubuntu/xorriso layout.  0xEE tells UEFI firmware that
+    // the disk uses GPT partitioning.
     let entry0_type = mbr_sector[0x1BE + 4];
     let entry0_start =
         u32::from_le_bytes(mbr_sector[(0x1BE + 8)..(0x1BE + 12)].try_into().unwrap());
-    assert_eq!(entry0_type, 0x83, "MBR entry 0 should be type 0x83 (Linux native, xorriso-compatible)");
-    assert_eq!(entry0_start, 0, "MBR entry 0 should start at LBA 0 (whole-disk)");
+    assert_eq!(entry0_type, 0xEE, "MBR entry 0 should be type 0xEE (GPT Protective, UEFI spec)");
+    assert_eq!(entry0_start, 1, "MBR entry 0 should start at LBA 1 (LBA 0 is the MBR itself)");
     println!("MBR entry 0: type=0x{:02X}, start={}", entry0_type, entry0_start);
 
     // MBR Partition Entry 1 at offset 0x1CE: type 0xEF (ESP), bootable=0x00

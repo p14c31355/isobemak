@@ -86,11 +86,13 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
     iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
 
-    // Verify Validation Entry's platform ID
+    // Verification Entry's platform ID is 0x00 (80x86) per El Torito spec §6.2.1.
+    // Setting it to 0xEF (EFI) is non-standard and causes some firmware to
+    // reject the boot catalog.
     assert_eq!(
         boot_catalog_sector[1],
-        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
-        "Validation entry platform ID is not EFI"
+        0x00,
+        "Validation entry platform ID must be 0x00 (80x86) per El Torito spec"
     );
 
     // xorriso-style 3-entry UEFI boot catalog:
