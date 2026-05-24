@@ -534,10 +534,10 @@ pub fn build_iso(
             let disk_layout = DiskLayout::from_partition_params(
                 iso_builder.profile.esp_alignment_lba_512,
                 Some(size_512_sectors),
-                // ISO data starts after ESP: esp_lba_iso + esp_size_iso_sectors in ISO LBA
-                esp_lba_iso_profile + calculated_esp_size_iso_sectors,
+                // ISO data starts at the aligned ESP position.
+                // The ESP image is added as a file and will occupy this space.
+                esp_lba_iso_profile,
             );
-            iso_builder.set_disk_layout(disk_layout);
 
             // Ubuntu/xorriso convention: EFI boot image is a regular ISO file,
             // not a hidden raw region.  Add the FAT image to the ISO tree so
