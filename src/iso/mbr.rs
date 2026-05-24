@@ -158,7 +158,7 @@ pub fn create_mbr_for_gpt_hybrid(
         mbr.partition_table[0].bootable = 0x00;
         mbr.partition_table[0].partition_type = 0xEE; // GPT Protective (standard)
         mbr.partition_table[0].starting_lba = 1;
-        mbr.partition_table[0].size_in_lba = total_lbas.saturating_sub(1).min(0xFFFF_FFFF);
+        mbr.partition_table[0].size_in_lba = total_lbas.saturating_sub(1);
         mbr.partition_table[0].starting_chs = lba_to_chs(1);
         let prot_end_lba = (total_lbas as u64).saturating_sub(1);
         mbr.partition_table[0].ending_chs = lba_to_chs(prot_end_lba);
