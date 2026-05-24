@@ -166,21 +166,21 @@ pub fn create_mbr_for_gpt_hybrid(
         // EFI System Partition in MBR entry 1
         // Provides a direct MBR pointer to the ESP for firmware that
         // boots via USB-HDD and reads MBR partitions directly.
-        if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba) {
-            if size > 0 {
-                let esp_start = start;
-                let esp_size = size;
-                mbr.partition_table[1].bootable = 0x00;
-                mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
-                mbr.partition_table[1].starting_lba = esp_start;
-                mbr.partition_table[1].size_in_lba = esp_size;
-                mbr.partition_table[1].starting_chs = lba_to_chs(esp_start as u64);
-                mbr.partition_table[1].ending_chs = lba_to_chs(
-                    (esp_start as u64)
-                        .saturating_add(esp_size as u64)
-                        .saturating_sub(1),
-                );
-            }
+        if let (Some(start), Some(size)) = (esp_start_lba, esp_size_lba)
+            && size > 0
+        {
+            let esp_start = start;
+            let esp_size = size;
+            mbr.partition_table[1].bootable = 0x00;
+            mbr.partition_table[1].partition_type = 0xEF; // EFI System Partition
+            mbr.partition_table[1].starting_lba = esp_start;
+            mbr.partition_table[1].size_in_lba = esp_size;
+            mbr.partition_table[1].starting_chs = lba_to_chs(esp_start as u64);
+            mbr.partition_table[1].ending_chs = lba_to_chs(
+                (esp_start as u64)
+                    .saturating_add(esp_size as u64)
+                    .saturating_sub(1),
+            );
         }
     } else {
         // Standard MBR for El Torito (if not isohybrid)

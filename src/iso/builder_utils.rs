@@ -211,7 +211,7 @@ pub fn create_boot_entry_generic(
                 // The ESP FAT image is already accessible via the Load RBA
                 // field (entry[8..12]) and the GPT partition table, so
                 // sector_count is not needed for boot.
-                if !esp_size_sectors.is_some() {
+                if esp_size_sectors.is_none() {
                     return Err(io_error!(
                         io::ErrorKind::InvalidInput,
                         "ESP size required for UEFI ESP boot"

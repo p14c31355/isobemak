@@ -63,7 +63,7 @@ fn make_directory_entries(
 
     let chk = lfn_checksum(short);
     let utf16: Vec<u16> = long_name.encode_utf16().collect();
-    let padded_len = ((utf16.len() + 12) / 13) * 13;
+    let padded_len = utf16.len().div_ceil(13) * 13;
     let mut chars = utf16;
     chars.resize(padded_len, 0xFFFF);
     let num_lfn = chars.len() / 13;
@@ -253,34 +253,25 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
 
     // 2. Allocate clusters
     let mut alloc = Alloc::new(total_sectors as u64, fat_sectors as u64);
-    let root = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "FAT32: out of free clusters for root directory",
-        )
-    })?;
-    let efi = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "FAT32: out of free clusters for EFI directory",
-        )
-    })?;
-    let boot = alloc.alloc(1).ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::Other,
-            "FAT32: out of free clusters for BOOT directory",
-        )
-    })?;
+    let root = alloc
+        .alloc(1)
+        .ok_or_else(|| io::Error::other("FAT32: out of free clusters for root directory"))?;
+    let efi = alloc
+        .alloc(1)
+        .ok_or_else(|| io::Error::other("FAT32: out of free clusters for EFI directory"))?;
+    let boot = alloc
+        .alloc(1)
+        .ok_or_else(|| io::Error::other("FAT32: out of free clusters for BOOT directory"))?;
     let mut file_starts = Vec::with_capacity(files.len());
     let mut file_sizes = Vec::with_capacity(files.len());
     for (_name, p) in files {
         let sz = p.metadata()?.len();
         let n = (sz.div_ceil(CLUSTER_SIZE)).max(1) as u32;
         let start = alloc.alloc(n).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Other,
-                format!("FAT32: out of free clusters for file (need {} clusters)", n),
-            )
+            io::Error::other(format!(
+                "FAT32: out of free clusters for file (need {} clusters)",
+                n
+            ))
         })?;
         file_starts.push(start);
         file_sizes.push(sz);
@@ -475,15 +466,12 @@ fn write_tree_to_slice(
     // BOOT directory is allocated a single cluster (4 KiB = ~128 dir entries).
     // Reject images that would exceed this capacity to avoid silent truncation.
     if boot_ents.len() > CLUSTER_SIZE as usize {
-        return Err(io::Error::new(
-            io::ErrorKind::Other,
-            format!(
-                "BOOT directory entries ({} bytes) exceed single cluster limit ({} bytes): \
+        return Err(io::Error::other(format!(
+            "BOOT directory entries ({} bytes) exceed single cluster limit ({} bytes): \
                  too many EFI boot files for this FAT image",
-                boot_ents.len(),
-                CLUSTER_SIZE,
-            ),
-        ));
+            boot_ents.len(),
+            CLUSTER_SIZE,
+        )));
     }
     boot_ents.resize(CLUSTER_SIZE as usize, 0);
     write_at(img, alloc.sector_of(boot) * SECTOR_SIZE, &boot_ents);

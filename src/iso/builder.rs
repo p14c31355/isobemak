@@ -520,7 +520,7 @@ pub fn build_iso(
             logical_fat_size_512_sectors = Some(size_512_sectors);
 
             // Convert logical FAT size from 512-byte sectors to ISO 2048-byte sectors
-            let calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 × 512-byte sectors
+            let _calculated_esp_size_iso_sectors = size_512_sectors.div_ceil(4); // 1 ISO sector = 4 × 512-byte sectors
 
             // Derive ISO-sector ESP LBA from profile alignment.
             let esp_lba_iso_profile = disk512_to_iso(iso_builder.profile.esp_alignment_lba_512);
@@ -528,7 +528,7 @@ pub fn build_iso(
             // Construct DiskLayout: ESP is a real disk partition, not an ISO object.
             // This matches xorriso `-append_partition` behavior and is required
             // for real hardware UEFI boot (NEC/Insyde/old AMI).
-            let disk_layout = DiskLayout::from_partition_params(
+            let _disk_layout = DiskLayout::from_partition_params(
                 iso_builder.profile.esp_alignment_lba_512,
                 Some(size_512_sectors),
                 // ISO data starts at the aligned ESP position.

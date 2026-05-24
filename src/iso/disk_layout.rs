@@ -90,13 +90,13 @@ impl DiskLayout {
         iso_data_start_lba: u32,
     ) -> Self {
         let mut partitions = Vec::new();
-        if let Some(size) = esp_size_512 {
-            if size > 0 {
-                partitions.push(Partition {
-                    start_lba_512: esp_alignment_lba_512 as u64,
-                    size_lba_512: size as u64,
-                });
-            }
+        if let Some(size) = esp_size_512
+            && size > 0
+        {
+            partitions.push(Partition {
+                start_lba_512: esp_alignment_lba_512 as u64,
+                size_lba_512: size as u64,
+            });
         }
         Self {
             partitions,
