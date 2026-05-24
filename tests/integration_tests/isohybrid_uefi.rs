@@ -130,11 +130,15 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Boot entry Load RBA ({}) should be {} (2 MiB alignment, in 2048-byte ISO sector units)",
         boot_lba, expected_esp_lba
     );
-    assert!(boot_sectors > 0, "Boot entry sectors must be > 0");
+    assert_eq!(
+        boot_sectors, 0,
+        "UEFI no-emulation boot entry must have sector_count=0, got {}",
+        boot_sectors
+    );
 
     println!(
-        "Verified single-entry UEFI catalog: Boot Entry 0x88 (LBA={}, Sectors={}, sys_type=0xEF)",
-        boot_lba, boot_sectors
+        "Verified single-entry UEFI catalog: Boot Entry 0x88 (LBA={}, Sectors=0, sys_type=0xEF)",
+        boot_lba
     );
 
     // Verify bytes after Boot Entry are zero (no spurious entries)
