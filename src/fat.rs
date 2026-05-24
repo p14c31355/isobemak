@@ -72,7 +72,7 @@ fn make_lfn(
         e[9..11].copy_from_slice(&seg[4].to_le_bytes());
         e[11] = 0x0F;
         e[13] = chk;
-        for k in 0..7 {
+        for k in 0..6 {
             e[14 + k * 2..16 + k * 2].copy_from_slice(&seg[5 + k].to_le_bytes());
         }
         e[28..30].copy_from_slice(&seg[11].to_le_bytes());
