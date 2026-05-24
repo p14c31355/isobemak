@@ -86,14 +86,13 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     let mut boot_catalog_sector = [0u8; isobemak::utils::ISO_SECTOR_SIZE];
     iso_file_for_nsect_check.read_exact(&mut boot_catalog_sector)?;
 
-    // Platform ID 0xEF (EFI) in the Validation Entry tells firmware that
-    // this boot catalog targets UEFI, not BIOS.  Ventoy and strict UEFI
-    // firmware use this field to decide whether to parse subsequent boot
-    // entries.
+    // Platform ID 0x00 (80x86) in the Validation Entry is the standard
+    // per El Torito spec §6.2.1.  The boot entry system_type=0xEF carries
+    // the UEFI platform identification.
     assert_eq!(
         boot_catalog_sector[1],
-        0xEF,
-        "Validation entry platform ID must be 0xEF (UEFI) for Ventoy/UEFI compat"
+        0x00,
+        "Validation entry platform ID must be 0x00 (80x86) per El Torito spec"
     );
 
     // Canonical single-entry UEFI boot catalog:

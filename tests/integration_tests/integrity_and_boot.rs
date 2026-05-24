@@ -86,10 +86,9 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     let isoinfo_d_output = run_command("isoinfo", &["-d", "-i", iso_path.to_str().unwrap()])?;
     println!("isoinfo -d output (integrity test):\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("El Torito VD version 1 found"));
-    // Validation Entry platform ID is 0xEF (EFI) for Ventoy/UEFI firmware compat.
-    // isoinfo reports this as "Arch 239 (Unknown Arch)" because it doesn't have
-    // a symbolic name for 0xEF in the architecture table.
-    assert!(isoinfo_d_output.contains("Arch 239 (Unknown Arch)"));
+    // Validation Entry platform ID is 0x00 (80x86) per El Torito spec §6.2.1.
+    // UEFI identification is via boot entry system_type=0xEF.
+    assert!(isoinfo_d_output.contains("Arch 0 (x86)"));
     // Single-entry UEFI boot catalog: 0x88 entry, No Emulation (0x00), system_type=0xEF.
     // This is the canonical El Torito UEFI layout recognised by OVMF and real firmware.
     assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)"));
