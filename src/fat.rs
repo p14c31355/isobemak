@@ -79,6 +79,7 @@ fn make_lfn(
     sfn[16..18].copy_from_slice(&0x0000u16.to_le_bytes());
     sfn[18..20].copy_from_slice(&0x21u16.to_le_bytes());
     sfn[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
+    sfn[24..26].copy_from_slice(&0x21u16.to_le_bytes());
     sfn[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
     sfn[28..32].copy_from_slice(&file_size.to_le_bytes());
     Some((lfn, sfn.to_vec()))
@@ -143,7 +144,7 @@ fn entry_83(short: &[u8; 11], attr: u8, first_cluster: u32, file_size: u32) -> [
     e[16..18].copy_from_slice(&0x0000u16.to_le_bytes());
     e[18..20].copy_from_slice(&0x21u16.to_le_bytes());
     e[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
-    e[22..24].copy_from_slice(&0x0000u16.to_le_bytes());
+    e[24..26].copy_from_slice(&0x21u16.to_le_bytes());
     e[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
     e[28..32].copy_from_slice(&file_size.to_le_bytes());
     e
@@ -299,11 +300,10 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         file_sizes.push(sz);
     }
 
-    // Root dir: vol label, ".", "..", EFI subdir
+    // Root dir: vol label, EFI subdir (no . / .. per FAT32 spec)
     let mut area = vec![0u8; CLUSTER as usize];
     area[..32].copy_from_slice(&vol_entry(&vol_label));
-    area[32..96].copy_from_slice(&dot_entries(root, 0));
-    area[96..128].copy_from_slice(&entry_83(&pack_83(b"EFI", b""), 0x10, efi, 0));
+    area[32..64].copy_from_slice(&entry_83(&pack_83(b"EFI", b""), 0x10, efi, 0));
     img[alloc.sector_of(root) as usize * 512..][..CLUSTER as usize].copy_from_slice(&area);
 
     // EFI dir: ".", "..", BOOT subdir
