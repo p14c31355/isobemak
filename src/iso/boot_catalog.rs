@@ -9,11 +9,12 @@ pub const LBA_BOOT_CATALOG: u32 = 19;
 /// Boot catalog constants
 pub const BOOT_CATALOG_HEADER_SIGNATURE: u16 = 0xAA55;
 pub const BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID: u8 = 1;
+/// Bootable Initial/Default entry flag (El Torito §6.2.1)
 pub const BOOT_CATALOG_BOOT_ENTRY_HEADER_ID: u8 = 0x88;
-/// Initial/Default entry flag (El Torito §6.2.1)
-pub const BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID: u8 = 0x90;
-/// Final/Section Header entry flag (El Torito §6.2.1, Table 8)
-pub const BOOT_CATALOG_FINAL_ENTRY_HEADER_ID: u8 = 0x91;
+/// Section Header entry flag – more headers follow (El Torito §7.2.4 Table 8)
+pub const BOOT_CATALOG_SECTION_HEADER_MORE_ID: u8 = 0x90;
+/// Final Section Header entry flag – last header (El Torito §7.2.4 Table 8)
+pub const BOOT_CATALOG_SECTION_HEADER_FINAL_ID: u8 = 0x91;
 pub const BOOT_CATALOG_EFI_PLATFORM_ID: u8 = 0xEF;
 pub const ID_FIELD_OFFSET: usize = 4;
 pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
@@ -23,10 +24,9 @@ pub const BOOT_CATALOG_CHECKSUM_OFFSET: usize = 28;
 pub enum BootCatalogEntryType {
     /// Standard boot entry (flag=0x88 or 0x00)
     BootEntry { bootable: bool },
-    /// Initial/Default entry (flag=0x90)
-    InitialDefault,
-    /// Section Header / Final entry (flag=0x91, per El Torito Table 8 for UEFI)
-    SectionHeader,
+    /// Section Header (flag=0x90 = more follow, 0x91 = last header)
+    /// Per El Torito §7.2.4 Table 8.
+    SectionHeader { more_follow: bool },
 }
 
 pub struct BootCatalogEntry {
@@ -95,11 +95,11 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         .iter()
         .enumerate()
         .map(|(i, e)| {
-            if matches!(e.entry_type, BootCatalogEntryType::SectionHeader) {
+            if matches!(e.entry_type, BootCatalogEntryType::SectionHeader { .. }) {
                 entries[i + 1..]
                     .iter()
                     .take_while(|next| {
-                        !matches!(next.entry_type, BootCatalogEntryType::SectionHeader)
+                        !matches!(next.entry_type, BootCatalogEntryType::SectionHeader { .. })
                     })
                     .count() as u16
             } else {
@@ -119,15 +119,20 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
                 } else {
                     0x00u8
                 };
-                (indicator, 0x00u8) // No Emulation
+                // Always No Emulation (0x00).  Hard Disk Emulation (4) is
+                // non-standard for UEFI and triggers "Boot media 4 (Hard Disk)"
+                // in isoinfo, which real firmware may reject.
+                (indicator, 0x00u8)
             }
-            BootCatalogEntryType::InitialDefault => {
-                // Initial/Default: flag=0x90, media=4 (Hard Disk)
-                (BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID, 4u8)
-            }
-            BootCatalogEntryType::SectionHeader => {
-                // Section Header / Final: flag=0x91, media=platform_id (0xEF for UEFI)
-                (BOOT_CATALOG_FINAL_ENTRY_HEADER_ID, entry_data.platform_id)
+            BootCatalogEntryType::SectionHeader { more_follow } => {
+                let indicator = if more_follow {
+                    BOOT_CATALOG_SECTION_HEADER_MORE_ID // 0x90
+                } else {
+                    BOOT_CATALOG_SECTION_HEADER_FINAL_ID // 0x91
+                };
+                // Section Header byte 1 carries the platform ID
+                // (El Torito Table 8: "Platform ID").
+                (indicator, entry_data.platform_id)
             }
         };
 
@@ -137,19 +142,22 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
         // Bytes 2–3: Load segment for boot entries; "Number of section entries"
         // for Section Header entries (El Torito §7.2.4 Table 8).
         let field_2_3: u16 = match entry_data.entry_type {
-            BootCatalogEntryType::SectionHeader => section_counts[idx],
+            BootCatalogEntryType::SectionHeader { .. } => section_counts[idx],
             _ => 0,
         };
         entry[2..4].copy_from_slice(&field_2_3.to_le_bytes());
 
-        // System type:
-        //   Section Header (0x91): always 0x00 (El Torito Table 8)
-        //   Boot Entry in a section (0x88): 0x00 (platform defined by Section Header, §7.2.3)
-        //   Initial/Default (0x90): platform_id (standalone, not in a section)
+        // System type (byte 4):
+        //   Section Header: always 0x00 (El Torito Table 8)
+        //   Boot Entry: carry the platform_id (e.g. 0xEF for UEFI).
+        //     Without a Section Header, the entry itself must identify the
+        //     target platform so that firmware (OVMF, InsydeH2O) can find it.
+        //     With a Section Header, this field is conventionally 0x00
+        //     (the section header already defines the platform), but
+        //     setting it to the platform_id is harmless and simpler.
         entry[4] = match entry_data.entry_type {
-            BootCatalogEntryType::SectionHeader => 0x00,
-            BootCatalogEntryType::BootEntry { .. } => 0x00,
-            BootCatalogEntryType::InitialDefault => entry_data.platform_id,
+            BootCatalogEntryType::SectionHeader { .. } => 0x00,
+            BootCatalogEntryType::BootEntry { .. } => entry_data.platform_id,
         };
 
         // Sector count is a u16 at offset 6.

@@ -95,64 +95,54 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID must be 0x00 (80x86) per El Torito spec"
     );
 
-    // xorriso-style 3-entry UEFI boot catalog:
+    // Canonical single-entry UEFI boot catalog:
     //
-    // Entry 0 (offset 32): Initial/Default (flag=0x90, media=HDD, sys=0xEF).
-    //   Marks this catalog as the default boot option.
-    let init_offset = 32;
-    let init_bytes = &boot_catalog_sector[init_offset..init_offset + 32];
-    let init_flag = init_bytes[0];
-    let init_media = init_bytes[1];
-    assert_eq!(
-        init_flag,
-        isobemak::iso::boot_catalog::BOOT_CATALOG_INITIAL_ENTRY_HEADER_ID,
-        "Entry 0 must be Initial/Default (0x90), got {:#x}",
-        init_flag
-    );
-    assert_eq!(init_media, 4, "Initial/Default media must be HDD (4), got {}", init_media);
-
-    // Entry 1 (offset 64): Section Header (flag=0x91, media=0xEF, sys=0x00).
-    //   El Torito Table 8 Section Entry for UEFI platform.
-    let sec_offset = 64;
-    let sec_bytes = &boot_catalog_sector[sec_offset..sec_offset + 32];
-    let sec_flag = sec_bytes[0];
-    let sec_media = sec_bytes[1];
-    let sec_sys = sec_bytes[4];
-    assert_eq!(
-        sec_flag,
-        isobemak::iso::boot_catalog::BOOT_CATALOG_FINAL_ENTRY_HEADER_ID,
-        "Entry 1 must be Section Header (0x91), got {:#x}",
-        sec_flag
-    );
-    assert_eq!(sec_media, isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID, "Section Header media must be 0xEF");
-    assert_eq!(sec_sys, 0x00, "Section Header sys type must be 0x00");
-
-    // Entry 2 (offset 96): Boot Entry (flag=0x88) → ESP FAT image.
-    //   QEMU/OVMF reads the FAT and loads \EFI\BOOT\BOOTX64.EFI.
-    let esp_offset = 96;
-    let esp_bytes = &boot_catalog_sector[esp_offset..esp_offset + 32];
-    let esp_boot_indicator = esp_bytes[0];
-    let esp_boot_lba = u32::from_le_bytes(esp_bytes[8..12].try_into().unwrap());
-    let esp_boot_sectors = u16::from_le_bytes(esp_bytes[6..8].try_into().unwrap());
+    //   Validation Entry (offset 0,  32 bytes)
+    //   Boot Entry       (offset 32, 32 bytes): flag=0x88, NoEmul, system_type=0xEF
+    //
+    // This is the standard El Torito UEFI layout used by xorriso, mkisofs,
+    // and recognised by OVMF/InsydeH2O/real firmware.
+    let boot_offset = 32;
+    let boot_bytes = &boot_catalog_sector[boot_offset..boot_offset + 32];
+    let boot_indicator = boot_bytes[0];
+    let boot_media = boot_bytes[1];
+    let boot_sys = boot_bytes[4];
+    let boot_lba = u32::from_le_bytes(boot_bytes[8..12].try_into().unwrap());
+    let boot_sectors = u16::from_le_bytes(boot_bytes[6..8].try_into().unwrap());
 
     assert_eq!(
-        esp_boot_indicator,
+        boot_indicator,
         isobemak::iso::boot_catalog::BOOT_CATALOG_BOOT_ENTRY_HEADER_ID,
-        "ESP boot entry (Entry 2) must be bootable (0x88), got {:#x}",
-        esp_boot_indicator
+        "Boot entry must be bootable (0x88), got {:#x}",
+        boot_indicator
+    );
+    assert_eq!(boot_media, 0x00, "Boot entry must use No Emulation (0x00), got {:#x}", boot_media);
+    assert_eq!(
+        boot_sys,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
+        "Boot entry system_type must be 0xEF for UEFI, got {:#x}",
+        boot_sys
     );
     // ESP is at 2 MiB alignment = 4096 512-byte sectors = 1024 ISO 2048-byte sectors
     let expected_esp_lba = 1024u32;
     assert_eq!(
-        esp_boot_lba, expected_esp_lba,
-        "ESP boot entry Load RBA ({}) should be {} (2 MiB alignment, in 2048-byte ISO sector units)",
-        esp_boot_lba, expected_esp_lba
+        boot_lba, expected_esp_lba,
+        "Boot entry Load RBA ({}) should be {} (2 MiB alignment, in 2048-byte ISO sector units)",
+        boot_lba, expected_esp_lba
     );
-    assert!(esp_boot_sectors > 0, "ESP boot sectors must be > 0");
+    assert!(boot_sectors > 0, "Boot entry sectors must be > 0");
 
     println!(
-        "Verified 3-entry UEFI catalog: Initial/Default + Section Header + Boot Entry (LBA={}, Sectors={})",
-        esp_boot_lba, esp_boot_sectors
+        "Verified single-entry UEFI catalog: Boot Entry 0x88 (LBA={}, Sectors={}, sys_type=0xEF)",
+        boot_lba, boot_sectors
+    );
+
+    // Verify bytes after Boot Entry are zero (no spurious entries)
+    let rest_start = boot_offset + 32;
+    let rest = &boot_catalog_sector[rest_start..];
+    assert!(
+        rest.iter().all(|&b| b == 0),
+        "Bytes after single Boot Entry must be zero (no Section Header / InitialDefault garbage)"
     );
 
     // Verify ISO content using isoinfo -l

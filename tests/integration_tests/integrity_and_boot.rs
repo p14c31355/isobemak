@@ -90,9 +90,10 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     // not 0xEF.  This matches Ubuntu/xorriso behaviour; setting 0xEF in the
     // validation entry causes some firmware to reject the boot catalog.
     assert!(isoinfo_d_output.contains("Arch 0 (x86)"));
-    // With the 3-entry UEFI catalog, isoinfo -d shows the Initial/Default entry
-    // (media=4, HDD emulation) as the defaultboot header.
-    assert!(isoinfo_d_output.contains("Boot media 4 (Hard Disk Emulation)"));
+    // Single-entry UEFI boot catalog: 0x88 entry, No Emulation (0x00), system_type=0xEF.
+    // This is the canonical El Torito UEFI layout recognised by OVMF and real firmware.
+    assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)"));
+    assert!(isoinfo_d_output.contains("Sys type EF"));
     // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
     // Detailed UEFI boot entry verification is handled in `test_create_isohybrid_uefi_iso`.
 
