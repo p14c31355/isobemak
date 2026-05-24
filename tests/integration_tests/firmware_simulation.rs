@@ -353,11 +353,11 @@ fn test_firmware_style_esp_discovery() -> io::Result<()> {
     let ts32 = u32::from_le_bytes(bpb[32..36].try_into().unwrap());
     let total_sectors = if ts16 != 0 { ts16 as u64 } else { ts32 as u64 };
 
-    // Safety: max 256 MiB (ESP minimum size for FAT32)
-    assert!(total_sectors <= 524288,
-        "ESP total sectors ({}) exceeds safety limit (524288 = 256 MiB)", total_sectors);
+    // Safety: max 260 MiB (ESP minimum size for FAT32 with 8 sec/clus)
+    assert!(total_sectors <= 532480,
+        "ESP total sectors ({}) exceeds safety limit (532480 = 260 MiB)", total_sectors);
 
-    let read_size = ((total_sectors as usize) * 512).min(256 * 1024 * 1024);
+    let read_size = ((total_sectors as usize) * 512).min(260 * 1024 * 1024);
     let mut esp_data = vec![0u8; read_size];
     iso_file.seek(SeekFrom::Start(esp_offset))?;
     iso_file.read_exact(&mut esp_data)?;
