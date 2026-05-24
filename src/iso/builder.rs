@@ -381,7 +381,11 @@ impl IsoBuilder {
         // Always begins right after VDs+boot catalog (LBA 20).
         // The EFI boot image is a regular ISO file (not raw appended sectors),
         // so no fixed-position ESP reservation is needed.
-        self.iso_data_lba = boot_catalog_lba + 1; // LBA 20
+        self.iso_data_lba = if let Some(ref layout) = self.disk_layout {
+            layout.iso_region.data_start_lba
+        } else {
+            boot_catalog_lba + 1
+        };
         iso_file.seek(SeekFrom::Start(
             (self.iso_data_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
