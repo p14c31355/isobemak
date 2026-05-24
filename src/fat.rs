@@ -21,7 +21,9 @@ const SECTOR_SIZE: u64 = 512;
 const CLUSTER_SIZE: u64 = SECTOR_SIZE * 8; // 4 KiB
 const SEC_PER_CLUS: u64 = 8;
 const RESERVED_SECTORS: u64 = 32;
-const MIN_IMAGE_SIZE: u64 = 260 * 1024 * 1024; // ≥ 65525 clusters
+// Minimum 65525 clusters for FAT32 (~256 MiB), but allow smaller images
+// when files are tiny (real UEFI firmware handles small FAT32 too).
+const MIN_CLUSTERS: usize = 65525;
 const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;
 
 // ── 8.3 name helpers ──
@@ -171,7 +173,12 @@ fn entry_83(short: &[u8; 11], attr: u8, first_cluster: u32, file_size: u32) -> [
     let mut e = [0u8; 32];
     e[..11].copy_from_slice(short);
     e[11] = attr;
+    // Set valid creation time (00:00:00) and date (2000-01-01 = 0x21 in FAT encoding)
+    // This avoids fsck.fat warnings about zero timestamps.
+    e[16..18].copy_from_slice(&0x0000u16.to_le_bytes()); // creation time 00:00:00
+    e[18..20].copy_from_slice(&0x21u16.to_le_bytes());   // creation date 2000-01-01
     e[20..22].copy_from_slice(&((first_cluster >> 16) as u16).to_le_bytes());
+    e[22..24].copy_from_slice(&0x0000u16.to_le_bytes()); // last access date
     e[26..28].copy_from_slice(&(first_cluster as u16).to_le_bytes());
     e[28..32].copy_from_slice(&file_size.to_le_bytes());
     e
@@ -222,7 +229,8 @@ fn build_image(
     }
 
     let logical = (content_size + FAT_OVERHEAD).div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
-    let total_size = logical.max(MIN_IMAGE_SIZE);
+    let min_size = MIN_CLUSTERS as u64 * CLUSTER_SIZE + RESERVED_SECTORS * SECTOR_SIZE + 2 * 1024 * SECTOR_SIZE;
+    let total_size = logical.max(min_size);
     let (fat_sectors_raw, _data) = calculate_fat32_layout(
         total_size / SECTOR_SIZE,
         RESERVED_SECTORS,
@@ -353,26 +361,34 @@ fn write_tree_to_slice(
     file_sizes: &[u64],
 ) -> io::Result<()> {
     // ── Root directory ──
+    // FAT spec order: volume label (if present), ".", "..", then other entries.
     let mut root_ents = Vec::<u8>::new();
     root_ents.extend_from_slice(&vol_entry(volume_label));
+    // "." entry: points to root's own cluster
     root_ents.extend_from_slice(&dot_entry(root));
-    // root's parent is itself (cluster 0 = no parent)
+    // ".." entry: for root dir, parent cluster is 0 (El Torito / no parent)
     root_ents.extend_from_slice(&dotdot_entry(0));
+    // EFI subdirectory
     root_ents.extend_from_slice(&entry_83(&pack_83(b"EFI", b""), 0x10, efi, 0));
     root_ents.resize(CLUSTER_SIZE as usize, 0);
     write_at(img, alloc.sector_of(root) * SECTOR_SIZE, &root_ents);
 
     // ── EFI directory ──
     let mut efi_ents = Vec::<u8>::new();
+    // "." entry: points to efi's own cluster
     efi_ents.extend_from_slice(&dot_entry(efi));
+    // ".." entry: points to parent (root)
     efi_ents.extend_from_slice(&dotdot_entry(root));
+    // BOOT subdirectory
     efi_ents.extend_from_slice(&entry_83(&pack_83(b"BOOT", b""), 0x10, boot, 0));
     efi_ents.resize(CLUSTER_SIZE as usize, 0);
     write_at(img, alloc.sector_of(efi) * SECTOR_SIZE, &efi_ents);
 
     // ── BOOT directory + file data ──
     let mut boot_ents = Vec::<u8>::new();
+    // "." entry: points to boot's own cluster
     boot_ents.extend_from_slice(&dot_entry(boot));
+    // ".." entry: points to parent (efi)
     boot_ents.extend_from_slice(&dotdot_entry(efi));
 
     for (idx, (dest_name, source_path)) in files.iter().enumerate() {
@@ -451,8 +467,8 @@ fn calculate_fat32_layout(total_sectors: u64, reserved: u64, spc: u64) -> (u64, 
 
 // ── Public API ──
 
-/// Build a FAT32 UEFI boot image in memory and return the raw bytes.
-/// The returned tuple contains (image_bytes, size_in_512_byte_sectors).
+/// Build a FAT32 UEFI boot image in memory and write it to disk.
+/// Returns the size of the image in 512-byte sectors.
 pub fn create_fat_image(
     fat_img_path: &Path,
     files: &[(&str, &Path)],

@@ -132,35 +132,63 @@ impl IsoBuilder {
 
     /// Prepares the list of boot catalog entries based on boot configuration.
     ///
-    /// El Torito boot catalog layout:
+    /// El Torito boot catalog layout (matching Ubuntu/xorriso convention):
     ///
     ///   Validation Entry (always, 32 bytes)
-    ///     header_id=1, platform_id=0x00, "EL TORITO SPECIFICATION"
+    ///     header_id=1, platform_id=0x00, ID="", key=0xAA55
     ///
-    ///   Boot Entry (flag=0x88, No Emulation, system_type=0xEF)
-    ///     Points to the ESP FAT image (hybrid) or ISO9660 file (CD-ROM).
-    ///     system_type=0xEF identifies this as a UEFI boot entry.
-    ///     No Section Header is needed — a single 0x88 entry with system_type=0xEF
-    ///     is the standard UEFI El Torito layout (used by xorriso, mkisofs, etc.).
+    ///   Initial/Default Boot Entry (offset 32, flag=0x88, No Emulation, system_type=0x00)
+    ///     Points to the BIOS boot image (or ESP FAT image for hybrid).
+    ///     Real UEFI firmware (InsydeH2O, old AMI, Lenovo) ignores this
+    ///     entry and instead looks for the Section Header with platform=0xEF.
+    ///
+    ///   Section Header Entry (offset 64, flag=0x91, platform=0xEF)
+    ///     Marks the start of UEFI-specific boot entries.
+    ///     This is the structure that real firmware recognizes for UEFI boot.
+    ///     Section entries count = 1 (one boot entry follows).
+    ///
+    ///   Section Boot Entry (offset 96, flag=0x88, No Emulation, system_type=0x00)
+    ///     Points to the ESP FAT image.
+    ///     Under a Section Header with platform=0xEF, this entry is
+    ///     interpreted as a UEFI boot target.
     fn prepare_boot_entries(
         &self,
         esp_lba: Option<u32>,
         esp_size_sectors: Option<u32>,
     ) -> io::Result<Vec<BootCatalogEntry>> {
+        use crate::iso::boot_catalog::{
+            BootCatalogEntryType, BOOT_CATALOG_EFI_PLATFORM_ID,
+        };
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // Hybrid path (ESP present): single BootEntry → ESP FAT image.
-        // Per El Torito spec, a single 0x88 entry with system_type=0xEF
-        // is the canonical UEFI boot catalog layout.  OVMF, InsydeH2O,
-        // and real firmware all recognise this pattern.
+        // Hybrid path (ESP present): Ubuntu/xorriso-compatible multi-entry layout.
         if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
             && size > 0
         {
+            // Entry 0: Initial/Default Boot Entry
+            // Points to the ESP FAT image (BIOS/legacy path).
+            // Uses system_type=0x00 (not 0xEF) so that real firmware
+            // treats it as a generic boot entry and looks further for
+            // the Section Header.
+            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+
+            // Entry 1: Final Section Header (flag=0x91, platform=0xEF)
+            // Tells firmware: "the following entry is UEFI".
+            // Real firmware (InsydeH2O, old AMI, Lenovo) requires this.
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: 0,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
+            });
+
+            // Entry 2: Section Boot Entry (under UEFI section header)
+            // Points to the ESP FAT image.
+            // System type = 0x00 (section header already defines platform = 0xEF).
             entries.push(create_uefi_esp_boot_entry(lba, size)?);
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
             // Non-hybrid path (CD-ROM / QEMU only): direct EFI binary entry.
-            // Points to BOOTX64.EFI inside the ISO9660 filesystem.
             entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
 
