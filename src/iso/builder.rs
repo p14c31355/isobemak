@@ -14,7 +14,7 @@ use crate::iso::boot_catalog::BootCatalogEntry;
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
     calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
-    ensure_directory_path, get_file_metadata,
+    ensure_directory_path, get_file_metadata, get_file_size_in_iso, get_lba_for_path,
 };
 use crate::iso::fs_node::{IsoDirectory, IsoFile, IsoFsNode};
 use crate::iso::iso_image::IsoImage;
@@ -44,6 +44,12 @@ pub struct IsoBuilder {
     /// When set, replaces the old "ESP as ISO object" model with the
     /// xorriso-style "ESP as disk partition" approach.
     disk_layout: Option<DiskLayout>,
+    /// ISO filesystem path of the FAT boot image (e.g. "/boot/efiboot.img").
+    /// When set, El Torito UEFI ESP boot entry and GPT ESP partition
+    /// both point to this file's extents instead of raw appended sectors.
+    /// This is the Ubuntu/xorriso convention: EFI image is an ISO file,
+    /// not a hidden raw region.
+    efi_boot_image_iso_path: Option<String>,
 }
 
 impl Default for IsoBuilder {
@@ -66,6 +72,7 @@ impl IsoBuilder {
             esp_size_sectors: None,
             profile: IsoLayoutProfile::default(),
             disk_layout: None,
+            efi_boot_image_iso_path: None,
         }
     }
 
@@ -225,7 +232,21 @@ impl IsoBuilder {
         };
 
         // Determine ESP start/size in 512-byte sectors.
-        let (esp_start_512, esp_size_512) = if let Some(ref layout) = self.disk_layout {
+        // Preferred: use file-backed EFI boot image extents (resolved from ISO
+        // filesystem tree in build()).  Convert from ISO 2048-byte LBA to 512-byte.
+        // Fallback: profile-driven fixed-position placement (legacy DiskLayout).
+        let (esp_start_512, esp_size_512) = if let (Some(iso_lba), Some(iso_sectors)) =
+            (self.esp_lba, self.esp_size_sectors)
+        {
+            // Convert ISO 2048-byte sector units to 512-byte sector units
+            let start_512 = (iso_lba as u64)
+                .checked_mul(4)
+                .and_then(|v| u32::try_from(v).ok());
+            let size_512 = (iso_sectors as u64)
+                .checked_mul(4)
+                .and_then(|v| u32::try_from(v).ok());
+            (start_512, size_512)
+        } else if let Some(ref layout) = self.disk_layout {
             if let Some(esp) = layout.esp_partition() {
                 (Some(esp.start_lba_512 as u32), Some(esp.size_lba_512 as u32))
             } else {
@@ -338,21 +359,32 @@ impl IsoBuilder {
         let boot_catalog_lba = 19;
 
         // iso_data_lba: start of ISO9660 directory records and file contents.
-        // For isohybrid, this begins after the ESP partition.
-        // For non-hybrid, this begins right after VDs+boot catalog.
-        // Derive ISO-sector ESP offset from profile alignment (512B → 2048B).
-        let esp_lba_iso_profile = disk512_to_iso(self.profile.esp_alignment_lba_512);
-        self.iso_data_lba = if self.is_isohybrid {
-            esp_lba_iso_profile + esp_size_sectors.unwrap_or(0)
-        } else {
-            boot_catalog_lba + 1 // LBA 20
-        };
+        // Always begins right after VDs+boot catalog (LBA 20).
+        // The EFI boot image is a regular ISO file (not raw appended sectors),
+        // so no fixed-position ESP reservation is needed.
+        self.iso_data_lba = boot_catalog_lba + 1; // LBA 20
         iso_file.seek(SeekFrom::Start(
             (self.iso_data_lba as u64) * ISO_SECTOR_SIZE as u64,
         ))?;
 
         // Calculate LBAs for all files and directories. This also updates self.iso_data_lba to the end of the filesystem data.
         calculate_lbas(&mut self.iso_data_lba, &mut self.root)?;
+
+        // --- Resolve ESP LBA/size from the ISO filesystem tree ---
+        // Preferred: use the file-backed EFI boot image (Ubuntu/xorriso convention).
+        // Fallback: use explicitly provided esp_lba/esp_size_sectors (legacy).
+        let (resolved_esp_lba, resolved_esp_size_sectors) =
+            if let Some(ref iso_path) = self.efi_boot_image_iso_path {
+                let lba = get_lba_for_path(&self.root, iso_path)?;
+                let size_bytes = get_file_size_in_iso(&self.root, iso_path)?;
+                let sectors = size_bytes.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+                (Some(lba), Some(sectors))
+            } else {
+                (esp_lba, esp_size_sectors)
+            };
+        // Store resolved values so write_hybrid_structures can use them
+        self.esp_lba = resolved_esp_lba;
+        self.esp_size_sectors = resolved_esp_size_sectors;
 
         // Write volume descriptors at fixed ISO 9660 positions
         // (LBA 16=PVD, 17=BRVD, 18=Terminator).
@@ -363,7 +395,7 @@ impl IsoBuilder {
             self.iso_data_lba,
         )?;
 
-        let boot_entries = self.prepare_boot_entries(esp_lba, esp_size_sectors)?;
+        let boot_entries = self.prepare_boot_entries(resolved_esp_lba, resolved_esp_size_sectors)?;
         write_boot_catalog_to_iso(iso_file, boot_catalog_lba, boot_entries)?;
 
         // Write directory records and copy file contents.
@@ -484,16 +516,17 @@ pub fn build_iso(
             );
             iso_builder.set_disk_layout(disk_layout);
 
-            // Store ESP LBA and size for the boot catalog
-            iso_builder.esp_lba = Some(esp_lba_iso_profile);
-            iso_builder.esp_size_sectors = Some(calculated_esp_size_iso_sectors);
-
-            // Copy the FAT image to the ISO file at the profile-aligned ESP LBA
-            iso_file.seek(SeekFrom::Start(
-                esp_lba_iso_profile as u64 * crate::utils::ISO_SECTOR_SIZE as u64,
-            ))?;
-            let mut temp_fat = std::fs::File::open(&path)?;
-            io::copy(&mut temp_fat, &mut iso_file)?;
+            // Ubuntu/xorriso convention: EFI boot image is a regular ISO file,
+            // not a hidden raw region.  Add the FAT image to the ISO tree so
+            // that El Torito, GPT, and xorriso can discover it as a normal file.
+            // El Torito and GPT will resolve the file's LBA and size after
+            // calculate_lbas() in build().
+            iso_builder.efi_boot_image_iso_path =
+                Some("/boot/efiboot.img".to_string());
+            iso_builder.add_file(
+                "/boot/efiboot.img",
+                &path,
+            )?;
         }
     }
 

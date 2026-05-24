@@ -123,12 +123,18 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Boot entry system_type must be 0xEF for UEFI, got {:#x}",
         boot_sys
     );
-    // ESP is at 2 MiB alignment = 4096 512-byte sectors = 1024 ISO 2048-byte sectors
-    let expected_esp_lba = 1024u32;
-    assert_eq!(
-        boot_lba, expected_esp_lba,
-        "Boot entry Load RBA ({}) should be {} (2 MiB alignment, in 2048-byte ISO sector units)",
-        boot_lba, expected_esp_lba
+    // ESP LBA is file-backed: /boot/efiboot.img in the ISO filesystem.
+    // The LBA depends on the filesystem layout (directories come before files).
+    // Verify it's non-zero and within a reasonable range (not raw-appended at LBA 1024).
+    assert!(
+        boot_lba > 19,
+        "Boot entry Load RBA ({}) should be after volume descriptors (>=20), got {}",
+        boot_lba, boot_lba
+    );
+    assert!(
+        boot_lba < 100,
+        "Boot entry Load RBA ({}) should be a reasonable file LBA (<100), got {}",
+        boot_lba, boot_lba
     );
     assert_eq!(
         boot_sectors, 0,

@@ -158,7 +158,10 @@ fn test_gpt_guid_exact_bytes() -> io::Result<()> {
         "Entry 1 GUID must be EFI System Partition (C12A7328-...)");
 
     let esp_start = u64::from_le_bytes(entry1[32..40].try_into().unwrap());
-    assert_eq!(esp_start, 4096, "ESP must start at LBA 4096");
+    // ESP is file-backed, so the LBA depends on filesystem layout.
+    // It should be after GPT reserved area (>=34) and within a reasonable range.
+    assert!(esp_start >= 34, "ESP must start after GPT reserved area (>=34), got {}", esp_start);
+    assert!(esp_start < 4096, "ESP should be a file-backed partition (<4096), got {}", esp_start);
 
     // Soft warn on attributes bit 0 (Ubuntu also omits)
     let esp_attrs = u64::from_le_bytes(entry1[48..56].try_into().unwrap());

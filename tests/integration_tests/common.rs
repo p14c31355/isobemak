@@ -131,19 +131,16 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
     let e1_type = mbr[0x1CE + 4];
     let e1_start = u32::from_le_bytes(mbr[(0x1CE + 8)..(0x1CE + 12)].try_into().unwrap());
     assert_eq!(e1_type, 0xEF, "MBR entry 1 must be type 0xEF (ESP)");
-    // ESP starts at 2 MiB = 4096 512-byte sectors
-    assert_eq!(e1_start, 4096, "MBR entry 1 (ESP) must start at LBA 4096 (2 MiB)");
+    // ESP is file-backed, so the LBA depends on filesystem layout.
+    // It should be after GPT reserved area (>=34) and within a reasonable range.
+    assert!(e1_start >= 34, "MBR entry 1 (ESP) must start after GPT reserved area (>=34), got {}", e1_start);
+    assert!(e1_start < 4096, "MBR entry 1 (ESP) should be file-backed (<4096), got {}", e1_start);
 
     // Verify CHS fields for entry 1 (ESP) are populated.
     let e1_chs_start = &mbr[0x1CE + 1..0x1CE + 4];
     assert_ne!(e1_chs_start, &[0, 0, 0], "MBR entry 1 (ESP) starting CHS must not be zero");
     let e1_chs_end = &mbr[0x1CE + 5..0x1CE + 8];
     assert_ne!(e1_chs_end, &[0, 0, 0], "MBR entry 1 (ESP) ending CHS must not be zero");
-
-    // LBA=4096 with H=64, SPT=32: cylinder=2, head=0, sector=1
-    assert_eq!(e1_chs_start[0], 0x00, "MBR entry 1 start head must be 0 (LBA=4096 H=64 SPT=32)");
-    assert_eq!(e1_chs_start[1], 0x01, "MBR entry 1 start sector must be 1 (LBA=4096 H=64 SPT=32)");
-    assert_eq!(e1_chs_start[2], 0x02, "MBR entry 1 start cylinder lo must be 2 (LBA=4096 H=64 SPT=32)");
 
     // ── Read GPT header (LBA 1, 512 bytes) ──
     iso_file.seek(SeekFrom::Start(512))?;
@@ -232,13 +229,11 @@ pub fn verify_gpt_and_mbr_chs(iso_file: &mut File) -> io::Result<()> {
         "GPT partition entry 1 must have ESP type GUID (C12A7328-F81F-11D2-BA4B-00A0C93EC93B)"
     );
 
-    // ESP starts at LBA 4096 (2 MiB alignment)
+    // ESP is file-backed, so the starting LBA depends on filesystem layout.
+    // It should be after GPT reserved area (>=34) and within a reasonable range.
     let esp_start = u64::from_le_bytes(esp_entry_1[32..40].try_into().unwrap());
-    assert_eq!(
-        esp_start, 4096,
-        "ESP partition starting LBA must be 4096 (2 MiB), got {}",
-        esp_start
-    );
+    assert!(esp_start >= 34, "ESP must start after GPT reserved area (>=34), got {}", esp_start);
+    assert!(esp_start < 4096, "ESP should be file-backed (<4096), got {}", esp_start);
 
     // ESP must have non-zero size and end after start
     let esp_end = u64::from_le_bytes(esp_entry_1[40..48].try_into().unwrap());
