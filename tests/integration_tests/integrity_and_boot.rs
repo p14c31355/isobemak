@@ -209,19 +209,31 @@ fn test_iso9660_volume_space_size_matches_file_size() -> io::Result<()> {
     let mut iso_file = File::open(&iso_path)?;
     let pvd_total_sectors = read_pvd_volume_space_size(&mut iso_file)?;
 
-    // Actual file size in 2048-byte sectors (ceiling division)
+    // Actual file size must be a multiple of 2048 (ISO sector size).
+    // Backup GPT structures are 33×512 = 16896 bytes, which is NOT 2048-aligned
+    // (16896 % 2048 = 512).  If the builder doesn't re-pad after appending
+    // GPT, the ISO file won't end on a 2048-byte boundary, which breaks
+    // Ventoy and other tools that expect ISO9660 filesystems to be
+    // sector-aligned.
     let actual_size = iso_file.metadata()?.len();
-    let actual_sectors = u32::try_from(actual_size.div_ceil(2048)).map_err(|_| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "ISO too large for u32 sectors",
-        )
+    assert_eq!(
+        actual_size % 2048,
+        0,
+        "ISO file size ({actual_size}) must be a multiple of 2048 (ISO sector size); \
+         remainder={} bytes = {} GPT sectors",
+        actual_size % 2048,
+        (actual_size % 2048) / 512,
+    );
+
+    let expected_sectors = u32::try_from(actual_size / 2048).map_err(|_| {
+        io::Error::new(io::ErrorKind::InvalidInput, "ISO too large for u32 sectors")
     })?;
 
     assert_eq!(
-        pvd_total_sectors, actual_sectors,
-        "PVD Volume Space Size ({pvd_total_sectors} sectors) must match actual file size
-         ({actual_size} bytes = {actual_sectors} sectors).  The difference is {} bytes ({} GPT sectors).",
+        pvd_total_sectors, expected_sectors,
+        "PVD Volume Space Size ({pvd_total_sectors} sectors) must match actual file size \
+         ({actual_size} bytes / 2048 = {expected_sectors} sectors).  \
+         The difference is {} bytes ({} GPT sectors).",
         actual_size.saturating_sub(pvd_total_sectors as u64 * 2048),
         actual_size.saturating_sub(pvd_total_sectors as u64 * 2048) / 512,
     );

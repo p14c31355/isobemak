@@ -1,5 +1,5 @@
 use std::fs::File;
-use std::io::{self, Seek, SeekFrom, Write};
+use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
@@ -227,6 +227,9 @@ impl IsoBuilder {
 
         // Add backup GPT reservation (33 sectors: 1 header + 32 partition entries)
         // so that GPT structures don't overlap ISO 9660 data.
+        // Round up to a multiple of 4 (2048-byte ISO sector alignment) so that
+        // the backup GPT header at the last 512-byte LBA leaves the file
+        // 2048-aligned.  raw_512_sectors is always 4-aligned; 33 is 1 mod 4.
         let total_512_sectors = raw_512_sectors
             .checked_add(BACKUP_GPT_RESERVED_512)
             .ok_or_else(|| {
@@ -235,6 +238,8 @@ impl IsoBuilder {
                     "ISO image + GPT backup too large",
                 )
             })?;
+        // Round up to next multiple of 4 (preserves 2048-byte ISO sector alignment)
+        let total_512_sectors = (total_512_sectors + 3) & !3u64;
 
         let total_for_mbr = if total_512_sectors <= u32::MAX as u64 {
             total_512_sectors as u32
@@ -417,10 +422,18 @@ impl IsoBuilder {
         if self.is_isohybrid {
             self.write_hybrid_structures(iso_file, self.total_sectors as u64, esp_size_sectors)?;
 
-            // write_hybrid_structures appended backup GPT (33 sectors) to the end
-            // of the file, so the file is now larger than when finalize_iso wrote
-            // the PVD Volume Space Size.  Re-read the actual file size and update
-            // the PVD so that Ventoy and other tools see correct ISO9660 metadata.
+            // write_hybrid_structures appended backup GPT (33×512 = 16896 bytes)
+            // to the end of the file.  16896 is not a multiple of 2048, so the
+            // file is now larger than when finalize_iso wrote the PVD and is no
+            // longer 2048-aligned.  Re-pad to 2048, then read the actual file
+            // size and update the PVD so that Ventoy and other tools see correct
+            // ISO9660 metadata.
+            let pos = iso_file.seek(SeekFrom::End(0))?;
+            let remainder = pos % ISO_SECTOR_SIZE as u64;
+            if remainder != 0 {
+                let padding = ISO_SECTOR_SIZE as u64 - remainder;
+                io::copy(&mut io::repeat(0).take(padding), iso_file)?;
+            }
             let final_size = iso_file.seek(SeekFrom::End(0))?;
             let final_total_sectors_u64 = final_size.div_ceil(ISO_SECTOR_SIZE as u64);
             let final_total_sectors = u32::try_from(final_total_sectors_u64)
