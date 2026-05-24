@@ -49,7 +49,12 @@ pub fn write_boot_catalog(iso: &mut File, entries: Vec<BootCatalogEntry>) -> io:
     // 0xEF (EFI) is non-standard and causes some real firmware (InsydeH2O,
     // AMI) to misidentify the boot catalog as unsupported for x64 UEFI,
     // resulting in "No bootfile found for UEFI!".
-    val[1] = 0x00; // platform_id must be 0x00 (80x86) per El Torito spec
+    // Platform ID 0xEF (EFI) in the Validation Entry tells firmware that
+    // this boot catalog targets UEFI, not BIOS.  Ventoy and strict UEFI
+    // firmware use this field to decide whether to parse subsequent boot
+    // entries.  When set to 0x00 (80x86), UEFI-only firmware may skip the
+    // catalog entirely.
+    val[1] = 0xEF;
     // ID string must always be "EL TORITO SPECIFICATION" per El Torito spec,
     // regardless of platform ID.  Some real UEFI firmware rejects the boot
     // catalog when this field is zero-filled.
@@ -214,7 +219,7 @@ mod tests {
         // Verify Validation Entry
         let val_entry: &[u8; 32] = &buffer[0..32].try_into().unwrap();
         assert_eq!(val_entry[0], BOOT_CATALOG_VALIDATION_ENTRY_HEADER_ID);
-        assert_eq!(val_entry[1], 0x00); // Platform ID must be 0x00 (80x86)
+        assert_eq!(val_entry[1], 0xEF); // Platform ID must be 0xEF (UEFI)
         assert_eq!(
             &val_entry[30..32],
             &BOOT_CATALOG_HEADER_SIGNATURE.to_le_bytes()
