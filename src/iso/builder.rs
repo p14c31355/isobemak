@@ -516,10 +516,12 @@ pub fn build_iso(
             // that El Torito, GPT, and xorriso can discover it as a normal file.
             // El Torito and GPT will resolve the file's LBA and size after
             // calculate_lbas() in build().
+            // Use relative paths (no leading "/") so that ensure_directory_path
+            // creates "boot" under the ISO root, not a literal "/" directory.
             iso_builder.efi_boot_image_iso_path =
-                Some("/boot/efiboot.img".to_string());
+                Some("boot/efiboot.img".to_string());
             iso_builder.add_file(
-                "/boot/efiboot.img",
+                "boot/efiboot.img",
                 &path,
             )?;
         }
