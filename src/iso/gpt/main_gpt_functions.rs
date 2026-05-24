@@ -38,8 +38,9 @@ fn write_primary<W: Write + Seek>(
     for p in parts {
         p.write_to(w)?;
     }
+    let zero = vec![0u8; es as usize];
     for _ in parts.len()..n as usize {
-        w.write_all(&vec![0u8; es as usize])?;
+        w.write_all(&zero)?;
     }
     Ok(())
 }
