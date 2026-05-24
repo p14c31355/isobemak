@@ -92,6 +92,29 @@ pub fn write_primary_volume_descriptor(
     pvd[PVD_ROOT_DIR_RECORD_OFFSET..PVD_ROOT_DIR_RECORD_OFFSET + root_entry_bytes.len()]
         .copy_from_slice(&root_entry_bytes);
 
+    // File Structure Version (ECMA-119 8.4.24): MUST be 1
+    pvd[881] = 1;
+
+    // Volume Creation Date/Time (ECMA-119 8.4.26.1, offset 813, 17 bytes)
+    // All-zero is spec-legal but libisofs rejects year=0/month=0 as "damaged".
+    // ISO 9660 uses ASCII digit characters, NOT binary integers.
+    // Format: "2024010100000000" + GMT offset (1 byte signed int, 15-min units).
+    // 2024-01-01 00:00:00.00 GMT+0
+    {
+        let date: [u8; 17] = *b"2024010100000000\x00";
+        pvd[813..830].copy_from_slice(&date);
+    }
+
+    // Volume Modification Date/Time (ECMA-119 8.4.26.2, offset 830, 17 bytes)
+    // Same value as creation date.
+    {
+        let date: [u8; 17] = *b"2024010100000000\x00";
+        pvd[830..847].copy_from_slice(&date);
+    }
+
+    // Application Use area: zero-initialized per spec
+    // bytes 883-1395 are already 0 from `[0u8; ISO_SECTOR_SIZE]` initialization
+
     iso.write_all(&pvd)?;
 
     Ok(())
