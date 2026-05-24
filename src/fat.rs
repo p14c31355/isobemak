@@ -21,8 +21,8 @@ const SECTOR_SIZE: u64 = 512;
 const CLUSTER_SIZE: u64 = SECTOR_SIZE * 8; // 4 KiB
 const SEC_PER_CLUS: u64 = 8;
 const RESERVED_SECTORS: u64 = 32;
-// Minimum 65525 clusters for FAT32 (~256 MiB), but allow smaller images
-// when files are tiny (real UEFI firmware handles small FAT32 too).
+// Minimum 65525 clusters (~256 MiB) required by FAT32 specification.
+// Every FAT32 image produced by isobemak is at least this size.
 const MIN_CLUSTERS: usize = 65525;
 const FAT_OVERHEAD: u64 = 2 * 1024 * 1024;
 
@@ -139,27 +139,27 @@ impl Alloc {
         }
     }
 
-    fn alloc(&mut self, count: u32) -> u32 {
-        let mut first = 0u32;
-        let mut prev = 0u32;
+    fn alloc(&mut self, count: u32) -> Option<u32> {
+        let mut first: Option<u32> = None;
+        let mut prev: Option<u32> = None;
         let mut n = 0u32;
         for i in 2..self.fat.len() {
             if self.fat[i] == 0x0000_0000 {
-                if first == 0 {
-                    first = i as u32;
+                // set or extend the chain
+                match (first, prev) {
+                    (None, _) => first = Some(i as u32),
+                    (_, Some(p)) => self.fat[p as usize] = i as u32,
+                    _ => {}
                 }
-                if prev != 0 {
-                    self.fat[prev as usize] = i as u32;
-                }
-                prev = i as u32;
-                self.fat[prev as usize] = 0x0FFFFFFF;
+                prev = Some(i as u32);
+                self.fat[i] = 0x0FFFFFFF; // end-of-chain marker
                 n += 1;
                 if n >= count {
-                    break;
+                    return first;
                 }
             }
         }
-        first
+        None
     }
 
     fn sector_of(&self, cluster: u32) -> u64 {
@@ -253,15 +253,24 @@ fn build_image(
 
     // 2. Allocate clusters
     let mut alloc = Alloc::new(total_sectors as u64, fat_sectors as u64);
-    let root = alloc.alloc(1);
-    let efi = alloc.alloc(1);
-    let boot = alloc.alloc(1);
+    let root = alloc.alloc(1).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for root directory")
+    })?;
+    let efi = alloc.alloc(1).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for EFI directory")
+    })?;
+    let boot = alloc.alloc(1).ok_or_else(|| {
+        io::Error::new(io::ErrorKind::Other, "FAT32: out of free clusters for BOOT directory")
+    })?;
     let mut file_starts = Vec::with_capacity(files.len());
     let mut file_sizes = Vec::with_capacity(files.len());
     for (_name, p) in files {
         let sz = p.metadata()?.len();
         let n = (sz.div_ceil(CLUSTER_SIZE)).max(1) as u32;
-        file_starts.push(alloc.alloc(n));
+        let start = alloc.alloc(n).ok_or_else(|| {
+            io::Error::new(io::ErrorKind::Other, format!("FAT32: out of free clusters for file (need {} clusters)", n))
+        })?;
+        file_starts.push(start);
         file_sizes.push(sz);
     }
 
@@ -421,14 +430,11 @@ fn write_tree_to_slice(
         while remaining > 0 {
             let chunk = remaining.min(CLUSTER_SIZE) as usize;
             let off = (alloc.sector_of(cur) * SECTOR_SIZE) as usize;
-            let n = src.read(&mut img[off..off + chunk])?;
-            // Zero remaining part of cluster
-            if n < CLUSTER_SIZE as usize {
-                for b in &mut img[off + n..off + CLUSTER_SIZE as usize] {
-                    *b = 0;
-                }
-            }
-            remaining = remaining.saturating_sub(n as u64);
+            // read_exact is used because we have pre-calculated the exact chunk size
+            // and the img buffer is zero-initialized, so any short read would
+            // leave zeroes anyway.
+            src.read_exact(&mut img[off..off + chunk])?;
+            remaining = remaining.saturating_sub(chunk as u64);
             let next = alloc.fat[cur as usize];
             if next == 0x0FFFFFFF || remaining == 0 {
                 break;

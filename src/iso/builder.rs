@@ -163,30 +163,26 @@ impl IsoBuilder {
         let bi = self.boot_info.as_ref();
 
         // Hybrid path (ESP present): Ubuntu/xorriso-compatible multi-entry layout.
-        if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors)
-            && size > 0
-        {
-            // Entry 0: Initial/Default Boot Entry
-            // Points to the ESP FAT image (BIOS/legacy path).
-            // Uses system_type=0x00 (not 0xEF) so that real firmware
-            // treats it as a generic boot entry and looks further for
-            // the Section Header.
-            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+        if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+            if size > 0 {
+                // Entry 0: Initial/Default Boot Entry
+                // Points to the ESP FAT image (BIOS/legacy path).
+                entries.push(create_uefi_esp_boot_entry(lba, size)?);
 
-            // Entry 1: Final Section Header (flag=0x91, platform=0xEF)
-            // Tells firmware: "the following entry is UEFI".
-            // Real firmware (InsydeH2O, old AMI, Lenovo) requires this.
-            entries.push(BootCatalogEntry {
-                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                boot_image_lba: 0,
-                boot_image_sectors: 0,
-                entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
-            });
+                // Entry 1: Final Section Header (flag=0x91, platform=0xEF)
+                // Tells firmware: "the following entry is UEFI".
+                // Real firmware (InsydeH2O, old AMI, Lenovo) requires this.
+                entries.push(BootCatalogEntry {
+                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                    boot_image_lba: 0,
+                    boot_image_sectors: 0,
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
+                });
 
-            // Entry 2: Section Boot Entry (under UEFI section header)
-            // Points to the ESP FAT image.
-            // System type = 0x00 (section header already defines platform = 0xEF).
-            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+                // Entry 2: Section Boot Entry (under UEFI section header)
+                // Points to the ESP FAT image.
+                entries.push(create_uefi_esp_boot_entry(lba, size)?);
+            }
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
             // Non-hybrid path (CD-ROM / QEMU only): direct EFI binary entry.
             entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
