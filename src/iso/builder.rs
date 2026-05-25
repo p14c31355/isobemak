@@ -226,11 +226,13 @@ impl IsoBuilder {
             if !parts.is_empty() {
                 write_gpt_structures(iso_file, total_512, &parts)?;
             }
-        } else {
+        } else if self.profile.mbr_mode != crate::iso::layout_profile::MbrMode::None {
             // GPT off: MBR-only ESP layout (Ventoy-compatible)
             create_mbr_esp_only(total_for_mbr, esp_start_512, esp_size_512)?
                 .write_to(iso_file)?;
         }
+        // MbrMode::None → no MBR/GPT written at all.
+        // The FAT32 image starts at byte 0 (super-floppy style).
         iso_file.sync_data()?;
         Ok(())
     }
