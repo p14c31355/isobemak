@@ -21,7 +21,7 @@ use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
-use crate::iso::mbr::create_mbr_for_gpt_hybrid;
+use crate::iso::mbr::{create_mbr_esp_only, create_mbr_for_gpt_hybrid};
 use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
 
 pub struct IsoBuilder {
@@ -188,15 +188,15 @@ impl IsoBuilder {
             };
 
         iso_file.seek(SeekFrom::Start(0))?;
-        create_mbr_for_gpt_hybrid(
-            total_for_mbr,
-            self.is_isohybrid,
-            esp_start_512,
-            esp_size_512,
-        )?
-        .write_to(iso_file)?;
-
         if self.profile.use_gpt {
+            create_mbr_for_gpt_hybrid(
+                total_for_mbr,
+                self.is_isohybrid,
+                esp_start_512,
+                esp_size_512,
+            )?
+            .write_to(iso_file)?;
+
             let mut parts = Vec::new();
             let start: u64 = 34;
             let end: u64 = total_512.saturating_sub(34);
@@ -226,6 +226,10 @@ impl IsoBuilder {
             if !parts.is_empty() {
                 write_gpt_structures(iso_file, total_512, &parts)?;
             }
+        } else {
+            // GPT off: MBR-only ESP layout (Ventoy-compatible)
+            create_mbr_esp_only(total_for_mbr, esp_start_512, esp_size_512)?
+                .write_to(iso_file)?;
         }
         iso_file.sync_data()?;
         Ok(())
