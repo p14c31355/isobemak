@@ -157,9 +157,5 @@ pub fn create_uefi_esp_boot_entry(esp_lba: u32, _esp_size: u32) -> io::Result<Bo
     // No-emulation boot entries MUST have sector_count = 0 per El Torito
     // spec § 6.4.  The actual image size is conveyed via the Section Header
     // entry count field.
-    Ok(mk_boot_entry(
-        BOOT_CATALOG_EFI_PLATFORM_ID,
-        esp_lba,
-        0,
-    ))
+    Ok(mk_boot_entry(BOOT_CATALOG_EFI_PLATFORM_ID, esp_lba, 0))
 }

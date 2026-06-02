@@ -8,8 +8,8 @@ use crate::iso::boot_catalog::BootCatalogEntry;
 use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
-    calculate_lbas, create_bios_boot_entry, create_uefi_esp_boot_entry,
-    ensure_directory_path, get_file_metadata, get_file_size_in_iso, get_lba_for_path,
+    calculate_lbas, create_bios_boot_entry, create_uefi_esp_boot_entry, ensure_directory_path,
+    get_file_metadata, get_file_size_in_iso, get_lba_for_path,
 };
 use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ISO_SECTOR_SIZE};
 use crate::iso::disk_layout::DiskLayout;
@@ -126,7 +126,9 @@ impl IsoBuilder {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
                     boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: bios_boot },
+                    entry_type: BootCatalogEntryType::SectionHeader {
+                        more_follow: bios_boot,
+                    },
                 });
                 entries.push(create_uefi_esp_boot_entry(lba, size)?);
                 true
@@ -136,7 +138,8 @@ impl IsoBuilder {
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
             // Follow ESP pattern: use dedicated section header with zero boot_image_sectors
             let lba = get_lba_for_path(&self.root, &u.destination_in_iso)?;
-            let size = get_file_size_in_iso(&self.root, &u.destination_in_iso)?.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+            let size = get_file_size_in_iso(&self.root, &u.destination_in_iso)?
+                .div_ceil(ISO_SECTOR_SIZE) as u32;
 
             // Initial / Default entry: sector_count MUST be 0 for
             // no-emulation boot according to El Torito spec § 6.4.
@@ -150,7 +153,9 @@ impl IsoBuilder {
                 platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                 boot_image_lba: 0,
                 boot_image_sectors: 0,
-                entry_type: BootCatalogEntryType::SectionHeader { more_follow: bios_boot },
+                entry_type: BootCatalogEntryType::SectionHeader {
+                    more_follow: bios_boot,
+                },
             });
             entries.push(create_uefi_esp_boot_entry(lba, size)?);
             true
