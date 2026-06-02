@@ -59,4 +59,5 @@ impl IsoLayoutProfile {
             uefi_boot_strategy: UefiBootStrategy::EspPartition,
         }
     }
+
 }

@@ -8,7 +8,7 @@ use crate::iso::boot_catalog::BootCatalogEntry;
 use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
 use crate::iso::boot_info::BootInfo;
 use crate::iso::builder_utils::{
-    calculate_lbas, create_bios_boot_entry, create_uefi_boot_entry, create_uefi_esp_boot_entry,
+    calculate_lbas, create_bios_boot_entry, create_uefi_esp_boot_entry,
     ensure_directory_path, get_file_metadata, get_file_size_in_iso, get_lba_for_path,
 };
 use crate::iso::constants::{BACKUP_GPT_RESERVED_512, ISO_SECTOR_SIZE};
@@ -108,21 +108,69 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+        // Check if BIOS boot will follow to determine more_follow flag
+        let bios_boot = bi.and_then(|b| b.bios_boot.as_ref()).is_some();
+
+        // --- UEFI entries (always under a dedicated section header) ---
+        let has_uefi = if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
             if size > 0 {
-                entries.push(create_uefi_esp_boot_entry(lba, size)?);
+                // Initial / Default entry: sector_count MUST be 0 for
+                // no-emulation boot according to El Torito spec § 6.4.
+                entries.push(BootCatalogEntry {
+                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                    boot_image_lba: lba,
+                    boot_image_sectors: 0,
+                    entry_type: BootCatalogEntryType::BootEntry { bootable: true },
+                });
                 entries.push(BootCatalogEntry {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
                     boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: bios_boot },
                 });
                 entries.push(create_uefi_esp_boot_entry(lba, size)?);
+                true
+            } else {
+                false
             }
         } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
-        }
+            // Follow ESP pattern: use dedicated section header with zero boot_image_sectors
+            let lba = get_lba_for_path(&self.root, &u.destination_in_iso)?;
+            let size = get_file_size_in_iso(&self.root, &u.destination_in_iso)?.div_ceil(ISO_SECTOR_SIZE as u64) as u32;
+
+            // Initial / Default entry: sector_count MUST be 0 for
+            // no-emulation boot according to El Torito spec § 6.4.
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: lba,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::BootEntry { bootable: true },
+            });
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: 0,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::SectionHeader { more_follow: bios_boot },
+            });
+            entries.push(create_uefi_esp_boot_entry(lba, size)?);
+            true
+        } else {
+            false
+        };
+
+        // --- BIOS entry in its own section (must not be grouped under EFI) ---
         if let Some(b) = bi.and_then(|b| b.bios_boot.as_ref()) {
+            // A section header is required whenever platform-specific boot
+            // entries follow; without it (or when placed after an EFI section
+            // header) some firmware treats the BIOS entry as an EFI entry.
+            if has_uefi {
+                entries.push(BootCatalogEntry {
+                    platform_id: 0x00,
+                    boot_image_lba: 0,
+                    boot_image_sectors: 0,
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
+                });
+            }
             entries.push(create_bios_boot_entry(&self.root, &b.destination_in_iso)?);
         }
         Ok(entries)
@@ -161,15 +209,15 @@ impl IsoBuilder {
             };
 
         iso_file.seek(SeekFrom::Start(0))?;
-        create_mbr_for_gpt_hybrid(
-            total_for_mbr,
-            self.is_isohybrid,
-            esp_start_512,
-            esp_size_512,
-        )?
-        .write_to(iso_file)?;
-
         if self.profile.use_gpt {
+            create_mbr_for_gpt_hybrid(
+                total_for_mbr,
+                self.is_isohybrid,
+                esp_start_512,
+                esp_size_512,
+            )?
+            .write_to(iso_file)?;
+
             let mut parts = Vec::new();
             let start: u64 = 34;
             let end: u64 = total_512.saturating_sub(34);
