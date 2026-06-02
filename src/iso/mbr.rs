@@ -125,26 +125,6 @@ pub fn create_mbr_for_gpt_hybrid(
     Ok(mbr)
 }
 
-/// MBR with a single ESP (type 0xEF) partition, no GPT protective entry.
-/// This is the layout Ventoy expects: the partition driver reads the MBR
-/// successfully (it lives at byte 0, which is LBA 0 regardless of block size),
-/// finds type 0xEF, and mounts the EFI System Partition.
-pub fn create_mbr_esp_only(
-    total_lbas: u32,
-    esp_start: Option<u32>,
-    esp_size: Option<u32>,
-) -> io::Result<Mbr> {
-    let mut mbr = Mbr::new();
-    if let (Some(s), Some(sz)) = (esp_start, esp_size)
-        && sz > 0
-    {
-        set_part(&mut mbr.partition_table[0], 0x00, 0xEF, s, sz);
-    } else {
-        // Fallback: ESP covering the whole addressable space
-        set_part(&mut mbr.partition_table[0], 0x00, 0xEF, 1, total_lbas.saturating_sub(1));
-    }
-    Ok(mbr)
-}
 
 #[cfg(test)]
 mod tests {

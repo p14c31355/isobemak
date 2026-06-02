@@ -21,7 +21,7 @@ use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
 };
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
-use crate::iso::mbr::{create_mbr_esp_only, create_mbr_for_gpt_hybrid};
+use crate::iso::mbr::create_mbr_for_gpt_hybrid;
 use crate::iso::volume_descriptor::update_total_sectors_in_pvd;
 
 pub struct IsoBuilder {
@@ -226,13 +226,7 @@ impl IsoBuilder {
             if !parts.is_empty() {
                 write_gpt_structures(iso_file, total_512, &parts)?;
             }
-        } else if self.profile.mbr_mode != crate::iso::layout_profile::MbrMode::None {
-            // GPT off: MBR-only ESP layout (Ventoy-compatible)
-            create_mbr_esp_only(total_for_mbr, esp_start_512, esp_size_512)?
-                .write_to(iso_file)?;
         }
-        // MbrMode::None → no MBR/GPT written at all.
-        // The FAT32 image starts at byte 0 (super-floppy style).
         iso_file.sync_data()?;
         Ok(())
     }

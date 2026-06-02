@@ -23,12 +23,6 @@ pub enum EspMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MbrMode {
     HybridLinuxEsp,
-    EspOnly,
-    /// No MBR or GPT partition table at all — the FAT32 image starts at byte 0.
-    /// The whole block device is a single FAT32 volume ("super floppy" style).
-    /// This works with Ventoy only if it does NOT connect a partition driver.
-    /// Enable `write_mbr: false` in the builder when using this mode.
-    None,
 }
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HiddenSectorMode {
@@ -66,71 +60,4 @@ impl IsoLayoutProfile {
         }
     }
 
-    /// Ventoy-compatible layout: GPT off, MBR-only ESP partition.
-    ///
-    /// Ventoy's default 2048-byte block mode cannot read GPT headers (they
-    /// reside at byte 512 = LBA 1 in 512-byte addressing, but Ventoy maps
-    /// LBA 1 → byte 2048).  This layout writes a plain MBR with type 0xEF
-    /// (ESP), which the UEFI partition driver *can* discover because the MBR
-    /// lives at byte 0 regardless of block size.
-    pub fn ventoy_compat() -> Self {
-        Self {
-            use_gpt: false,
-            eltorito_mode: ElToritoMode::Both,
-            esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 2048,
-            mbr_mode: MbrMode::EspOnly,
-            hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
-            uefi_boot_strategy: UefiBootStrategy::EspPartition,
-        }
-    }
-
-    /// Flat MBR layout: no GPT, ESP partition starts at alignment (LBA 2048 or user-set).
-    ///
-    /// This maximizes Ventoy compatibility: the MBR lives at byte 0, GPT is absent,
-    /// and the FAT BPB's hidden-sectors field matches the partition start so the
-    /// UEFI partition driver can mount the filesystem regardless of block size.
-    ///
-    /// Use `esp_alignment_lba_512: 0` only if you know the ESP must start at
-    /// LBA 0 (e.g. for certain embedded or floppy-emulation scenarios).
-    pub fn flat() -> Self {
-        Self {
-            use_gpt: false,
-            eltorito_mode: ElToritoMode::Both,
-            esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 0,
-            mbr_mode: MbrMode::EspOnly,
-            hidden_sectors_mode: HiddenSectorMode::PartitionOffset,
-            uefi_boot_strategy: UefiBootStrategy::EspPartition,
-        }
-    }
-
-    /// Ventoy super-floppy layout: no MBR, no GPT.
-    ///
-    /// The entire ISO9660 filesystem tail is preceded by a FAT32 image written
-    /// at byte 0 (LBA 0 in 512-byte parlance).  The FAT32 BPB at the very
-    /// first sector acts as a "super floppy" — the UEFI partition driver may
-    /// skip the absent partition table and mount the FAT volume directly.
-    ///
-    /// This layout gives the best chance on Ventoy + real hardware because
-    /// the FAT BPB lives at byte 0, which is always LBA 0 regardless of the
-    /// block size Ventoy uses.
-    ///
-    /// **Caveat**: Ventoy explicitly connects the Partition Driver via
-    /// `ventoy_connect_driver(gBlockData.Handle, L"Partition Driver")`,
-    /// so in practice the partition driver *must* see at least an MBR with a
-    /// type-0xEF entry for the ESP to be recognised.  Setting `mbr_mode`
-    /// to `None` disables MBR writing; you may need to patch Ventoy to
-    /// skip the partition-driver connection for such images.
-    pub fn ventoy_direct() -> Self {
-        Self {
-            use_gpt: false,
-            eltorito_mode: ElToritoMode::DirectEfiOnly,
-            esp_mode: EspMode::AppendedPartition,
-            esp_alignment_lba_512: 0,
-            mbr_mode: MbrMode::None,
-            hidden_sectors_mode: HiddenSectorMode::Zero,
-            uefi_boot_strategy: UefiBootStrategy::EspPartition,
-        }
-    }
 }
