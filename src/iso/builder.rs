@@ -140,10 +140,7 @@ impl IsoBuilder {
             // EFI executable, so sector_count MUST reflect the actual file
             // size (not 0 like the ESP entry).  This is the original
             // behaviour that commit 915006a accidentally changed.
-            entries.push(create_uefi_boot_entry(
-                &self.root,
-                &u.destination_in_iso,
-            )?);
+            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
             true
         } else {
             false
