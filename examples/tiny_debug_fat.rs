@@ -1,7 +1,5 @@
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
-use std::process::Command;
 
 fn main() -> std::io::Result<()> {
     // Tiny manual FAT32 image: enough sectors for a minimal test

@@ -1,6 +1,6 @@
 use isobemak::fat::create_fat_image;
-use std::fs::{self, File, OpenOptions};
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::fs::{self, File};
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 fn main() -> std::io::Result<()> {
