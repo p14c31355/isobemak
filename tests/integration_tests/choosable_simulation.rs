@@ -49,11 +49,17 @@ fn find_in_dir_flat(
         let mut offset: usize = 0;
         while offset + 34 <= ISO_SECTOR_SIZE {
             let record_len = scratch[offset] as usize;
-            if record_len == 0 { break; }
-            if offset + record_len > ISO_SECTOR_SIZE { break; }
+            if record_len == 0 {
+                break;
+            }
+            if offset + record_len > ISO_SECTOR_SIZE {
+                break;
+            }
             let name_len = scratch[offset + 32] as usize;
             let name_offset = offset + 33;
-            if name_offset + name_len > ISO_SECTOR_SIZE { break; }
+            if name_offset + name_len > ISO_SECTOR_SIZE {
+                break;
+            }
             let effective_len = if name_len >= 2 && scratch[name_offset + name_len - 2] == b';' {
                 name_len - 2
             } else {
@@ -80,7 +86,10 @@ fn find_in_dir_flat(
 fn resolve_efi_boot_flat(file: &mut File) -> io::Result<(u32, u32)> {
     let pvd = read_file_iso_sector(file, 16)?;
     if pvd[0] != 1 || &pvd[1..6] != b"CD001" {
-        return Err(io::Error::new(io::ErrorKind::InvalidData, "Invalid PVD signature"));
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Invalid PVD signature",
+        ));
     }
     let root_lba = u32::from_le_bytes(pvd[158..162].try_into().unwrap());
     let root_size = u32::from_le_bytes(pvd[166..170].try_into().unwrap());
@@ -88,9 +97,8 @@ fn resolve_efi_boot_flat(file: &mut File) -> io::Result<(u32, u32)> {
 
     let (efi_lba, efi_size) = find_in_dir_flat(file, root_lba, root_size, b"EFI", &mut scratch)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "/EFI not found"))?;
-    let (boot_lba, boot_size) =
-        find_in_dir_flat(file, efi_lba, efi_size, b"BOOT", &mut scratch)
-            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "/EFI/BOOT not found"))?;
+    let (boot_lba, boot_size) = find_in_dir_flat(file, efi_lba, efi_size, b"BOOT", &mut scratch)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "/EFI/BOOT not found"))?;
     find_in_dir_flat(file, boot_lba, boot_size, b"BOOTX64.EFI", &mut scratch)
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "/EFI/BOOT/BOOTX64.EFI not found"))
 }
@@ -99,7 +107,9 @@ fn resolve_efi_boot_flat(file: &mut File) -> io::Result<(u32, u32)> {
 //  Premount script builder (mirrors premount.rs::build_premount_script)
 // ═══════════════════════════════════════════════════════════════════════════
 
-fn hex_nibble(n: u8) -> u8 { if n < 10 { b'0' + n } else { b'A' + (n - 10) } }
+fn hex_nibble(n: u8) -> u8 {
+    if n < 10 { b'0' + n } else { b'A' + (n - 10) }
+}
 
 fn format_decimal_u64(v: u64) -> [u8; 21] {
     let mut buf = [b'0'; 21];
@@ -111,7 +121,9 @@ fn format_decimal_u64(v: u64) -> [u8; 21] {
         loop {
             buf[pos] = b'0' + (val % 10) as u8;
             val /= 10;
-            if val == 0 { break; }
+            if val == 0 {
+                break;
+            }
             pos -= 1;
         }
     }
@@ -121,7 +133,11 @@ fn format_decimal_u64(v: u64) -> [u8; 21] {
 fn build_premount_script_sim(offset_bytes: u64, needs_sr_mod: bool) -> Vec<u8> {
     let mut script = [0u8; 4096];
 
-    let sr_mod_line: &[u8] = if needs_sr_mod { b"modprobe sr_mod 2>/dev/null\n" } else { b"" };
+    let sr_mod_line: &[u8] = if needs_sr_mod {
+        b"modprobe sr_mod 2>/dev/null\n"
+    } else {
+        b""
+    };
 
     let src_template = b"\
 #!/bin/sh
@@ -196,7 +212,9 @@ echo 'gaveup' >>/tmp/choosable.log
 
     let off_str = format_decimal_u64(offset_bytes);
     let mut off_start = 0;
-    while off_start < 20 && off_str[off_start] == b'0' { off_start += 1; }
+    while off_start < 20 && off_str[off_start] == b'0' {
+        off_start += 1;
+    }
 
     let mut pos = 0usize;
     let bytes = src_template;
@@ -204,19 +222,39 @@ echo 'gaveup' >>/tmp/choosable.log
     let mut i = 0;
     while i < bytes.len() {
         if i + 5 <= bytes.len()
-            && bytes[i] == b'S' && bytes[i+1] == b'R' && bytes[i+2] == b'M'
-            && bytes[i+3] == b'O' && bytes[i+4] == b'D'
+            && bytes[i] == b'S'
+            && bytes[i + 1] == b'R'
+            && bytes[i + 2] == b'M'
+            && bytes[i + 3] == b'O'
+            && bytes[i + 4] == b'D'
         {
-            for j in 0..sr_mod_len { if pos < 4095 { script[pos] = sr_mod_line[j]; pos += 1; } }
+            for j in 0..sr_mod_len {
+                if pos < 4095 {
+                    script[pos] = sr_mod_line[j];
+                    pos += 1;
+                }
+            }
             i += 5;
         } else if i + 6 <= bytes.len()
-            && bytes[i] == b'O' && bytes[i+1] == b'F' && bytes[i+2] == b'F'
-            && bytes[i+3] == b'S' && bytes[i+4] == b'E' && bytes[i+5] == b'T'
+            && bytes[i] == b'O'
+            && bytes[i + 1] == b'F'
+            && bytes[i + 2] == b'F'
+            && bytes[i + 3] == b'S'
+            && bytes[i + 4] == b'E'
+            && bytes[i + 5] == b'T'
         {
-            for j in off_start..21 { if pos < 4095 { script[pos] = off_str[j]; pos += 1; } }
+            for j in off_start..21 {
+                if pos < 4095 {
+                    script[pos] = off_str[j];
+                    pos += 1;
+                }
+            }
             i += 6;
         } else {
-            if pos < 4095 { script[pos] = bytes[i]; pos += 1; }
+            if pos < 4095 {
+                script[pos] = bytes[i];
+                pos += 1;
+            }
             i += 1;
         }
     }
@@ -233,18 +271,26 @@ fn cpio_newc_header_sim(buf: &mut [u8], name: &[u8], file_size: u32, mode: u32) 
     let mut pos = 6usize;
     for &v in &header_fields {
         let s = [
-            hex_nibble(((v >> 28) & 0xF) as u8), hex_nibble(((v >> 24) & 0xF) as u8),
-            hex_nibble(((v >> 20) & 0xF) as u8), hex_nibble(((v >> 16) & 0xF) as u8),
-            hex_nibble(((v >> 12) & 0xF) as u8), hex_nibble(((v >> 8) & 0xF) as u8),
-            hex_nibble(((v >> 4) & 0xF) as u8), hex_nibble((v & 0xF) as u8),
+            hex_nibble(((v >> 28) & 0xF) as u8),
+            hex_nibble(((v >> 24) & 0xF) as u8),
+            hex_nibble(((v >> 20) & 0xF) as u8),
+            hex_nibble(((v >> 16) & 0xF) as u8),
+            hex_nibble(((v >> 12) & 0xF) as u8),
+            hex_nibble(((v >> 8) & 0xF) as u8),
+            hex_nibble(((v >> 4) & 0xF) as u8),
+            hex_nibble((v & 0xF) as u8),
         ];
         buf[pos..pos + 8].copy_from_slice(&s);
         pos += 8;
     }
     buf[pos..pos + name.len()].copy_from_slice(name);
     pos += name.len();
-    buf[pos] = 0; pos += 1;
-    while pos < header_buf_len + padded_name_len { buf[pos] = 0; pos += 1; }
+    buf[pos] = 0;
+    pos += 1;
+    while pos < header_buf_len + padded_name_len {
+        buf[pos] = 0;
+        pos += 1;
+    }
     header_buf_len + padded_name_len
 }
 
@@ -281,21 +327,36 @@ fn find_first_overwritable_file_sim(
         let mut offset: usize = 0;
         while offset + 34 <= ISO_SECTOR_SIZE {
             let record_len = scratch[offset] as usize;
-            if record_len == 0 { break; }
-            if offset + record_len > ISO_SECTOR_SIZE { break; }
+            if record_len == 0 {
+                break;
+            }
+            if offset + record_len > ISO_SECTOR_SIZE {
+                break;
+            }
             let name_len = scratch[offset + 32] as usize;
             let name_offset = offset + 33;
-            if name_offset + name_len > ISO_SECTOR_SIZE { break; }
+            if name_offset + name_len > ISO_SECTOR_SIZE {
+                break;
+            }
             let flags = scratch[offset + 25];
             let is_dir = flags & 0x02 != 0;
             let is_dot = name_len == 1 && (scratch[name_offset] == 0 || scratch[name_offset] == 1);
 
             if !is_dot && !is_dir {
-                let eff_len = if name_len >= 2 && scratch[name_offset + name_len - 2] == b';' { name_len - 2 } else { name_len };
-                if eff_len > 15 { offset += record_len; continue; }
+                let eff_len = if name_len >= 2 && scratch[name_offset + name_len - 2] == b';' {
+                    name_len - 2
+                } else {
+                    name_len
+                };
+                if eff_len > 15 {
+                    offset += record_len;
+                    continue;
+                }
                 let cl = eff_len.min(16);
                 let mut upper = [0u8; 16];
-                for i in 0..cl { upper[i] = scratch[name_offset + i].to_ascii_uppercase(); }
+                for i in 0..cl {
+                    upper[i] = scratch[name_offset + i].to_ascii_uppercase();
+                }
                 let is_boot_cat = &upper[..cl] == b"BOOT.CATALOG" || &upper[..cl] == b"BOOT.CAT";
                 let has_cfg = eff_len >= 4
                     && scratch[name_offset + eff_len - 4].to_ascii_uppercase() == b'.'
@@ -334,7 +395,9 @@ fn find_eod_in_dir_sim(
                 }
                 break;
             }
-            if record_len < 34 || off + record_len > ISO_SECTOR_SIZE { break; }
+            if record_len < 34 || off + record_len > ISO_SECTOR_SIZE {
+                break;
+            }
             walked += record_len as u32;
             off += record_len;
         }
@@ -355,8 +418,14 @@ fn make_test_iso_image(bootx64: std::path::PathBuf, kernel: std::path::PathBuf) 
     IsoImage {
         volume_id: None,
         files: vec![
-            IsoImageFile { source: bootx64.clone(), destination: "EFI/BOOT/BOOTX64.EFI".into() },
-            IsoImageFile { source: kernel.clone(),  destination: "EFI/BOOT/KERNEL.EFI".into() },
+            IsoImageFile {
+                source: bootx64.clone(),
+                destination: "EFI/BOOT/BOOTX64.EFI".into(),
+            },
+            IsoImageFile {
+                source: kernel.clone(),
+                destination: "EFI/BOOT/KERNEL.EFI".into(),
+            },
         ],
         boot_info: BootInfo {
             bios_boot: None,
@@ -429,11 +498,11 @@ fn test_cpio_newc_header() {
     let name = b"scripts/live/00choosable";
     let hdr_len = cpio_newc_header_sim(&mut header, name, 1024, 0o100755);
     assert_eq!(&header[..6], b"070701");
-    assert_eq!(&header[6..14], b"00000001");          // inode
-    assert_eq!(&header[14..22], b"000081ED");         // mode 0o100755
-    assert_eq!(&header[54..62], b"00000400");         // file_size 1024
+    assert_eq!(&header[6..14], b"00000001"); // inode
+    assert_eq!(&header[14..22], b"000081ED"); // mode 0o100755
+    assert_eq!(&header[54..62], b"00000400"); // file_size 1024
     assert_eq!(&header[110..110 + name.len()], name);
-    assert_eq!(header[110 + name.len()], 0);           // null terminator
+    assert_eq!(header[110 + name.len()], 0); // null terminator
     assert!(hdr_len > 110);
 }
 
@@ -470,7 +539,13 @@ fn test_find_eod_in_isohybrid_root_dir() -> io::Result<()> {
     let root_size = u32::from_le_bytes(pvd[166..170].try_into().unwrap());
     let mut scratch = [0u8; ISO_SECTOR_SIZE];
     let mut new_root_size: u32 = 0;
-    let eod = find_eod_in_dir_sim(&mut file, root_lba, root_size, &mut scratch, &mut new_root_size);
+    let eod = find_eod_in_dir_sim(
+        &mut file,
+        root_lba,
+        root_size,
+        &mut scratch,
+        &mut new_root_size,
+    );
     assert!(eod.is_some(), "EOD marker must exist in root dir");
     assert!(new_root_size > 0);
     Ok(())
