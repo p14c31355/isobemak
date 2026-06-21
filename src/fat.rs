@@ -494,13 +494,49 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         content_size += p.metadata()?.len();
     }
 
-    // Rough estimate: content + directory overhead + 2×FATs.
-    let overhead = CLUSTER * 5 + 256 * SECTOR; // generous upper bound
-    let rough_total = content_size + overhead;
+    // Compute the exact number of clusters needed for the payload.
+    let needed_data_clusters = content_size.div_ceil(CLUSTER).max(1);
+    // Directory clusters: root (FAT32 only), EFI, BOOT, plus 2 extra for
+    // the volume entry + dot entries in the root if using FAT12/16.
+    let dir_clusters = 3 + 2; // generous over-count
+    // Total data clusters including directory overhead.
+    let min_data_clusters = needed_data_clusters + dir_clusters;
 
-    // Clamp to a safe minimum so we always have at least a few data clusters.
-    let min_sectors = (12 * SEC_PER_CLUS + 16).max(2880); // at least a 1.44 MB floppy worth
-    let estimated_sectors = rough_total.div_ceil(SECTOR).max(min_sectors);
+    // Directly compute the required sector count (worst‑case FAT32
+    // overhead) and then verify with calc_layout, increasing by 10 %
+    // if the first‑pass estimate is insufficient.
+    let data_sectors_est = min_data_clusters * SEC_PER_CLUS;
+    let fat_entries = data_sectors_est.div_ceil(SEC_PER_CLUS) + 2;
+    let fat_bytes = fat_entries * (FatType::Fat32.entry_bytes() / 8); // bytes per FAT
+    let fat_sectors_est = fat_bytes.div_ceil(SECTOR);
+    let mut total_est = FatType::Fat32.reserved_sectors()
+        + 2 * fat_sectors_est
+        + data_sectors_est;
+    total_est = total_est.max(2880);
+
+    let reserved32 = FatType::Fat32.reserved_sectors();
+    loop {
+        let (_fat_sectors, data_sectors) = calc_layout(
+            total_est,
+            reserved32,
+            SEC_PER_CLUS,
+            0,
+            FatType::Fat32.entry_bytes(),
+        );
+        let data_clusters = data_sectors / SEC_PER_CLUS;
+        if data_clusters >= min_data_clusters {
+            break;
+        }
+        // Increase by 10 % and retry — converges quickly without
+        // grossly over‑estimating for medium‑sized payloads.
+        total_est = total_est.saturating_add(total_est / 10).max(total_est + 1);
+    }
+    let estimated_sectors = total_est;
+
+    // Add a 10 % safety margin — the layout solver rounds down after
+    // alignment and the FAT type selection may produce slightly fewer
+    // data clusters than the FAT32‑only estimation computed.
+    let estimated_sectors = estimated_sectors.saturating_add(estimated_sectors / 10);
 
     // Pick the first candidate FAT type, then refine with a layout pass.
     let candidates = [FatType::Fat12, FatType::Fat16, FatType::Fat32];
