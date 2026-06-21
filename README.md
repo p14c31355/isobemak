@@ -8,7 +8,7 @@
 - UEFI Boot Support: Creates UEFI-bootable images with proper ESP (EFI System Partition) handling
 - BIOS/El Torito Boot Support: Provides legacy BIOS boot capability
 - Hybrid Isohybrid Images: Generates hybrid images that can boot both as optical media and USB drives with GPT/MBR structures
-- FAT32 ESP Creation: Automatically creates FAT32-formatted EFI System Partitions for UEFI booting
+- FAT12/16/32 ESP Creation: Automatically creates FAT12/16/32-formatted EFI System Partitions for UEFI booting
 - Additional EFI Boot Files: Supports including extra EFI binaries (e.g. GRUBX64.EFI) in the ESP FAT image
 - Layout Profiles: Configurable `IsoLayoutProfile` for firmware compatibility (hardware vs. emulator), GPT/MBR control, and ESP alignment
 - Auto-Generated grub.cfg: Can auto-generate a `grub.cfg` in the ESP via `UefiBootInfo::grub_cfg_content`
@@ -19,7 +19,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-isobemak = "0.4.0"
+isobemak = "0.4.1"
 ```
 
 ## Usage
