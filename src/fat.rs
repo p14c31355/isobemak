@@ -45,7 +45,7 @@ impl FatType {
         match self {
             FatType::Fat12 => 224, // 14 sectors — plenty for a small ESP
             FatType::Fat16 => 512, // 32 sectors
-            FatType::Fat32 => 0, // root is a cluster chain, not a fixed region
+            FatType::Fat32 => 0,   // root is a cluster chain, not a fixed region
         }
     }
 
@@ -512,7 +512,13 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         let reserved = ft.reserved_sectors();
         let rds = ft.root_dir_sectors();
         // Try the current estimate; if the clusters don't fit then try FAT32.
-        let (fs, ds) = calc_layout(estimated_sectors, reserved, SEC_PER_CLUS, rds, ft.entry_bytes());
+        let (fs, ds) = calc_layout(
+            estimated_sectors,
+            reserved,
+            SEC_PER_CLUS,
+            rds,
+            ft.entry_bytes(),
+        );
         let data_aligned = (ds / SEC_PER_CLUS) * SEC_PER_CLUS;
         let total = (reserved + 2 * fs + rds + data_aligned) as u32;
         let clusters = data_aligned / SEC_PER_CLUS;
@@ -568,9 +574,9 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
     for (_name, p) in files {
         let sz = p.metadata()?.len();
         let n = (sz.div_ceil(CLUSTER)).max(1) as u32;
-        let start = alloc
-            .alloc(n)
-            .ok_or_else(|| io::Error::other(format!("FAT: out of free clusters for file (need {n})")))?;
+        let start = alloc.alloc(n).ok_or_else(|| {
+            io::Error::other(format!("FAT: out of free clusters for file (need {n})"))
+        })?;
         file_starts.push(start);
         file_sizes.push(sz);
     }
@@ -584,8 +590,7 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         let mut area = vec![0u8; CLUSTER as usize];
         area[..32].copy_from_slice(&vol_entry(&vol_label));
         area[32..64].copy_from_slice(&entry_83(&pack_83(b"EFI", b""), 0x10, efi, 0));
-        img[alloc.sector_of(root_clus) as usize * 512..][..CLUSTER as usize]
-            .copy_from_slice(&area);
+        img[alloc.sector_of(root_clus) as usize * 512..][..CLUSTER as usize].copy_from_slice(&area);
     } else {
         // FAT12/16: write directly to the fixed root directory region
         let root_start = (alloc.root_dir_start() * SECTOR) as usize;
@@ -798,8 +803,7 @@ mod tests {
             .read_to_end(&mut v)?;
         assert_eq!(v, b"UEFI loader");
         v.clear();
-        root.open_file("EFI/BOOT/KERNEL.EFI")?
-            .read_to_end(&mut v)?;
+        root.open_file("EFI/BOOT/KERNEL.EFI")?.read_to_end(&mut v)?;
         assert_eq!(v, b"ELF kernel");
         Ok(())
     }
@@ -845,7 +849,10 @@ mod tests {
         // Layout must not overflow.
         assert!(data + 2 * fat + 32 <= 2097152);
         assert!(fat > 0);
-        assert!(data / 8 > 65525, "should need > 65525 clusters (FAT32 territory)");
+        assert!(
+            data / 8 > 65525,
+            "should need > 65525 clusters (FAT32 territory)"
+        );
     }
 
     #[test]
@@ -928,13 +935,15 @@ mod tests {
 
         // Verify fatfs can read it
         let r = File::open(&img).unwrap();
-        let fs =
-            fatfs::FileSystem::new(r, fatfs::FsOptions::new()).map_err(|e| io::Error::new(io::ErrorKind::Other, e)).unwrap();
+        let fs = fatfs::FileSystem::new(r, fatfs::FsOptions::new())
+            .map_err(|e| io::Error::new(io::ErrorKind::Other, e))
+            .unwrap();
         let mut v = Vec::new();
         fs.root_dir()
             .open_file("EFI/BOOT/T.EFI")
             .unwrap()
-            .read_to_end(&mut v).unwrap();
+            .read_to_end(&mut v)
+            .unwrap();
         assert_eq!(v, b"hello");
     }
 }
