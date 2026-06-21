@@ -108,58 +108,60 @@ impl IsoBuilder {
         let mut entries = Vec::new();
         let bi = self.boot_info.as_ref();
 
-        // Check if BIOS boot will follow to determine more_follow flag
-        let bios_boot = bi.and_then(|b| b.bios_boot.as_ref()).is_some();
+        let bios_boot_info = bi.and_then(|b| b.bios_boot.as_ref());
+        let uefi_boot_info = bi.and_then(|b| b.uefi_boot.as_ref());
 
-        // --- UEFI entries (always under a dedicated section header) ---
-        let has_uefi = if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
-            if size > 0 {
-                // Initial / Default entry: sector_count MUST be 0 for
-                // no-emulation boot according to El Torito spec § 6.4.
-                entries.push(BootCatalogEntry {
-                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                    boot_image_lba: lba,
-                    boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::BootEntry { bootable: true },
-                });
-                entries.push(BootCatalogEntry {
-                    platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
-                    boot_image_lba: 0,
-                    boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader {
-                        more_follow: bios_boot,
-                    },
-                });
-                entries.push(create_uefi_esp_boot_entry(lba, size)?);
-                true
+        // Determine effective UEFI LBA/size
+        let (has_uefi, uefi_lba, uefi_size_sectors) =
+            if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
+                if size > 0 {
+                    (true, lba, size)
+                } else {
+                    (false, 0, 0)
+                }
             } else {
-                false
-            }
-        } else if let Some(u) = bi.and_then(|b| b.uefi_boot.as_ref()) {
-            // Non-isohybrid path: UEFI boot entry points directly to the
-            // EFI executable, so sector_count MUST reflect the actual file
-            // size (not 0 like the ESP entry).  This is the original
-            // behaviour that commit 915006a accidentally changed.
-            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
-            true
-        } else {
-            false
-        };
+                (false, 0, 0)
+            };
 
-        // --- BIOS entry in its own section (must not be grouped under EFI) ---
-        if let Some(b) = bi.and_then(|b| b.bios_boot.as_ref()) {
-            // A section header is required whenever platform-specific boot
-            // entries follow; without it (or when placed after an EFI section
-            // header) some firmware treats the BIOS entry as an EFI entry.
-            if has_uefi {
-                entries.push(BootCatalogEntry {
-                    platform_id: 0x00,
-                    boot_image_lba: 0,
-                    boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
-                });
-            }
-            entries.push(create_bios_boot_entry(&self.root, &b.destination_in_iso)?);
+        // Track whether we have a UEFI boot entry from a non-isohybrid path
+        let has_uefi_non_isohybrid =
+            !has_uefi && uefi_boot_info.is_some() && esp_lba.is_none();
+
+        // --- BIOS as Initial/Default Entry (if present) ---
+        // SeaBIOS only checks the Initial/Default Entry; if its platform_id
+        // is 0xEF (UEFI), SeaBIOS skips BIOS boot entirely.  Placing BIOS
+        // here ensures it can boot on legacy firmware while UEFI firmware
+        // discovers the EFI entries via the Section Header with
+        // platform_id=0xEF.
+        if let Some(bios) = bios_boot_info {
+            entries.push(create_bios_boot_entry(&self.root, &bios.destination_in_iso)?);
+        }
+
+        // --- UEFI entries under a dedicated Section Header ---
+        if has_uefi {
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: 0,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::SectionHeader {
+                    more_follow: false,
+                },
+            });
+            // Initial / Default entry within UEFI section: sector_count MUST
+            // be 0 for no-emulation boot according to El Torito spec § 6.4.
+            entries.push(BootCatalogEntry {
+                platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
+                boot_image_lba: uefi_lba,
+                boot_image_sectors: 0,
+                entry_type: BootCatalogEntryType::BootEntry { bootable: true },
+            });
+            entries.push(create_uefi_esp_boot_entry(uefi_lba, uefi_size_sectors)?);
+        } else if has_uefi_non_isohybrid {
+            let u = uefi_boot_info.unwrap();
+            // No BIOS boot present: UEFI is the Initial/Default Entry.
+            // sector_count reflects actual file size (original behaviour
+            // before commit 915006a).
+            entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
         }
         Ok(entries)
     }
