@@ -111,6 +111,25 @@ impl IsoBuilder {
         let bios_boot_info = bi.and_then(|b| b.bios_boot.as_ref());
         let uefi_boot_info = bi.and_then(|b| b.uefi_boot.as_ref());
 
+        // Validate ESP parameters when UEFI boot is requested
+        if uefi_boot_info.is_some() {
+            match (esp_lba, esp_size_sectors) {
+                (Some(_), None) | (None, Some(_)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Invalid ESP configuration: esp_lba and esp_size_sectors must both be Some or both be None",
+                    ));
+                }
+                (Some(_), Some(0)) => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "Invalid ESP configuration: esp_size_sectors cannot be zero when esp_lba is provided",
+                    ));
+                }
+                _ => {}
+            }
+        }
+
         // Determine effective UEFI LBA/size
         let (has_uefi, uefi_lba, uefi_size_sectors) =
             if let (Some(lba), Some(size)) = (esp_lba, esp_size_sectors) {
