@@ -552,7 +552,10 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         // Try the current estimate; if the clusters don't fit then try FAT32.
         let (fs, ds) = calc_layout(estimated_sectors, reserved, SEC_PER_CLUS, rds, ft.entry_bits());
         let data_aligned = (ds / SEC_PER_CLUS) * SEC_PER_CLUS;
-        let total = (reserved + 2 * fs + rds + data_aligned) as u32;
+        let total = match u32::try_from(reserved + 2 * fs + rds + data_aligned) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
         let clusters = data_aligned / SEC_PER_CLUS;
 
         // FAT12 must fit in 65535 sectors (u16 BPB_TotSec16).
