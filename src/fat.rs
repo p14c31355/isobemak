@@ -450,7 +450,7 @@ fn calc_layout(
     root_dir_sectors: u64,
     entry_bits: u64,
 ) -> (u64, u64) {
-    let mut data = total_sectors.saturating_sub(reserved + root_dir_sectors).max(1);
+    let mut data = total_sectors.saturating_sub(reserved.saturating_add(root_dir_sectors)).max(1);
     loop {
         let entries = data.div_ceil(spc) + 2;
         let fat_bytes = (entries * entry_bits).div_ceil(8);
