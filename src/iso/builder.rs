@@ -147,7 +147,10 @@ impl IsoBuilder {
         // discovers the EFI entries via the Section Header with
         // platform_id=0xEF.
         if let Some(bios) = bios_boot_info {
-            entries.push(create_bios_boot_entry(&self.root, &bios.destination_in_iso)?);
+            entries.push(create_bios_boot_entry(
+                &self.root,
+                &bios.destination_in_iso,
+            )?);
 
             // UEFI entries follow under a dedicated Section Header
             if has_uefi {
@@ -155,9 +158,7 @@ impl IsoBuilder {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
                     boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader {
-                        more_follow: false,
-                    },
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
                 });
                 entries.push(create_uefi_esp_boot_entry(uefi_lba, uefi_size_sectors)?);
             } else if let Some(u) = uefi_boot_info {
@@ -166,9 +167,7 @@ impl IsoBuilder {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
                     boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader {
-                        more_follow: false,
-                    },
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
                 });
                 entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
             }
@@ -190,9 +189,7 @@ impl IsoBuilder {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
                     boot_image_sectors: 0,
-                    entry_type: BootCatalogEntryType::SectionHeader {
-                        more_follow: false,
-                    },
+                    entry_type: BootCatalogEntryType::SectionHeader { more_follow: false },
                 });
                 entries.push(create_uefi_esp_boot_entry(uefi_lba, uefi_size_sectors)?);
             } else if let Some(u) = uefi_boot_info {
