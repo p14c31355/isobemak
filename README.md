@@ -19,7 +19,7 @@ Add this to your `Cargo.toml`:
 
 ```toml
 [dependencies]
-isobemak = "0.3.3"
+isobemak = "0.4.0"
 ```
 
 ## Usage
