@@ -338,9 +338,8 @@ fn write_bpb(
         FatType::Fat12 | FatType::Fat16 => {
             // FAT12/16: sectors per FAT in u16 field at offset 22
             b[22..24].copy_from_slice(&(fat_sectors as u16).to_le_bytes());
-            // If total_sectors >= 65536, use the 32-bit field (and set the
-            // 16-bit field to 0 in the caller).  Otherwise both fields must
-            // be 0 per the FAT spec.
+            // If total_sectors >= 65536, use the 32-bit field (the 16-bit field
+            // is set to 0 above). Otherwise, the 32-bit field must be 0.
             let total32 = if total_sectors >= 65536 { total_sectors } else { 0 };
             b[32..36].copy_from_slice(&total32.to_le_bytes());
             b[36] = 0x80; // drive number
