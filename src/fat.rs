@@ -532,7 +532,7 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         }
         // Increase by 10 % and retry — converges quickly without
         // grossly over‑estimating for medium‑sized payloads.
-        total_est = total_est.saturating_add(total_est / 10).max(total_est + 1);
+        total_est = total_est.saturating_add((total_est / 10).max(1));
     }
     let estimated_sectors = total_est;
 
