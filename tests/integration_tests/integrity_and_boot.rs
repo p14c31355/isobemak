@@ -87,14 +87,11 @@ fn test_iso_integrity_and_boot_modes() -> io::Result<()> {
     println!("isoinfo -d output (integrity test):\n{}", isoinfo_d_output);
     assert!(isoinfo_d_output.contains("El Torito VD version 1 found"));
     // Validation Entry platform ID is 0x00 (80x86) per El Torito spec §6.2.1.
-    // UEFI identification is via boot entry system_type=0xEF.
     assert!(isoinfo_d_output.contains("Arch 0 (x86)"));
-    // Single-entry UEFI boot catalog: 0x88 entry, No Emulation (0x00), system_type=0xEF.
-    // This is the canonical El Torito UEFI layout recognised by OVMF and real firmware.
+    // BIOS is the Initial/Default Entry (Sys type 0), no-emulation boot.
+    // UEFI entries follow under a dedicated Section Header with platform_id=0xEF.
     assert!(isoinfo_d_output.contains("Boot media 0 (No Emulation Boot)"));
-    assert!(isoinfo_d_output.contains("Sys type EF"));
-    // Removed assertion for "EFI boot entry is present" as isoinfo -d does not output this string directly.
-    // Detailed UEFI boot entry verification is handled in `test_create_isohybrid_uefi_iso`.
+    assert!(isoinfo_d_output.contains("Sys type 0"));
 
     // 7z may fail to extract from isohybrid images (offset ISO9660 start),
     // so this check is best-effort only. Structural verification is done above.

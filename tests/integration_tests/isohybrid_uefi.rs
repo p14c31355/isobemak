@@ -94,17 +94,18 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Validation entry platform ID must be 0x00 (80x86) per El Torito spec"
     );
 
-    // Ubuntu/xorriso-compatible multi-entry UEFI boot catalog:
+    // UEFI-only boot catalog (no BIOS boot):
     //
-    //   Validation Entry    (offset 0,  32 bytes): header_id=1, platform=0x00
-    //   Boot Entry 0        (offset 32, 32 bytes): flag=0x88, NoEmul, system_type=0xEF, LBA→ESP
-    //   Section Header      (offset 64, 32 bytes): flag=0x91, platform=0xEF, entries=1
-    //   Section Boot Entry  (offset 96, 32 bytes): flag=0x88, NoEmul, system_type=0x00, LBA→ESP
+    //   Validation Entry     (offset 0,  32 bytes): header_id=1, platform=0x00
+    //   Boot Entry 0         (offset 32, 32 bytes): flag=0x88, NoEmul, system_type=0xEF, LBA→ESP
+    //   Section Header       (offset 64, 32 bytes): flag=0x91, platform=0xEF, entries=1
+    //   Section Boot Entry   (offset 96, 32 bytes): flag=0x88, NoEmul, system_type=0xEF, LBA→ESP
     //
-    // This is the xorriso/Ubuntu El Torito UEFI layout.  Real UEFI firmware
-    // (InsydeH2O, old AMI, Lenovo, Panasonic) requires the Section Header
-    // with Platform ID 0xEF to discover the UEFI boot entry.
-    //
+    // El Torito spec requires offset 32 to be the Initial/Default Entry
+    // (a BootEntry, NOT a SectionHeader).  A Section Header with
+    // platform_id=0xEF follows for firmware that requires it to discover
+    // the UEFI boot entry (InsydeH2O, old AMI, Lenovo, Panasonic).
+
     // --- Boot Entry 0 (Initial/Default, offset 32) ---
     let boot0_offset = 32;
     let boot0_bytes = &boot_catalog_sector[boot0_offset..boot0_offset + 32];
@@ -131,10 +132,6 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Boot Entry 0 system_type must be 0xEF for UEFI, got {:#x}",
         boot0_sys
     );
-    // efiboot.img is a large file (~260 MiB FAT32 minimum) placed after
-    // regular files in the ISO filesystem (alphabetical sort order).
-    // Its LBA depends on the file layout and is expected to be > 20
-    // but may be large due to the FAT32 minimum size constraint.
     assert!(
         boot0_lba > 19,
         "Boot Entry 0 Load RBA ({}) should be after volume descriptors (>=20), got {}",
@@ -198,9 +195,12 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
         "Section Boot Entry must use No Emulation (0x00), got {:#x}",
         sentry_media
     );
-    // Under Section Header, system_type is conventionally 0x00
-    // (the section header's platform_id already identifies the target as EFI).
-    // OVMF and real firmware look at the Section Header platform, not this field.
+    assert_eq!(
+        sentry_sys,
+        isobemak::iso::boot_catalog::BOOT_CATALOG_EFI_PLATFORM_ID,
+        "Section Boot Entry system_type must be 0xEF, got {:#x}",
+        sentry_sys
+    );
     assert_eq!(
         sentry_sectors, 0,
         "Section Boot Entry no-emulation sector_count must be 0, got {}",
@@ -212,7 +212,10 @@ fn test_create_isohybrid_uefi_iso() -> io::Result<()> {
     );
 
     println!(
-        "Verified multi-entry UEFI catalog:\n  Boot Entry 0: flag=0x88, sys_type=0xEF, LBA={}, Sectors=0\n  Section Header: flag=0x91, platform=0xEF, entries=1\n  Section Boot Entry: flag=0x88, sys_type=0x{:02x}, LBA={}, Sectors=0",
+        "Verified multi-entry UEFI catalog:\n  \
+         Boot Entry 0: flag=0x88, sys_type=0xEF, LBA={}, Sectors=0\n  \
+         Section Header: flag=0x91, platform=0xEF, entries=1\n  \
+         Section Boot Entry: flag=0x88, sys_type=0x{:02x}, LBA={}, Sectors=0",
         boot0_lba, sentry_sys, sentry_lba
     );
 
