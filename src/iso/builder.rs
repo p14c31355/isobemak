@@ -111,23 +111,21 @@ impl IsoBuilder {
         let bios_boot_info = bi.and_then(|b| b.bios_boot.as_ref());
         let uefi_boot_info = bi.and_then(|b| b.uefi_boot.as_ref());
 
-        // Validate ESP parameters when UEFI boot is requested
-        if uefi_boot_info.is_some() {
-            match (esp_lba, esp_size_sectors) {
-                (Some(_), None) | (None, Some(_)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Invalid ESP configuration: esp_lba and esp_size_sectors must both be Some or both be None",
-                    ));
-                }
-                (Some(_), Some(0)) => {
-                    return Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "Invalid ESP configuration: esp_size_sectors cannot be zero when esp_lba is provided",
-                    ));
-                }
-                _ => {}
+        // Validate ESP parameters (always, not only when UEFI boot is requested)
+        match (esp_lba, esp_size_sectors) {
+            (Some(_), None) | (None, Some(_)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid ESP configuration: esp_lba and esp_size_sectors must both be Some or both be None",
+                ));
             }
+            (Some(_), Some(0)) => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "Invalid ESP configuration: esp_size_sectors cannot be zero when esp_lba is provided",
+                ));
+            }
+            _ => {}
         }
 
         // Determine effective UEFI LBA/size
@@ -141,13 +139,6 @@ impl IsoBuilder {
             } else {
                 (false, 0, 0)
             };
-
-        // Track whether we have a UEFI boot entry from a non-isohybrid path
-        // (direct EFI executable in ISO filesystem, not an ESP FAT image).
-        // Only valid when BIOS is NOT present, since BIOS+non-isohybrid-UEFI
-        // requires a Section Header before the UEFI entry (see below).
-        let has_uefi_non_isohybrid =
-            !has_uefi && uefi_boot_info.is_some() && esp_lba.is_none() && bios_boot_info.is_none();
 
         // --- BIOS as Initial/Default Entry (if present) ---
         // SeaBIOS only checks the Initial/Default Entry; if its platform_id
@@ -169,9 +160,8 @@ impl IsoBuilder {
                     },
                 });
                 entries.push(create_uefi_esp_boot_entry(uefi_lba, uefi_size_sectors)?);
-            } else if uefi_boot_info.is_some() && esp_lba.is_none() {
+            } else if let Some(u) = uefi_boot_info {
                 // BIOS + non-isohybrid UEFI: UEFI entry under a Section Header
-                let u = uefi_boot_info.unwrap();
                 entries.push(BootCatalogEntry {
                     platform_id: BOOT_CATALOG_EFI_PLATFORM_ID,
                     boot_image_lba: 0,
@@ -205,8 +195,7 @@ impl IsoBuilder {
                     },
                 });
                 entries.push(create_uefi_esp_boot_entry(uefi_lba, uefi_size_sectors)?);
-            } else if has_uefi_non_isohybrid {
-                let u = uefi_boot_info.unwrap();
+            } else if let Some(u) = uefi_boot_info {
                 entries.push(create_uefi_boot_entry(&self.root, &u.destination_in_iso)?);
             }
         }
