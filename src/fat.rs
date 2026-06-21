@@ -340,7 +340,11 @@ fn write_bpb(
             b[22..24].copy_from_slice(&(fat_sectors as u16).to_le_bytes());
             // If total_sectors >= 65536, use the 32-bit field (the 16-bit field
             // is set to 0 above). Otherwise, the 32-bit field must be 0.
-            let total32 = if total_sectors >= 65536 { total_sectors } else { 0 };
+            let total32 = if total_sectors >= 65536 {
+                total_sectors
+            } else {
+                0
+            };
             b[32..36].copy_from_slice(&total32.to_le_bytes());
             b[36] = 0x80; // drive number
             // b[37] = 0; reserved
@@ -450,7 +454,9 @@ fn calc_layout(
     root_dir_sectors: u64,
     entry_bits: u64,
 ) -> (u64, u64) {
-    let mut data = total_sectors.saturating_sub(reserved.saturating_add(root_dir_sectors)).max(1);
+    let mut data = total_sectors
+        .saturating_sub(reserved.saturating_add(root_dir_sectors))
+        .max(1);
     loop {
         let entries = data.div_ceil(spc) + 2;
         let fat_bytes = (entries * entry_bits).div_ceil(8);
@@ -511,9 +517,7 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
     let fat_entries = data_sectors_est.div_ceil(SEC_PER_CLUS) + 2;
     let fat_bytes = fat_entries * (FatType::Fat32.entry_bits() / 8); // bytes per FAT
     let fat_sectors_est = fat_bytes.div_ceil(SECTOR);
-    let mut total_est = FatType::Fat32.reserved_sectors()
-        + 2 * fat_sectors_est
-        + data_sectors_est;
+    let mut total_est = FatType::Fat32.reserved_sectors() + 2 * fat_sectors_est + data_sectors_est;
     total_est = total_est.max(2880);
 
     let reserved32 = FatType::Fat32.reserved_sectors();
@@ -550,7 +554,13 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         let reserved = ft.reserved_sectors();
         let rds = ft.root_dir_sectors();
         // Try the current estimate; if the clusters don't fit then try FAT32.
-        let (fs, ds) = calc_layout(estimated_sectors, reserved, SEC_PER_CLUS, rds, ft.entry_bits());
+        let (fs, ds) = calc_layout(
+            estimated_sectors,
+            reserved,
+            SEC_PER_CLUS,
+            rds,
+            ft.entry_bits(),
+        );
         let data_aligned = (ds / SEC_PER_CLUS) * SEC_PER_CLUS;
         let total = match u32::try_from(reserved + 2 * fs + rds + data_aligned) {
             Ok(t) => t,
