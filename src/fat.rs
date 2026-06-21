@@ -77,8 +77,8 @@ impl FatType {
         }
     }
 
-    /// Number of bytes one FAT entry occupies on disk.
-    fn entry_bytes(self) -> u64 {
+    /// Number of bits one FAT entry occupies on disk.
+    fn entry_bits(self) -> u64 {
         match self {
             FatType::Fat12 => 12,
             FatType::Fat16 => 16,
@@ -338,8 +338,10 @@ fn write_bpb(
         FatType::Fat12 | FatType::Fat16 => {
             // FAT12/16: sectors per FAT in u16 field at offset 22
             b[22..24].copy_from_slice(&(fat_sectors as u16).to_le_bytes());
-            // BPB_TotSec32 must be 0 when BPB_TotSec16 is non-zero (FAT spec)
-            b[32..36].copy_from_slice(&0u32.to_le_bytes());
+            // If total_sectors >= 65536, use the 32-bit field (the 16-bit field
+            // is set to 0 above). Otherwise, the 32-bit field must be 0.
+            let total32 = if total_sectors >= 65536 { total_sectors } else { 0 };
+            b[32..36].copy_from_slice(&total32.to_le_bytes());
             b[36] = 0x80; // drive number
             // b[37] = 0; reserved
             b[38] = 0x29; // extended boot signature
@@ -448,7 +450,7 @@ fn calc_layout(
     root_dir_sectors: u64,
     entry_bits: u64,
 ) -> (u64, u64) {
-    let mut data = total_sectors - reserved - root_dir_sectors;
+    let mut data = total_sectors.saturating_sub(reserved.saturating_add(root_dir_sectors)).max(1);
     loop {
         let entries = data.div_ceil(spc) + 2;
         let fat_bytes = (entries * entry_bits).div_ceil(8);
@@ -494,13 +496,49 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         content_size += p.metadata()?.len();
     }
 
-    // Rough estimate: content + directory overhead + 2×FATs.
-    let overhead = CLUSTER * 5 + 256 * SECTOR; // generous upper bound
-    let rough_total = content_size + overhead;
+    // Compute the exact number of clusters needed for the payload.
+    let needed_data_clusters = content_size.div_ceil(CLUSTER).max(1);
+    // Directory clusters: root (FAT32 only), EFI, BOOT, plus 2 extra for
+    // the volume entry + dot entries in the root if using FAT12/16.
+    let dir_clusters = 3 + 2; // generous over-count
+    // Total data clusters including directory overhead.
+    let min_data_clusters = needed_data_clusters + dir_clusters;
 
-    // Clamp to a safe minimum so we always have at least a few data clusters.
-    let min_sectors = (12 * SEC_PER_CLUS + 16).max(2880); // at least a 1.44 MB floppy worth
-    let estimated_sectors = rough_total.div_ceil(SECTOR).max(min_sectors);
+    // Directly compute the required sector count (worst‑case FAT32
+    // overhead) and then verify with calc_layout, increasing by 10 %
+    // if the first‑pass estimate is insufficient.
+    let data_sectors_est = min_data_clusters * SEC_PER_CLUS;
+    let fat_entries = data_sectors_est.div_ceil(SEC_PER_CLUS) + 2;
+    let fat_bytes = fat_entries * (FatType::Fat32.entry_bits() / 8); // bytes per FAT
+    let fat_sectors_est = fat_bytes.div_ceil(SECTOR);
+    let mut total_est = FatType::Fat32.reserved_sectors()
+        + 2 * fat_sectors_est
+        + data_sectors_est;
+    total_est = total_est.max(2880);
+
+    let reserved32 = FatType::Fat32.reserved_sectors();
+    loop {
+        let (_fat_sectors, data_sectors) = calc_layout(
+            total_est,
+            reserved32,
+            SEC_PER_CLUS,
+            0,
+            FatType::Fat32.entry_bits(),
+        );
+        let data_clusters = data_sectors / SEC_PER_CLUS;
+        if data_clusters >= min_data_clusters {
+            break;
+        }
+        // Increase by 10 % and retry — converges quickly without
+        // grossly over‑estimating for medium‑sized payloads.
+        total_est = total_est.saturating_add((total_est / 10).max(1));
+    }
+    let estimated_sectors = total_est;
+
+    // Add a 10 % safety margin — the layout solver rounds down after
+    // alignment and the FAT type selection may produce slightly fewer
+    // data clusters than the FAT32‑only estimation computed.
+    let estimated_sectors = estimated_sectors.saturating_add(estimated_sectors / 10);
 
     // Pick the first candidate FAT type, then refine with a layout pass.
     let candidates = [FatType::Fat12, FatType::Fat16, FatType::Fat32];
@@ -512,19 +550,21 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
         let reserved = ft.reserved_sectors();
         let rds = ft.root_dir_sectors();
         // Try the current estimate; if the clusters don't fit then try FAT32.
-        let (fs, ds) = calc_layout(
-            estimated_sectors,
-            reserved,
-            SEC_PER_CLUS,
-            rds,
-            ft.entry_bytes(),
-        );
+        let (fs, ds) = calc_layout(estimated_sectors, reserved, SEC_PER_CLUS, rds, ft.entry_bits());
         let data_aligned = (ds / SEC_PER_CLUS) * SEC_PER_CLUS;
-        let total = (reserved + 2 * fs + rds + data_aligned) as u32;
+        let total = match u32::try_from(reserved + 2 * fs + rds + data_aligned) {
+            Ok(t) => t,
+            Err(_) => continue,
+        };
         let clusters = data_aligned / SEC_PER_CLUS;
 
-        // FAT12/16 volumes must fit in 65535 sectors (u16 BPB_TotSec16)
-        let fits_in_u16 = total < 65536;
+        // FAT12 must fit in 65535 sectors (u16 BPB_TotSec16).
+        // FAT16 can use the 32-bit sector count for larger volumes.
+        let is_valid_for_type = match ft {
+            FatType::Fat12 => total < 65536,
+            FatType::Fat16 => true,
+            FatType::Fat32 => true,
+        };
 
         // Does the computed cluster count fall within this FAT type's range?
         let max_clusters = match ft {
@@ -532,7 +572,7 @@ fn build_image(files: &[(&str, &Path)], hidden: u32) -> io::Result<(Vec<u8>, u32
             FatType::Fat16 => 65524u64,
             FatType::Fat32 => u64::MAX,
         };
-        if clusters <= max_clusters && fits_in_u16 {
+        if clusters <= max_clusters && is_valid_for_type {
             chosen_type = ft;
             chosen_total = total;
             chosen_fat_sectors = fs as u32;
