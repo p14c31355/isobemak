@@ -17,7 +17,7 @@ pub struct IsoImage {
     pub files: Vec<IsoImageFile>,
     pub boot_info: BootInfo,
     /// ISO layout profile for firmware compatibility.
-    /// Default: [IsoLayoutProfile::hardware] (GPT disabled, 2 MiB ESP alignment).
+    /// Default: [IsoLayoutProfile::hardware] (GPT enabled, 2 MiB ESP alignment).
     /// For QEMU/OVMF, use [IsoLayoutProfile::emulator] (GPT enabled).
     pub layout_profile: IsoLayoutProfile,
 }
