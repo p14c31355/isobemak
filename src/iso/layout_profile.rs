@@ -50,7 +50,7 @@ impl IsoLayoutProfile {
     }
     pub fn hardware() -> Self {
         Self {
-            use_gpt: true,
+            use_gpt: false,
             eltorito_mode: ElToritoMode::Both,
             esp_mode: EspMode::AppendedPartition,
             esp_alignment_lba_512: 4096,
