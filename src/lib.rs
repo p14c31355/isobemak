@@ -105,9 +105,9 @@ mod tests {
 
         // Verify the boot information table in the BIOS boot image
         // by reading the boot catalog (LBA 19) to find the boot image LBA.
-        use std::io::{Read, Seek, SeekFrom};
-        use crate::iso::constants::ISO_SECTOR_SIZE;
         use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
+        use crate::iso::constants::ISO_SECTOR_SIZE;
+        use std::io::{Read, Seek, SeekFrom};
 
         let mut iso_file = std::fs::File::open(&iso_output_path)?;
         let mut catalog_sector = [0u8; ISO_SECTOR_SIZE as usize];
@@ -118,8 +118,7 @@ mod tests {
 
         // The Initial/Default Entry is at offset 32 in the catalog.
         // Bytes 40..44 (offset 8 within the entry) = boot image LBA (LE u32).
-        let boot_image_lba =
-            u32::from_le_bytes(catalog_sector[40..44].try_into().unwrap());
+        let boot_image_lba = u32::from_le_bytes(catalog_sector[40..44].try_into().unwrap());
 
         assert!(
             boot_image_lba > 0,
@@ -155,15 +154,13 @@ mod tests {
         let boot_image_size = size as u64;
         let mut expected_checksum = 0u32;
         if boot_image_size > 64 {
-            let sample_offset =
-                boot_image_lba as u64 * ISO_SECTOR_SIZE as u64 + 64;
+            let sample_offset = boot_image_lba as u64 * ISO_SECTOR_SIZE as u64 + 64;
             let mut buf = vec![0u8; (boot_image_size - 64) as usize];
             iso_file.seek(SeekFrom::Start(sample_offset))?;
             iso_file.read_exact(&mut buf)?;
             for chunk in buf.chunks_exact(4) {
-                expected_checksum = expected_checksum.wrapping_add(
-                    u32::from_le_bytes(chunk.try_into().unwrap()),
-                );
+                expected_checksum =
+                    expected_checksum.wrapping_add(u32::from_le_bytes(chunk.try_into().unwrap()));
             }
         }
         let actual_checksum = u32::from_le_bytes(table[12..16].try_into().unwrap());

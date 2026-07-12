@@ -18,8 +18,8 @@ use crate::iso::gpt::main_gpt_functions::write_gpt_structures;
 use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEntry};
 use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
-    copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
-    write_boot_info_table,
+    copy_files, finalize_iso, write_boot_catalog_to_iso, write_boot_info_table, write_descriptors,
+    write_directories,
 };
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
 use crate::iso::mbr::create_mbr_for_gpt_hybrid;
@@ -325,12 +325,12 @@ impl IsoBuilder {
         // whether the underlying file was truncated before being passed in.
         let end_of_data = iso_file.stream_position()?;
 
-        if let Some(bi) = &self.boot_info {
-            if let Some(bios) = &bi.bios_boot {
-                let lba = get_lba_for_path(&self.root, &bios.destination_in_iso)?;
-                let size = get_file_size_in_iso(&self.root, &bios.destination_in_iso)?;
-                write_boot_info_table(iso_file, lba, size)?;
-            }
+        if let Some(bi) = &self.boot_info
+            && let Some(bios) = &bi.bios_boot
+        {
+            let lba = get_lba_for_path(&self.root, &bios.destination_in_iso)?;
+            let size = get_file_size_in_iso(&self.root, &bios.destination_in_iso)?;
+            write_boot_info_table(iso_file, lba, size)?;
         }
 
         // Seek back to the saved end-of-data position so finalize_iso can
