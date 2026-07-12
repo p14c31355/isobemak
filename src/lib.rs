@@ -36,7 +36,7 @@ mod tests {
     fn setup_iso_creation(temp_dir: &Path) -> io::Result<IsoImage> {
         let files = create_dummy_files!(
             temp_dir,
-            "isolinux.bin" => 64,
+            "isolinux.bin" => 256,
             "isolinux.cfg" => 1,
             "BOOTX64.EFI" => 64,
             "kernel" => 16,
@@ -102,6 +102,77 @@ mod tests {
         // Assert that the ISO file was created and is not empty
         assert!(iso_output_path.exists());
         assert!(iso_output_path.metadata()?.len() > 0);
+
+        // Verify the boot information table in the BIOS boot image
+        // by reading the boot catalog (LBA 19) to find the boot image LBA.
+        use std::io::{Read, Seek, SeekFrom};
+        use crate::iso::constants::ISO_SECTOR_SIZE;
+        use crate::iso::boot_catalog::LBA_BOOT_CATALOG;
+
+        let mut iso_file = std::fs::File::open(&iso_output_path)?;
+        let mut catalog_sector = [0u8; ISO_SECTOR_SIZE as usize];
+        iso_file.seek(SeekFrom::Start(
+            LBA_BOOT_CATALOG as u64 * ISO_SECTOR_SIZE as u64,
+        ))?;
+        iso_file.read_exact(&mut catalog_sector)?;
+
+        // The Initial/Default Entry is at offset 32 in the catalog.
+        // Bytes 40..44 (offset 8 within the entry) = boot image LBA (LE u32).
+        let boot_image_lba =
+            u32::from_le_bytes(catalog_sector[40..44].try_into().unwrap());
+
+        assert!(
+            boot_image_lba > 0,
+            "boot image LBA must be non-zero, got {boot_image_lba}"
+        );
+
+        // Read the boot info table at offset 8 within the boot image's sector.
+        let mut table = [0u8; 56];
+        iso_file.seek(SeekFrom::Start(
+            boot_image_lba as u64 * ISO_SECTOR_SIZE as u64 + 8,
+        ))?;
+        iso_file.read_exact(&mut table)?;
+
+        // PVD is always at LBA 16.
+        assert_eq!(
+            u32::from_le_bytes(table[0..4].try_into().unwrap()),
+            16,
+            "PVD LBA should be 16"
+        );
+        // Boot image LBA matches what the boot catalog says.
+        assert_eq!(
+            u32::from_le_bytes(table[4..8].try_into().unwrap()),
+            boot_image_lba,
+            "boot image LBA mismatch in boot info table"
+        );
+        // Boot image size is positive.
+        let size = u32::from_le_bytes(table[8..12].try_into().unwrap());
+        assert!(size > 0, "boot image size must be non-zero");
+        // Reserved bytes are zeroed.
+        assert_eq!(&table[16..56], &[0u8; 40], "reserved bytes not zero");
+
+        // Verify the checksum: read bytes 64..size from the boot image and sum u32 LE words.
+        let boot_image_size = size as u64;
+        let mut expected_checksum = 0u32;
+        if boot_image_size > 64 {
+            let sample_offset =
+                boot_image_lba as u64 * ISO_SECTOR_SIZE as u64 + 64;
+            let mut buf = vec![0u8; (boot_image_size - 64) as usize];
+            iso_file.seek(SeekFrom::Start(sample_offset))?;
+            iso_file.read_exact(&mut buf)?;
+            for chunk in buf.chunks(4) {
+                if chunk.len() == 4 {
+                    expected_checksum = expected_checksum.wrapping_add(
+                        u32::from_le_bytes(chunk.try_into().unwrap()),
+                    );
+                }
+            }
+        }
+        let actual_checksum = u32::from_le_bytes(table[12..16].try_into().unwrap());
+        assert_eq!(
+            actual_checksum, expected_checksum,
+            "boot info table checksum mismatch"
+        );
 
         Ok(())
     }
