@@ -6,7 +6,7 @@ This document outlines the API for `isobemak`, a Rust crate for creating bootabl
 
 ### `build_iso(iso_path: &Path, image: &IsoImage, is_isohybrid: bool) -> io::Result<(PathBuf, Option<NamedTempFile>, File, Option<u32>)>`
 
-**Description:** Builds a bootable ISO 9660 image at the specified path. For hybrid isohybrid images that can boot from both optical media and USB drives, set `is_isohybrid` to `true`.
+**Description:** Builds a bootable ISO 9660 image at the specified path. The boot information table (`-boot-info-table`) is automatically patched into the BIOS boot image (if configured), providing bootloaders such as ISOLINUX and Limine with the PVD LBA, boot image LBA, file length, and checksum. For hybrid isohybrid images that can boot from both optical media and USB drives, set `is_isohybrid` to `true`.
 
 **Parameters:**
 - `iso_path`: The path where the ISO image will be created
@@ -109,7 +109,7 @@ pub struct IsoBuilder { /* ... */ }
 - `set_profile(&mut self, profile: IsoLayoutProfile)`: Sets the layout profile
 - `set_isohybrid(&mut self, is_isohybrid: bool)`: Enables hybrid isohybrid creation
 - `set_disk_layout(&mut self, layout: DiskLayout)`: Sets a manual disk layout
-- `build(&mut self, iso_file: &mut File, iso_path: &Path, esp_lba: Option<u32>, esp_size_sectors: Option<u32>) -> io::Result<()>`: Builds the ISO
+- `build(&mut self, iso_file: &mut File, iso_path: &Path, esp_lba: Option<u32>, esp_size_sectors: Option<u32>) -> io::Result<()>`: Builds the ISO. **Note:** The `iso_file` must be opened with **read + write** access (e.g., `OpenOptions::new().read(true).write(true).create(true).truncate(true)`) because the builder reads back boot image data to compute the boot information table checksum. Using `File::create()` (write-only) will cause `EBADF` errors
 
 **Public fields:**
 - `esp_lba: Option<u32>` — ESP partition starting LBA (set automatically during build if not specified)
@@ -477,7 +477,7 @@ let (_iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &
 
 ```rust
 use isobemak::{IsoBuilder, BootInfo, BiosBootInfo, UefiBootInfo};
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
 let mut builder = IsoBuilder::new();
@@ -505,7 +505,14 @@ let boot_info = BootInfo {
 builder.set_boot_info(boot_info);
 builder.set_profile(IsoLayoutProfile::default());
 
-let mut iso_file = File::create("output.iso")?;
+// NOTE: Must use read+write access (the builder reads back boot image data
+// to compute the boot information table checksum).
+let mut iso_file = OpenOptions::new()
+    .read(true)
+    .write(true)
+    .create(true)
+    .truncate(true)
+    .open("output.iso")?;
 builder.build(&mut iso_file, Path::new("output.iso"), None, None)?;
 ```
 
