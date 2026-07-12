@@ -1,4 +1,5 @@
 ## [unreleased]
+## [unreleased]
 - Implement boot information table (`-boot-info-table`) patching for BIOS boot images. The 56-byte structure (PVD LBA, boot image LBA, file length, checksum) is now automatically written at offsets 8–63 of the BIOS boot image, fixing boot for stage‑1 loaders such as ISOLINUX and Limine
 - **Breaking:** `IsoBuilder::build()` now requires the `iso_file` to be opened with **read + write** access. Use `OpenOptions::new().read(true).write(true).create(true).truncate(true).open(...)` instead of `File::create(...)`. The `build_iso()` convenience function handles this automatically
 
