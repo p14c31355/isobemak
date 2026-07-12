@@ -1,4 +1,4 @@
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -19,6 +19,7 @@ use crate::iso::gpt::partition_entry::{EFI_SYSTEM_PARTITION_GUID, GptPartitionEn
 use crate::iso::iso_image::IsoImage;
 use crate::iso::iso_writer::{
     copy_files, finalize_iso, write_boot_catalog_to_iso, write_descriptors, write_directories,
+    write_boot_info_table,
 };
 use crate::iso::layout_profile::{HiddenSectorMode, IsoLayoutProfile};
 use crate::iso::mbr::create_mbr_for_gpt_hybrid;
@@ -316,6 +317,26 @@ impl IsoBuilder {
         )?;
         write_directories(iso_file, &self.root, self.root.lba)?;
         copy_files(iso_file, &self.root)?;
+
+        // Capture the exact end of the newly written ISO data *before*
+        // patching the boot information table (which seeks back into the
+        // data stream).  Using this saved position in the seek below is
+        // more robust than SeekFrom::End(0) because it does not depend on
+        // whether the underlying file was truncated before being passed in.
+        let end_of_data = iso_file.stream_position()?;
+
+        if let Some(bi) = &self.boot_info {
+            if let Some(bios) = &bi.bios_boot {
+                let lba = get_lba_for_path(&self.root, &bios.destination_in_iso)?;
+                let size = get_file_size_in_iso(&self.root, &bios.destination_in_iso)?;
+                write_boot_info_table(iso_file, lba, size)?;
+            }
+        }
+
+        // Seek back to the saved end-of-data position so finalize_iso can
+        // compute the correct total sector count.
+        iso_file.seek(SeekFrom::Start(end_of_data))?;
+
         finalize_iso(iso_file, &mut self.total_sectors)?;
 
         if self.is_isohybrid {
@@ -352,7 +373,12 @@ pub fn build_iso(
     let mut fat_holder: Option<NamedTempFile> = None;
     let mut _grub_holder: Option<NamedTempFile> = None;
     let mut fat_size_512: Option<u32> = None;
-    let mut iso_file = File::create(iso_path)?;
+    let mut iso_file = OpenOptions::new()
+        .read(true)
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .open(iso_path)?;
 
     if let Some(uefi) = &image.boot_info.uefi_boot {
         b.uefi_catalog_path = Some(uefi.destination_in_iso.clone());

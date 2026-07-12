@@ -7,6 +7,7 @@
 - ISO 9660 Filesystem Creation: Generates standard ISO 9660 filesystem structures
 - UEFI Boot Support: Creates UEFI-bootable images with proper ESP (EFI System Partition) handling
 - BIOS/El Torito Boot Support: Provides legacy BIOS boot capability
+- Boot Information Table: Automatically patches the `-boot-info-table` structure (PVD LBA, boot image LBA, file length, checksum) into BIOS boot images, required by bootloaders such as ISOLINUX and Limine
 - Hybrid Isohybrid Images: Generates hybrid images that can boot both as optical media and USB drives with GPT/MBR structures
 - FAT12/16/32 ESP Creation: Automatically creates FAT12/16/32-formatted EFI System Partitions for UEFI booting
 - Additional EFI Boot Files: Supports including extra EFI binaries (e.g. GRUBX64.EFI) in the ESP FAT image
@@ -146,6 +147,7 @@ let (iso_path, _temp_fat, _iso_file, _fat_size) = build_iso(&iso_output_path, &i
 2. Boot Catalog Creation: Generates an El Torito boot catalog pointing to boot images
 3. Volume Descriptors: Writes Primary Volume Descriptor, Boot Record Volume Descriptor, and Volume Descriptor Set Terminator
 4. File Copying: Copies all specified files into the ISO at their designated locations
+5. Boot Information Table: Patches the boot information table (`-boot-info-table`) into the BIOS boot image at offsets 8–63, containing the PVD LBA, the boot image's own LBA, file length, and a checksum of bytes 64+
 
 ### Isohybrid (Hybrid) Creation
 
@@ -179,7 +181,7 @@ For more control, you can use the `IsoBuilder`:
 
 ```rust
 use isobemak::{IsoBuilder, BootInfo, BiosBootInfo, UefiBootInfo, IsoLayoutProfile};
-use std::fs::File;
+use std::fs::OpenOptions;
 use std::path::{Path, PathBuf};
 
 let mut builder = IsoBuilder::new();
@@ -205,7 +207,14 @@ let boot_info = BootInfo {
 builder.set_boot_info(boot_info);
 builder.set_profile(IsoLayoutProfile::default());
 
-let mut iso_file = File::create("output.iso")?;
+// NOTE: The file must be opened with both read and write access because the
+// builder reads back boot image data to compute the boot information table checksum.
+let mut iso_file = OpenOptions::new()
+    .read(true)
+    .write(true)
+    .create(true)
+    .truncate(true)
+    .open("output.iso")?;
 builder.build(&mut iso_file, Path::new("output.iso"), None, None)?;
 ```
 
