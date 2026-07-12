@@ -318,6 +318,13 @@ impl IsoBuilder {
         write_directories(iso_file, &self.root, self.root.lba)?;
         copy_files(iso_file, &self.root)?;
 
+        // Capture the exact end of the newly written ISO data *before*
+        // patching the boot information table (which seeks back into the
+        // data stream).  Using this saved position in the seek below is
+        // more robust than SeekFrom::End(0) because it does not depend on
+        // whether the underlying file was truncated before being passed in.
+        let end_of_data = iso_file.stream_position()?;
+
         if let Some(bi) = &self.boot_info {
             if let Some(bios) = &bi.bios_boot {
                 let lba = get_lba_for_path(&self.root, &bios.destination_in_iso)?;
@@ -326,9 +333,9 @@ impl IsoBuilder {
             }
         }
 
-        // Seek back to the end of the data so finalize_iso can compute
-        // the correct total sector count.
-        iso_file.seek(SeekFrom::End(0))?;
+        // Seek back to the saved end-of-data position so finalize_iso can
+        // compute the correct total sector count.
+        iso_file.seek(SeekFrom::Start(end_of_data))?;
 
         finalize_iso(iso_file, &mut self.total_sectors)?;
 

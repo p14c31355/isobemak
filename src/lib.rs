@@ -160,12 +160,10 @@ mod tests {
             let mut buf = vec![0u8; (boot_image_size - 64) as usize];
             iso_file.seek(SeekFrom::Start(sample_offset))?;
             iso_file.read_exact(&mut buf)?;
-            for chunk in buf.chunks(4) {
-                if chunk.len() == 4 {
-                    expected_checksum = expected_checksum.wrapping_add(
-                        u32::from_le_bytes(chunk.try_into().unwrap()),
-                    );
-                }
+            for chunk in buf.chunks_exact(4) {
+                expected_checksum = expected_checksum.wrapping_add(
+                    u32::from_le_bytes(chunk.try_into().unwrap()),
+                );
             }
         }
         let actual_checksum = u32::from_le_bytes(table[12..16].try_into().unwrap());

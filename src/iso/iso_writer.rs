@@ -158,12 +158,10 @@ pub fn write_boot_info_table(
         while remaining > 0 {
             let to_read = buf.len().min(remaining as usize);
             iso_file.read_exact(&mut buf[..to_read])?;
-            for chunk in buf[..to_read].chunks(4) {
-                if chunk.len() == 4 {
-                    checksum = checksum.wrapping_add(u32::from_le_bytes(
-                        chunk.try_into().unwrap(),
-                    ));
-                }
+            for chunk in buf[..to_read].chunks_exact(4) {
+                checksum = checksum.wrapping_add(u32::from_le_bytes(
+                    chunk.try_into().unwrap(),
+                ));
             }
             remaining -= to_read as u64;
         }
@@ -240,12 +238,10 @@ mod tests {
 
         // Manually compute expected checksum: sum of all u32 LE words at bytes 64..
         let mut expected_csum = 0u32;
-        for chunk in boot_data[64..].chunks(4) {
-            if chunk.len() == 4 {
-                expected_csum = expected_csum.wrapping_add(u32::from_le_bytes(
-                    chunk.try_into().unwrap(),
-                ));
-            }
+        for chunk in boot_data[64..].chunks_exact(4) {
+            expected_csum = expected_csum.wrapping_add(u32::from_le_bytes(
+                chunk.try_into().unwrap(),
+            ));
         }
         let actual_csum = u32::from_le_bytes(table[12..16].try_into().unwrap());
         assert_eq!(actual_csum, expected_csum, "checksum mismatch");
